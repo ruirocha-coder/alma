@@ -1,19 +1,20 @@
 import httpx, os, time
 
-STORE = os.environ["BIGCOMMERCE_STORE_HASH"]
-TOKEN = os.environ["BIGCOMMERCE_ACCESS_TOKEN"]
-BASE = f"https://api.bigcommerce.com/stores/{STORE}"
-HEADERS = {"X-Auth-Token": TOKEN, "Accept": "application/json"}
-
 _cache = {}  # {chave: (timestamp, dados)}
 TTL = {"catalogo": 900, "encomendas": 300}  # segundos
+
+def _base_url():
+    return f"https://api.bigcommerce.com/stores/{os.environ['BIGCOMMERCE_STORE_HASH']}"
+
+def _headers():
+    return {"X-Auth-Token": os.environ["BIGCOMMERCE_ACCESS_TOKEN"], "Accept": "application/json"}
 
 def _get(url, params=None, cache_key=None, ttl=900):
     if cache_key and cache_key in _cache:
         ts, dados = _cache[cache_key]
         if time.time() - ts < ttl:
             return dados
-    r = httpx.get(url, headers=HEADERS, params=params, timeout=30)
+    r = httpx.get(url, headers=_headers(), params=params, timeout=30)
     r.raise_for_status()
     dados = r.json()
     if cache_key:
@@ -22,7 +23,7 @@ def _get(url, params=None, cache_key=None, ttl=900):
 
 def procurar_produtos(termo: str, limite: int = 10):
     """Pesquisa no catálogo. Devolve nome, preço, custo, stock, URL."""
-    dados = _get(f"{BASE}/v3/catalog/products",
+    dados = _get(f"{_base_url()}/v3/catalog/products",
                  params={"keyword": termo, "limit": limite,
                          "include_fields": "name,price,cost_price,inventory_level,custom_url,sku"})
     return dados.get("data", [])
@@ -31,7 +32,7 @@ def encomendas_recentes(dias: int = 30):
     """Encomendas dos últimos N dias (API V2 de orders)."""
     from datetime import datetime, timedelta
     desde = (datetime.utcnow() - timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%S")
-    return _get(f"{BASE}/v2/orders",
+    return _get(f"{_base_url()}/v2/orders",
                 params={"min_date_created": desde, "limit": 250},
                 cache_key=f"orders_{dias}", ttl=TTL["encomendas"])
 
