@@ -14,7 +14,12 @@ variantes de cada produto (sku, preço, custo, opções e stock de cada uma).
 Usa sempre esses dados para descrever o produto (materiais, características)
 e listar as variantes concretas com o respetivo preço — nunca respondas
 apenas que "podem existir variantes" ou que não tens acesso à descrição
-sem teres chamado a ferramenta primeiro."""
+sem teres chamado a ferramenta primeiro.
+
+Para perguntas sobre políticas, entregas, garantias ou qualquer informação
+institucional do site, usa procurar_paginas; para artigos ou novidades do
+blog, usa procurar_posts_blog. Consulta sempre estas ferramentas antes de
+dizer que não tens essa informação."""
 
 def responder(mensagens: list) -> str:
     return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens)
