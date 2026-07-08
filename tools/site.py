@@ -32,14 +32,13 @@ def _extrair_texto(html: str) -> str:
     texto = soup.body.get_text(separator=" ", strip=True) if soup.body else soup.get_text(" ", strip=True)
     return re.sub(r"\s+", " ", texto).strip()
 
-def listar_paginas_site():
-    """Lista os URLs de todas as páginas de conteúdo do site, a partir do sitemap."""
+def _listar_sitemap(tipo: str):
     base = _site_url()
     urls = []
     pagina = 1
     while pagina <= 5:  # proteção contra sites enormes; o típico cabe numa página
-        xml = _get_texto(f"{base}/xmlsitemap.php", params={"type": "pages", "page": pagina},
-                          cache_key=f"sitemap_paginas_{pagina}")
+        xml = _get_texto(f"{base}/xmlsitemap.php", params={"type": tipo, "page": pagina},
+                          cache_key=f"sitemap_{tipo}_{pagina}")
         encontrados = re.findall(r"<loc>([^<]+)</loc>", xml)
         if not encontrados:
             break
@@ -48,6 +47,11 @@ def listar_paginas_site():
             break
         pagina += 1
     return urls
+
+def listar_paginas_site():
+    """Lista os URLs de todas as páginas institucionais e artigos (blog/academia) do site."""
+    # "pages" = páginas institucionais; "news" = artigos de blog (a Academia, neste site)
+    return _listar_sitemap("pages") + _listar_sitemap("news")
 
 def ler_pagina_site(url: str):
     """Lê o texto principal de uma página do site, a partir do seu URL."""
@@ -62,7 +66,7 @@ def ler_pagina_site(url: str):
 TOOLS_SITE = [
     {
         "name": "listar_paginas_site",
-        "description": "Lista os URLs de todas as páginas institucionais/de conteúdo do site (ex: Método, Como Funciona, Academia, Planos, Design de Interiores, Termos e Condições). Usa isto para descobrir que páginas existem antes de leres uma com ler_pagina_site.",
+        "description": "Lista os URLs de todas as páginas institucionais (Método, Como Funciona, Academia, Planos, Design de Interiores, Termos e Condições, etc.) e de todos os artigos de blog/Academia do site. Usa isto para descobrir que páginas ou artigos existem antes de leres um com ler_pagina_site — inclui sempre os artigos, mesmo que procurar_posts_blog não encontre nada.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {

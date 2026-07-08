@@ -19,12 +19,17 @@ apenas que "podem existir variantes" ou que não tens acesso à descrição
 sem teres chamado a ferramenta primeiro.
 
 Para perguntas sobre políticas, entregas, garantias ou qualquer informação
-institucional do site, usa procurar_paginas; para artigos ou novidades do
-blog, usa procurar_posts_blog. Muitas páginas do site (Método, Como Funciona,
-Academia, Planos, Design de Interiores, etc.) são construídas com o Page
-Builder e não aparecem em procurar_paginas — se essa ferramenta não
-devolver nada, usa listar_paginas_site para veres os URLs existentes e
-ler_pagina_site para leres o conteúdo real. Consulta sempre estas
+institucional do site, usa procurar_paginas. Muitas páginas do site (Método,
+Como Funciona, Academia, Planos, Design de Interiores, etc.) são construídas
+com o Page Builder e não aparecem em procurar_paginas — se essa ferramenta
+não devolver nada, usa listar_paginas_site para veres os URLs existentes e
+ler_pagina_site para leres o conteúdo real.
+
+Para artigos da Academia (o blog do site): tenta primeiro procurar_posts_blog,
+mas se não encontrar nada usa listar_paginas_site (já inclui todos os artigos,
+em /academia/...) e depois ler_pagina_site no URL certo — não te fiques
+apenas pela página-índice da Academia, que só tem excertos "leia mais", lê
+sempre o artigo completo antes de responder. Consulta sempre estas
 ferramentas antes de dizer que não tens essa informação."""
 
 def responder(mensagens: list) -> str:
