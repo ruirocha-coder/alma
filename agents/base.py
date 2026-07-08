@@ -34,6 +34,7 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list,
                 try:
                     out = FUNCOES[bloco.name](**bloco.input)
                 except Exception as e:
+                    print(f"[ferramenta] {bloco.name}({bloco.input}) falhou: {e!r}")
                     out = {"erro": str(e)}
                 resultados.append({
                     "type": "tool_result",

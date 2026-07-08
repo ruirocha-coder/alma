@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,6 +37,13 @@ def alma(p: Pedido):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/health/config")
+def health_config():
+    """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
+    variaveis = ["DATABASE_URL", "ANTHROPIC_API_KEY", "BIGCOMMERCE_STORE_HASH",
+                 "BIGCOMMERCE_ACCESS_TOKEN", "SITE_URL"]
+    return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
 def sessoes(utilizador: str):
