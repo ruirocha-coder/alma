@@ -5,6 +5,8 @@ client = anthropic.Anthropic()
 
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
+    "procurar_paginas": bigcommerce.procurar_paginas,
+    "procurar_posts_blog": bigcommerce.procurar_posts_blog,
     "resumo_vendas": bigcommerce.resumo_vendas,
 }
 

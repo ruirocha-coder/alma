@@ -54,7 +54,36 @@ def resumo_vendas(dias: int = 30):
     n = len(orders)
     return {"periodo_dias": dias, "total_eur": round(total, 2),
             "n_encomendas": n, "ticket_medio": round(total / n, 2) if n else 0}
-TOOLS_CEO = [
+
+def procurar_paginas(termo: str, limite: int = 5):
+    """Pesquisa páginas estáticas do site (ex: sobre nós, entregas, garantias, FAQ)."""
+    dados = _get(f"{_base_url()}/v3/content/pages",
+                 params={"keyword": termo, "limit": limite,
+                         "include_fields": "name,url,body,is_visible"})
+    paginas = dados.get("data", [])
+    return [
+        {"nome": p.get("name"), "url": p.get("url"), "conteudo": _texto_simples(p.get("body"))[:1500]}
+        for p in paginas if p.get("is_visible", True)
+    ]
+
+def procurar_posts_blog(termo: str, limite: int = 5):
+    """Pesquisa posts do blog do site por palavra-chave no título ou corpo do texto."""
+    # a API de blog não tem filtro de keyword nativo — traz os publicados mais
+    # recentes (até 250) e filtra aqui; blogs maiores podem não ficar 100% cobertos.
+    posts = _get(f"{_base_url()}/v2/blog/posts",
+                 params={"is_published": "true", "limit": 250},
+                 cache_key="blog_posts", ttl=TTL["catalogo"]) or []
+    termo_lower = termo.lower()
+    encontrados = []
+    for post in posts:
+        texto = _texto_simples(post.get("body", ""))
+        if termo_lower in (post.get("title", "") + " " + texto).lower():
+            encontrados.append({"titulo": post.get("title"), "url": post.get("url"), "resumo": texto[:1500]})
+        if len(encontrados) >= limite:
+            break
+    return encontrados
+
+TOOLS_COMUNS = [
     {
         "name": "procurar_produtos",
         "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve nome, descrição (texto simples), preço de venda, preço de custo, stock, URL e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Se um produto tiver descrição e/ou variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador ou especular se existem.",
@@ -67,6 +96,33 @@ TOOLS_CEO = [
             "required": ["termo"]
         }
     },
+    {
+        "name": "procurar_paginas",
+        "description": "Pesquisa nas páginas de conteúdo estático do site (sobre nós, entregas, garantias, FAQ, etc.) por palavra-chave no nome ou no corpo da página. Devolve nome, URL e o texto da página. Usa isto sempre que a pergunta for sobre políticas, informação institucional ou qualquer conteúdo que não seja um produto.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "termo": {"type": "string"},
+                "limite": {"type": "integer", "default": 5}
+            },
+            "required": ["termo"]
+        }
+    },
+    {
+        "name": "procurar_posts_blog",
+        "description": "Pesquisa posts do blog do site por palavra-chave. Devolve título, URL e um resumo do texto de cada post encontrado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "termo": {"type": "string"},
+                "limite": {"type": "integer", "default": 5}
+            },
+            "required": ["termo"]
+        }
+    }
+]
+
+TOOLS_CEO = TOOLS_COMUNS + [
     {
         "name": "resumo_vendas",
         "description": "Resumo de vendas: total, número de encomendas e ticket médio nos últimos N dias.",
