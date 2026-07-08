@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from orchestrator import encaminhar, AGENTES
 from db import guardar_mensagem, historico_sessao, log_routing
+from db import inicializar_schema
+inicializar_schema()
 
 app = FastAPI(title="ALMA")
 
