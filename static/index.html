@@ -781,6 +781,7 @@
   } else {
     const overlay = document.getElementById("identidade-overlay");
     const identidadeForm = document.getElementById("identidade-form");
+    const identidadeVideo = overlay.querySelector("video");
     overlay.hidden = false;
     identidadeForm.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -788,7 +789,10 @@
       if (!nome) return;
       UTILIZADOR = nome;
       localStorage.setItem("alma_utilizador", nome);
-      overlay.hidden = true;
+      identidadeVideo.pause();
+      identidadeVideo.removeAttribute("src");
+      identidadeVideo.load();
+      overlay.remove();
       iniciar();
     });
   }
