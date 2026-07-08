@@ -1,3 +1,11 @@
+# db.py — ligação Postgres + schema + memória partilhada
+import os
+import psycopg
+from psycopg.rows import dict_row
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversas (
     id SERIAL PRIMARY KEY,
     utilizador TEXT NOT NULL,
@@ -23,3 +31,46 @@ CREATE TABLE IF NOT EXISTS routing_log (
     correto BOOLEAN,              -- preenchido na revisão semanal
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+"""
+
+def get_conn():
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+def inicializar_schema():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+        conn.commit()
+
+def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO conversas (utilizador, sessao, papel, conteudo, agente)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (utilizador, sessao, papel, conteudo, agente)
+            )
+        conn.commit()
+
+def historico_sessao(sessao: str, limite: int = 20) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT papel, conteudo FROM conversas
+                   WHERE sessao = %s
+                   ORDER BY criado_em ASC
+                   LIMIT %s""",
+                (sessao, limite)
+            )
+            linhas = cur.fetchall()
+    return [{"role": l["papel"], "content": l["conteudo"]} for l in linhas]
+
+def log_routing(pergunta: str, agente_escolhido: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO routing_log (pergunta, agente_escolhido)
+                   VALUES (%s, %s)""",
+                (pergunta, agente_escolhido)
+            )
+        conn.commit()
