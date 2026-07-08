@@ -1,4 +1,4 @@
-import httpx, os, time
+import httpx, os, re, time
 
 _cache = {}  # {chave: (timestamp, dados)}
 TTL = {"catalogo": 900, "encomendas": 300}  # segundos
@@ -21,13 +21,23 @@ def _get(url, params=None, cache_key=None, ttl=900):
         _cache[cache_key] = (time.time(), dados)
     return dados
 
+def _texto_simples(html: str) -> str:
+    """A descrição do BigCommerce vem em HTML; simplifica para texto corrido."""
+    if not html:
+        return html
+    texto = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", texto).strip()
+
 def procurar_produtos(termo: str, limite: int = 10):
-    """Pesquisa no catálogo. Devolve nome, preço, custo, stock, URL e variantes."""
+    """Pesquisa no catálogo. Devolve nome, descrição, preço, custo, stock, URL e variantes."""
     dados = _get(f"{_base_url()}/v3/catalog/products",
                  params={"keyword": termo, "limit": limite,
                          "include": "variants",
-                         "include_fields": "name,price,cost_price,inventory_level,custom_url,sku,variants"})
-    return dados.get("data", [])
+                         "include_fields": "name,description,price,cost_price,inventory_level,custom_url,sku,variants"})
+    produtos = dados.get("data", [])
+    for produto in produtos:
+        produto["description"] = _texto_simples(produto.get("description"))
+    return produtos
 
 def encomendas_recentes(dias: int = 30):
     """Encomendas dos últimos N dias (API V2 de orders)."""
@@ -47,7 +57,7 @@ def resumo_vendas(dias: int = 30):
 TOOLS_CEO = [
     {
         "name": "procurar_produtos",
-        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve preço de venda, preço de custo, stock, URL e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Se um produto tiver variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador se existem.",
+        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve nome, descrição (texto simples), preço de venda, preço de custo, stock, URL e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Se um produto tiver descrição e/ou variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador ou especular se existem.",
         "input_schema": {
             "type": "object",
             "properties": {
