@@ -173,6 +173,49 @@
   }
   header input:focus { outline: none; color: var(--text); }
 
+  .identidade-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .identidade-overlay:not([hidden]) { display: flex; }
+  .identidade-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 26px;
+    width: min(340px, 90vw);
+    text-align: center;
+  }
+  .identidade-card img { width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 14px; display: block; }
+  .identidade-card h2 { margin: 0 0 6px; font-size: 16px; }
+  .identidade-card p { margin: 0 0 16px; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+  .identidade-card form { display: flex; flex-direction: column; gap: 10px; }
+  .identidade-card input {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .identidade-card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .identidade-card button {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
   #messages {
     flex: 1;
     overflow-y: auto;
@@ -338,6 +381,17 @@
 </style>
 </head>
 <body>
+  <div id="identidade-overlay" class="identidade-overlay" hidden>
+    <div class="identidade-card">
+      <img src="/avatar.jpg" alt="Alma">
+      <h2>Como te chamas?</h2>
+      <p>Isto identifica as tuas conversas na barra lateral — só tu as vês.</p>
+      <form id="identidade-form">
+        <input id="identidade-input" type="text" placeholder="O teu nome" maxlength="40" required>
+        <button type="submit">Continuar</button>
+      </form>
+    </div>
+  </div>
   <div id="app">
     <aside id="sidebar">
       <button id="new-chat" class="new-chat" type="button">+ Nova conversa</button>
@@ -350,7 +404,7 @@
         <button id="menu-toggle" class="icon-btn" type="button" aria-label="Mostrar/ocultar histórico">☰</button>
         <img class="logo" src="/avatar.jpg" alt="Alma">
         <h1>Alma</h1>
-        <span class="sub">sessão <input id="sessao-label" type="text" readonly></span>
+        <span class="sub"><span id="utilizador-label"></span> · sessão <input id="sessao-label" type="text" readonly></span>
       </header>
       <div id="messages">
         <div id="messages-inner">
@@ -372,7 +426,7 @@
 <script>
 (function () {
   const API_URL = "/alma";
-  const UTILIZADOR = "console-teste";
+  let UTILIZADOR = localStorage.getItem("alma_utilizador");
 
   let sessao = sessionStorage.getItem("alma_sessao");
   if (!sessao) {
@@ -380,6 +434,7 @@
     sessionStorage.setItem("alma_sessao", sessao);
   }
 
+  const utilizadorLabel = document.getElementById("utilizador-label");
   const scrollContainer = document.getElementById("messages");
   const messagesInner = document.getElementById("messages-inner");
   const form = document.getElementById("form");
@@ -635,7 +690,7 @@
     sessaoLabel.value = sessao;
     messagesInner.innerHTML = '<div class="empty-state">A carregar histórico…</div>';
     try {
-      const resp = await fetch(`/historico/${encodeURIComponent(sessao)}`);
+      const resp = await fetch(`/historico/${encodeURIComponent(sessao)}?utilizador=${encodeURIComponent(UTILIZADOR)}`);
       const historico = resp.ok ? await resp.json() : [];
       resetMessages();
       historico.forEach(m => addMessage(m.role === "assistant" ? "assistant" : "user", m.content));
@@ -710,7 +765,27 @@
     }
   });
 
-  switchSession(sessao);
+  function iniciar() {
+    utilizadorLabel.textContent = UTILIZADOR;
+    switchSession(sessao);
+  }
+
+  if (UTILIZADOR) {
+    iniciar();
+  } else {
+    const overlay = document.getElementById("identidade-overlay");
+    const identidadeForm = document.getElementById("identidade-form");
+    overlay.hidden = false;
+    identidadeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const nome = document.getElementById("identidade-input").value.trim();
+      if (!nome) return;
+      UTILIZADOR = nome;
+      localStorage.setItem("alma_utilizador", nome);
+      overlay.hidden = true;
+      iniciar();
+    });
+  }
 })();
 </script>
 </body>

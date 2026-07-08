@@ -22,7 +22,7 @@ def alma(p: Pedido):
     agente = encaminhar(p.mensagem)
     log_routing(p.mensagem, agente)
 
-    mensagens = historico_sessao(p.sessao)          # memória partilhada
+    mensagens = historico_sessao(p.sessao, p.utilizador)   # memória por utilizador
     mensagens.append({"role": "user", "content": p.mensagem})
 
     try:
@@ -50,8 +50,8 @@ def sessoes(utilizador: str):
     return sessoes_utilizador(utilizador)
 
 @app.get("/historico/{sessao}")
-def historico(sessao: str):
-    return historico_sessao(sessao, limite=200)
+def historico(sessao: str, utilizador: str):
+    return historico_sessao(sessao, utilizador, limite=200)
 
 @app.delete("/sessoes/{sessao}")
 def apagar_sessao(sessao: str, utilizador: str):
