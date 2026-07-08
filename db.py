@@ -83,6 +83,15 @@ def sessoes_utilizador(utilizador: str, limite: int = 30) -> list[dict]:
             )
             return cur.fetchall()
 
+def eliminar_sessao(sessao: str, utilizador: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM conversas WHERE sessao = %s AND utilizador = %s",
+                (sessao, utilizador)
+            )
+        conn.commit()
+
 def log_routing(pergunta: str, agente_escolhido: str):
     with get_conn() as conn:
         with conn.cursor() as cur:

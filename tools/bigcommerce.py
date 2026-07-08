@@ -98,7 +98,7 @@ TOOLS_COMUNS = [
     },
     {
         "name": "procurar_paginas",
-        "description": "Pesquisa nas páginas de conteúdo estático do site (sobre nós, entregas, garantias, FAQ, etc.) por palavra-chave no nome ou no corpo da página. Devolve nome, URL e o texto da página. Usa isto sempre que a pergunta for sobre políticas, informação institucional ou qualquer conteúdo que não seja um produto.",
+        "description": "Pesquisa nas páginas de conteúdo estático do site por palavra-chave no nome ou no corpo da página. Só encontra páginas com texto simples guardado no BigCommerce — muitas páginas do site (ex: Método, Como Funciona, Academia, Planos) são construídas com o Page Builder e não têm corpo de texto pesquisável aqui. Se isto não devolver nada, usa listar_paginas_site + ler_pagina_site.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -122,14 +122,12 @@ TOOLS_COMUNS = [
     }
 ]
 
-TOOLS_CEO = TOOLS_COMUNS + [
-    {
-        "name": "resumo_vendas",
-        "description": "Resumo de vendas: total, número de encomendas e ticket médio nos últimos N dias.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"dias": {"type": "integer", "default": 30}},
-            "required": []
-        }
+TOOL_RESUMO_VENDAS = {
+    "name": "resumo_vendas",
+    "description": "Resumo de vendas: total, número de encomendas e ticket médio nos últimos N dias.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"dias": {"type": "integer", "default": 30}},
+        "required": []
     }
-]
+}

@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from orchestrator import encaminhar, AGENTES
-from db import guardar_mensagem, historico_sessao, log_routing, sessoes_utilizador
+from db import guardar_mensagem, historico_sessao, log_routing, sessoes_utilizador, eliminar_sessao
 from db import inicializar_schema
 inicializar_schema()
 
@@ -44,6 +44,11 @@ def sessoes(utilizador: str):
 @app.get("/historico/{sessao}")
 def historico(sessao: str):
     return historico_sessao(sessao, limite=200)
+
+@app.delete("/sessoes/{sessao}")
+def apagar_sessao(sessao: str, utilizador: str):
+    eliminar_sessao(sessao, utilizador)
+    return {"ok": True}
 
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

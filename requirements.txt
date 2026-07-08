@@ -4,3 +4,4 @@ anthropic
 httpx
 psycopg[binary]
 python-dotenv
+beautifulsoup4
