@@ -22,10 +22,11 @@ def _get(url, params=None, cache_key=None, ttl=900):
     return dados
 
 def procurar_produtos(termo: str, limite: int = 10):
-    """Pesquisa no catálogo. Devolve nome, preço, custo, stock, URL."""
+    """Pesquisa no catálogo. Devolve nome, preço, custo, stock, URL e variantes."""
     dados = _get(f"{_base_url()}/v3/catalog/products",
                  params={"keyword": termo, "limit": limite,
-                         "include_fields": "name,price,cost_price,inventory_level,custom_url,sku"})
+                         "include": "variants",
+                         "include_fields": "name,price,cost_price,inventory_level,custom_url,sku,variants"})
     return dados.get("data", [])
 
 def encomendas_recentes(dias: int = 30):
@@ -46,7 +47,7 @@ def resumo_vendas(dias: int = 30):
 TOOLS_CEO = [
     {
         "name": "procurar_produtos",
-        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve preço de venda, preço de custo, stock e URL.",
+        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve preço de venda, preço de custo, stock, URL e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Se um produto tiver variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador se existem.",
         "input_schema": {
             "type": "object",
             "properties": {
