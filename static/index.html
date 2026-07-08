@@ -186,11 +186,17 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 28px 26px;
-    width: min(340px, 90vw);
+    padding: 24px 26px 28px;
+    width: min(380px, 90vw);
     text-align: center;
   }
-  .identidade-card img { width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 14px; display: block; }
+  .identidade-card video {
+    width: 100%;
+    border-radius: 12px;
+    margin: 0 0 16px;
+    display: block;
+    background: var(--sidebar);
+  }
   .identidade-card h2 { margin: 0 0 6px; font-size: 16px; }
   .identidade-card p { margin: 0 0 16px; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
   .identidade-card form { display: flex; flex-direction: column; gap: 10px; }
@@ -383,7 +389,7 @@
 <body>
   <div id="identidade-overlay" class="identidade-overlay" hidden>
     <div class="identidade-card">
-      <img src="/avatar.jpg" alt="Alma">
+      <video src="/apresentacao.mp4" autoplay loop muted playsinline controls></video>
       <h2>Como te chamas?</h2>
       <p>Isto identifica as tuas conversas na barra lateral — só tu as vês.</p>
       <form id="identidade-form">
