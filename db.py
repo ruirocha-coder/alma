@@ -52,15 +52,15 @@ def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, ag
             )
         conn.commit()
 
-def historico_sessao(sessao: str, limite: int = 20) -> list[dict]:
+def historico_sessao(sessao: str, utilizador: str, limite: int = 20) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT papel, conteudo FROM conversas
-                   WHERE sessao = %s
+                   WHERE sessao = %s AND utilizador = %s
                    ORDER BY criado_em ASC
                    LIMIT %s""",
-                (sessao, limite)
+                (sessao, utilizador, limite)
             )
             linhas = cur.fetchall()
     return [{"role": l["papel"], "content": l["conteudo"]} for l in linhas]
