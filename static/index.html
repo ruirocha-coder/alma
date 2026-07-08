@@ -132,6 +132,29 @@
   .msg.assistant .bubble { background: var(--bubble-assistant); border: 1px solid var(--border); }
   .msg.error .bubble { background: transparent; border: 1px solid var(--error); color: var(--error); }
 
+  .bubble p { margin: 0 0 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble ul, .bubble ol { margin: 4px 0 8px; padding-left: 22px; }
+  .bubble li { margin-bottom: 3px; }
+  .bubble h3, .bubble h4, .bubble h5 { margin: 10px 0 4px; font-size: 1em; }
+  .bubble strong { font-weight: 700; }
+  .bubble a { color: var(--accent); }
+  .bubble code {
+    background: var(--bubble-user);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  .bubble pre {
+    background: var(--bubble-user);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 6px 0;
+  }
+  .bubble pre code { background: none; padding: 0; }
+
   .typing {
     display: inline-flex;
     gap: 4px;
@@ -241,6 +264,86 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // Interpretador minimal de markdown: negrito, itálico, código (inline e blocos),
+  // links, títulos e listas — o suficiente para as respostas da Alma.
+  function renderMarkdown(raw) {
+    const codeBlocks = [];
+    let text = raw.replace(/```[a-zA-Z0-9]*\n?([\s\S]*?)```/g, (_, code) => {
+      codeBlocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
+      return `@@CODEBLOCK${codeBlocks.length - 1}@@`;
+    });
+
+    text = escapeHtml(text);
+
+    text = text.replace(/`([^`\n]+)`/g, (_, code) => `<code>${code}</code>`);
+    text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+    text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    text = text.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+
+    const lines = text.split("\n");
+    let html = "";
+    let inUl = false, inOl = false, paraLines = [];
+
+    const flushPara = () => {
+      if (paraLines.length) {
+        html += `<p>${paraLines.join("<br>")}</p>`;
+        paraLines = [];
+      }
+    };
+    const closeLists = () => {
+      if (inUl) { html += "</ul>"; inUl = false; }
+      if (inOl) { html += "</ol>"; inOl = false; }
+    };
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const codeBlockMatch = trimmed.match(/^@@CODEBLOCK(\d+)@@$/);
+      const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)/);
+      const ulMatch = trimmed.match(/^[-*]\s+(.*)/);
+      const olMatch = trimmed.match(/^\d+\.\s+(.*)/);
+
+      if (!trimmed) {
+        flushPara();
+        closeLists();
+      } else if (codeBlockMatch) {
+        flushPara();
+        closeLists();
+        html += codeBlocks[Number(codeBlockMatch[1])];
+      } else if (headerMatch) {
+        flushPara();
+        closeLists();
+        const level = headerMatch[1].length + 2;
+        html += `<h${level}>${headerMatch[2]}</h${level}>`;
+      } else if (ulMatch) {
+        flushPara();
+        if (inOl) { html += "</ol>"; inOl = false; }
+        if (!inUl) { html += "<ul>"; inUl = true; }
+        html += `<li>${ulMatch[1]}</li>`;
+      } else if (olMatch) {
+        flushPara();
+        if (inUl) { html += "</ul>"; inUl = false; }
+        if (!inOl) { html += "<ol>"; inOl = true; }
+        html += `<li>${olMatch[1]}</li>`;
+      } else {
+        closeLists();
+        paraLines.push(line);
+      }
+    }
+    flushPara();
+    closeLists();
+    return html;
+  }
+
   function addMessage(role, text) {
     if (emptyState) emptyState.remove();
     const wrap = document.createElement("div");
@@ -250,7 +353,11 @@
     avatar.textContent = role === "user" ? "Tu" : (role === "error" ? "!" : "A");
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = text;
+    if (role === "assistant") {
+      bubble.innerHTML = renderMarkdown(text);
+    } else {
+      bubble.textContent = text;
+    }
     wrap.appendChild(avatar);
     wrap.appendChild(bubble);
     messagesEl.appendChild(wrap);
