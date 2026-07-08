@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from orchestrator import encaminhar, AGENTES
 from db import guardar_mensagem, historico_sessao, log_routing
@@ -23,7 +24,10 @@ def alma(p: Pedido):
     mensagens = historico_sessao(p.sessao)          # memória partilhada
     mensagens.append({"role": "user", "content": p.mensagem})
 
-    resposta = AGENTES[agente](mensagens)
+    try:
+        resposta = AGENTES[agente](mensagens)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao obter resposta do agente: {e}")
 
     guardar_mensagem(p.utilizador, p.sessao, "user", p.mensagem)
     guardar_mensagem(p.utilizador, p.sessao, "assistant", resposta, agente)
@@ -32,3 +36,6 @@ def alma(p: Pedido):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# consola de chat de teste, servida em "/"
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
