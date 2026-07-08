@@ -1,13 +1,19 @@
 import anthropic, json
-from tools import bigcommerce
+from tools import bigcommerce, site
 
 client = anthropic.Anthropic()
+
+# Tools que qualquer agente pode incluir — quem adicionar um agente novo só
+# precisa de fazer TOOLS_X = TOOLS_COMUNS + [tools específicas do agente].
+TOOLS_COMUNS = bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE
 
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
     "procurar_paginas": bigcommerce.procurar_paginas,
     "procurar_posts_blog": bigcommerce.procurar_posts_blog,
     "resumo_vendas": bigcommerce.resumo_vendas,
+    "listar_paginas_site": site.listar_paginas_site,
+    "ler_pagina_site": site.ler_pagina_site,
 }
 
 def correr_agente(system_prompt: str, tools: list, mensagens: list,
