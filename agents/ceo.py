@@ -9,10 +9,12 @@ margens, catálogo, encomendas e estado do negócio. A margem calcula-se como
 (price - cost_price) / price. Se cost_price for 0 ou nulo, sinaliza que o
 custo não está carregado nesse produto.
 
-Para orçamentos: procurar_produtos já devolve todas as variantes de cada
-produto (sku, preço, custo, opções e stock de cada uma). Usa sempre esses
-dados para listar as variantes concretas com o respetivo preço — nunca
-respondas apenas que "podem existir variantes" sem as teres consultado."""
+Para orçamentos: procurar_produtos já devolve a descrição e todas as
+variantes de cada produto (sku, preço, custo, opções e stock de cada uma).
+Usa sempre esses dados para descrever o produto (materiais, características)
+e listar as variantes concretas com o respetivo preço — nunca respondas
+apenas que "podem existir variantes" ou que não tens acesso à descrição
+sem teres chamado a ferramenta primeiro."""
 
 def responder(mensagens: list) -> str:
     return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens)

@@ -65,6 +65,24 @@ def historico_sessao(sessao: str, limite: int = 20) -> list[dict]:
             linhas = cur.fetchall()
     return [{"role": l["papel"], "content": l["conteudo"]} for l in linhas]
 
+def sessoes_utilizador(utilizador: str, limite: int = 30) -> list[dict]:
+    """Sessões recentes de um utilizador, com preview da primeira mensagem — para a barra lateral."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT sessao,
+                          MAX(criado_em) AS ultima_atividade,
+                          (ARRAY_AGG(conteudo ORDER BY criado_em ASC)
+                               FILTER (WHERE papel = 'user'))[1] AS preview
+                   FROM conversas
+                   WHERE utilizador = %s
+                   GROUP BY sessao
+                   ORDER BY ultima_atividade DESC
+                   LIMIT %s""",
+                (utilizador, limite)
+            )
+            return cur.fetchall()
+
 def log_routing(pergunta: str, agente_escolhido: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
