@@ -81,17 +81,39 @@
     gap: 2px;
   }
   .session-item {
-    padding: 9px 10px;
+    padding: 9px 6px 9px 10px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 13px;
     color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .session-item:hover { background: var(--bubble-user); color: var(--text); }
+  .session-item.active { background: var(--bubble-user); color: var(--text); font-weight: 600; }
+  .session-item .session-title {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .session-item:hover { background: var(--bubble-user); color: var(--text); }
-  .session-item.active { background: var(--bubble-user); color: var(--text); font-weight: 600; }
+  .session-item .delete-btn {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    visibility: hidden;
+  }
+  .session-item:hover .delete-btn { visibility: visible; }
+  .session-item .delete-btn:hover { background: var(--border); color: var(--error); }
   .sessions-empty {
     padding: 10px 14px;
     font-size: 12px;
@@ -571,11 +593,40 @@
     lista.forEach(s => {
       const item = document.createElement("div");
       item.className = "session-item" + (s.sessao === sessao ? " active" : "");
-      item.textContent = s.preview || s.sessao;
       item.title = s.preview || s.sessao;
       item.addEventListener("click", () => switchSession(s.sessao));
+
+      const titulo = document.createElement("span");
+      titulo.className = "session-title";
+      titulo.textContent = s.preview || s.sessao;
+      item.appendChild(titulo);
+
+      const apagar = document.createElement("button");
+      apagar.className = "delete-btn";
+      apagar.type = "button";
+      apagar.textContent = "✕";
+      apagar.title = "Eliminar conversa";
+      apagar.addEventListener("click", (e) => {
+        e.stopPropagation();
+        eliminarSessao(s.sessao);
+      });
+      item.appendChild(apagar);
+
       sessionsList.appendChild(item);
     });
+  }
+
+  async function eliminarSessao(sessaoAlvo) {
+    if (!confirm("Eliminar esta conversa? Não é possível recuperar depois.")) return;
+    try {
+      await fetch(`/sessoes/${encodeURIComponent(sessaoAlvo)}?utilizador=${encodeURIComponent(UTILIZADOR)}`,
+        { method: "DELETE" });
+    } catch (_) { /* segue para atualizar a UI mesmo que o pedido falhe */ }
+    if (sessaoAlvo === sessao) {
+      novaConversa();
+    } else {
+      fetchSessions();
+    }
   }
 
   async function switchSession(novaSessao) {
