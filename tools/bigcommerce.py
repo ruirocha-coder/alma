@@ -29,15 +29,22 @@ def _texto_simples(html: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 def procurar_produtos(termo: str, limite: int = 10):
-    """Pesquisa no catálogo. Devolve nome, descrição, preço, custo, stock, URL e variantes."""
+    """Pesquisa no catálogo. Devolve nome, descrição, preço, custo, stock, URL e variantes — só produtos visíveis na loja."""
     dados = _get(f"{_base_url()}/v3/catalog/products",
                  params={"keyword": termo, "limit": limite,
                          "include": "variants",
-                         "include_fields": "name,description,price,cost_price,inventory_level,custom_url,sku,variants"})
+                         "include_fields": "name,description,price,cost_price,inventory_level,custom_url,sku,variants,is_visible"})
     produtos = dados.get("data", [])
+    site = os.environ.get("SITE_URL", "").rstrip("/")
+    resultado = []
     for produto in produtos:
+        if not produto.pop("is_visible", True):
+            continue  # produto oculto na loja — nunca mostrar nem mencionar
         produto["description"] = _texto_simples(produto.get("description"))
-    return produtos
+        caminho = (produto.pop("custom_url", None) or {}).get("url", "")
+        produto["url"] = f"{site}{caminho}" if site else caminho
+        resultado.append(produto)
+    return resultado
 
 def encomendas_recentes(dias: int = 30):
     """Encomendas dos últimos N dias (API V2 de orders)."""
@@ -86,7 +93,7 @@ def procurar_posts_blog(termo: str, limite: int = 5):
 TOOLS_COMUNS = [
     {
         "name": "procurar_produtos",
-        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve nome, descrição (texto simples), preço de venda, preço de custo, stock, URL e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Se um produto tiver descrição e/ou variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador ou especular se existem.",
+        "description": "Pesquisa produtos no catálogo BigCommerce por palavra-chave. Devolve nome, descrição (texto simples), preço de venda, preço de custo, stock, URL completo e a lista completa de variantes (sku, preço, custo, opções como cor/tamanho, stock por variante). Já exclui produtos ocultos na loja — o que é devolvido é sempre o que o cliente também vê. Se um produto tiver descrição e/ou variantes, vêm sempre incluídas nesta chamada — nunca é preciso perguntar ao utilizador ou especular se existem.",
         "input_schema": {
             "type": "object",
             "properties": {
