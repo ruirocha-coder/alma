@@ -1,0 +1,73 @@
+from persona import PERSONA
+from agents.base import client
+from tools import basecamp, procedimentos
+import db
+
+MISSAO_MONITOR = PERSONA + """
+
+Modo atual: monitorização automática do Basecamp. Vais publicar um único
+comentário na tarefa/card abaixo, sinalizando o atraso e, quando fizer
+sentido, uma sugestão relacionada com os procedimentos da empresa.
+
+Regras deste comentário:
+- Curto (3 a 5 linhas), tom calmo e construtivo — nunca acusatório.
+- Refere quantos dias de atraso tem.
+- Se os comentários já existentes explicarem o atraso (ex: à espera de
+  aprovação, cliente não respondeu), reconhece isso em vez de repetir o óbvio.
+- Se os procedimentos da empresa (abaixo, quando disponíveis) forem
+  relevantes para este caso, aponta o que deveria ter acontecido segundo
+  esses procedimentos.
+- Termina sempre a assinar como "— Alma", para ficar claro que é automático.
+- Escreve só o comentário em si — sem saudações, sem perguntas, isto não é
+  uma conversa."""
+
+def _procedimentos_ou_aviso() -> str:
+    try:
+        return procedimentos.procedimentos_empresa()
+    except Exception as e:
+        print(f"[monitor_basecamp] procedimentos indisponíveis: {e!r}")
+        return "(Documento de procedimentos ainda não está configurado.)"
+
+def _gerar_comentario(item: dict, comentarios: list, procedimentos_texto: str) -> str:
+    historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
+    contexto = f"""Tarefa/card: {item['titulo']}
+Projeto: {item['projeto']}
+Tipo: {item['tipo']}
+Prazo: {item['prazo']} ({item['dias_atraso']} dias de atraso)
+
+Comentários existentes:
+{historico}
+
+Procedimentos da empresa:
+{procedimentos_texto}"""
+    resposta = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=500,
+        system=MISSAO_MONITOR,
+        messages=[{"role": "user", "content": contexto}]
+    )
+    return "".join(b.text for b in resposta.content if b.type == "text").strip()
+
+def correr_monitorizacao() -> list[dict]:
+    """Verifica tarefas/cards atrasados no Basecamp e publica um alerta em cada um (uma vez por prazo)."""
+    procedimentos_texto = _procedimentos_ou_aviso()
+
+    try:
+        itens = basecamp.tarefas_e_cards_atrasados()
+    except Exception as e:
+        print(f"[monitor_basecamp] não foi possível obter tarefas do Basecamp: {e!r}")
+        return [{"erro": str(e), "ok": False}]
+
+    resultado = []
+    for item in itens:
+        if db.ja_alertado(item["id"], item["prazo"]):
+            continue
+        try:
+            comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
+            texto = _gerar_comentario(item, comentarios, procedimentos_texto)
+            basecamp.comentar(item["id"], texto)
+            db.registar_alerta(item["id"], item["prazo"], texto)
+            resultado.append({"item": item, "comentario": texto, "ok": True})
+        except Exception as e:
+            print(f"[monitor_basecamp] falhou para {item.get('id')}: {e!r}")
+            resultado.append({"item": item, "erro": str(e), "ok": False})
+    return resultado

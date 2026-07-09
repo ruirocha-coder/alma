@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS memoria_utilizador (
     facto TEXT NOT NULL,
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS basecamp_alertas (
+    recording_id BIGINT PRIMARY KEY,
+    prazo DATE,                   -- due_on no momento do alerta, para saber se mudou
+    comentario TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 def get_conn():
@@ -198,3 +205,26 @@ def contexto_utilizador(utilizador: str) -> str:
         linhas.append("O que sabes sobre o trabalho recente desta pessoa:")
         linhas += [f"- {f}" for f in factos]
     return "\n".join(linhas)
+
+def ja_alertado(recording_id: int, prazo: str) -> bool:
+    """Verifica se já foi publicado um alerta para esta tarefa/card com este prazo."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM basecamp_alertas WHERE recording_id = %s AND prazo = %s",
+                (recording_id, prazo)
+            )
+            return cur.fetchone() is not None
+
+def registar_alerta(recording_id: int, prazo: str, comentario: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO basecamp_alertas (recording_id, prazo, comentario)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (recording_id) DO UPDATE SET
+                       prazo = EXCLUDED.prazo, comentario = EXCLUDED.comentario,
+                       criado_em = now()""",
+                (recording_id, prazo, comentario)
+            )
+        conn.commit()
