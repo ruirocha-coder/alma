@@ -5,14 +5,20 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe)
-from agents import acolhimento
+from agents import acolhimento, monitor_basecamp
 from db import inicializar_schema
 inicializar_schema()
 
 app = FastAPI(title="ALMA")
+
+# monitorização do Basecamp: todos os dias às 8h (hora de Lisboa)
+scheduler = BackgroundScheduler(timezone="Europe/Lisbon")
+scheduler.add_job(monitor_basecamp.correr_monitorizacao, "cron", hour=8, minute=0)
+scheduler.start()
 
 class Pedido(BaseModel):
     utilizador: str
@@ -47,7 +53,9 @@ def health():
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
     variaveis = ["DATABASE_URL", "ANTHROPIC_API_KEY", "BIGCOMMERCE_STORE_HASH",
-                 "BIGCOMMERCE_ACCESS_TOKEN", "SITE_URL"]
+                 "BIGCOMMERCE_ACCESS_TOKEN", "SITE_URL",
+                 "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
+                 "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
@@ -62,6 +70,11 @@ def historico(sessao: str, utilizador: str):
 def apagar_sessao(sessao: str, utilizador: str):
     eliminar_sessao(sessao, utilizador)
     return {"ok": True}
+
+@app.post("/basecamp/monitorizar")
+def monitorizar_basecamp_agora():
+    """Corre a monitorização do Basecamp já, sem esperar pelo agendamento das 8h."""
+    return monitor_basecamp.correr_monitorizacao()
 
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
