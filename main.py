@@ -6,7 +6,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from orchestrator import encaminhar, AGENTES
-from db import guardar_mensagem, historico_sessao, log_routing, sessoes_utilizador, eliminar_sessao
+from db import (guardar_mensagem, historico_sessao, log_routing,
+                sessoes_utilizador, eliminar_sessao, perfil_existe)
+from agents import acolhimento
 from db import inicializar_schema
 inicializar_schema()
 
@@ -19,14 +21,17 @@ class Pedido(BaseModel):
 
 @app.post("/alma")
 def alma(p: Pedido):
-    agente = encaminhar(p.mensagem)
-    log_routing(p.mensagem, agente)
-
     mensagens = historico_sessao(p.sessao, p.utilizador)   # memória por utilizador
     mensagens.append({"role": "user", "content": p.mensagem})
 
     try:
-        resposta = AGENTES[agente](mensagens)
+        if not perfil_existe(p.utilizador):
+            resposta = acolhimento.responder(p.utilizador, mensagens)
+            agente = "acolhimento"
+        else:
+            agente = encaminhar(p.mensagem)
+            log_routing(p.mensagem, agente)
+            resposta = AGENTES[agente](p.utilizador, mensagens)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao obter resposta do agente: {e}")
 

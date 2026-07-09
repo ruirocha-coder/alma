@@ -1,0 +1,70 @@
+import json
+from persona import PERSONA
+from agents.base import client
+import db
+
+MISSAO_ACOLHIMENTO = PERSONA + """
+
+Modo atual: acolhimento. É a primeira vez que falas com esta pessoa.
+
+Objetivo: conhece-la através de uma conversa natural e curta — nunca um
+questionário. Faz UMA pergunta de cada vez, reage ao que a pessoa diz antes
+de passar à seguinte. As perguntas-chave, por esta ordem:
+
+1. Qual o teu papel na Interior Guider?
+2. Quando me pedires ajuda, preferes que vá direta ao essencial ou que
+   explique o raciocínio?
+3. Preferes que te dê uma recomendação fechada ou opções para escolheres?
+4. Que dificuldades consideras que eu posso complementar e ajudar a resolver?
+5. O que te rouba mais tempo na semana?
+
+Quando tiveres as respostas, usa a ferramenta guardar_perfil UMA vez.
+Depois de guardar, resume à pessoa o que ficaste a saber e diz-lhe que pode
+pedir-te para alterar ou esquecer qualquer parte, quando quiser. Termina
+perguntando em que podes ser útil agora.
+
+Não voltes a fazer estas perguntas no futuro — a partir daqui adaptas-te
+pela memória."""
+
+TOOLS_ACOLHIMENTO = [
+    {
+        "name": "guardar_perfil",
+        "description": "Guarda o perfil do utilizador. Usar uma única vez, quando as cinco respostas estiverem recolhidas.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "papel": {"type": "string", "description": "Papel na Interior Guider"},
+                "estilo_resposta": {"type": "string", "description": "Direto ao essencial ou com raciocínio explicado"},
+                "formato": {"type": "string", "description": "Preferências de formato (listas, texto corrido, visual)"},
+                "decisao": {"type": "string", "description": "Recomendação fechada ou opções"},
+                "dificuldades": {"type": "string", "description": "Dificuldades onde a Alma pode complementar e ajudar"},
+            },
+            "required": ["papel", "estilo_resposta", "formato", "decisao", "dificuldades"]
+        }
+    }
+]
+
+def responder(utilizador: str, mensagens: list) -> str:
+    while True:
+        resposta = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=1500,
+            system=MISSAO_ACOLHIMENTO, tools=TOOLS_ACOLHIMENTO, messages=mensagens
+        )
+        if resposta.stop_reason != "tool_use":
+            return "".join(b.text for b in resposta.content if b.type == "text")
+
+        mensagens.append({"role": "assistant", "content": resposta.content})
+        resultados = []
+        for bloco in resposta.content:
+            if bloco.type == "tool_use":
+                try:
+                    out = db.guardar_perfil(utilizador=utilizador, **bloco.input)
+                except Exception as e:
+                    print(f"[ferramenta] guardar_perfil({bloco.input}) falhou: {e!r}")
+                    out = {"erro": str(e)}
+                resultados.append({
+                    "type": "tool_result",
+                    "tool_use_id": bloco.id,
+                    "content": json.dumps(out, ensure_ascii=False, default=str)
+                })
+        mensagens.append({"role": "user", "content": resultados})

@@ -31,6 +31,23 @@ CREATE TABLE IF NOT EXISTS routing_log (
     correto BOOLEAN,              -- preenchido na revisão semanal
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS perfis (
+    utilizador TEXT PRIMARY KEY,
+    papel TEXT,
+    estilo_resposta TEXT,
+    formato TEXT,
+    decisao TEXT,
+    dificuldades TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS memoria_utilizador (
+    id SERIAL PRIMARY KEY,
+    utilizador TEXT NOT NULL,
+    facto TEXT NOT NULL,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 def get_conn():
@@ -101,3 +118,83 @@ def log_routing(pergunta: str, agente_escolhido: str):
                 (pergunta, agente_escolhido)
             )
         conn.commit()
+
+def perfil_existe(utilizador: str) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM perfis WHERE utilizador = %s", (utilizador,))
+            return cur.fetchone() is not None
+
+def guardar_perfil(utilizador: str, papel: str, estilo_resposta: str,
+                   formato: str, decisao: str, dificuldades: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO perfis (utilizador, papel, estilo_resposta, formato, decisao, dificuldades)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (utilizador) DO UPDATE SET
+                       papel = EXCLUDED.papel, estilo_resposta = EXCLUDED.estilo_resposta,
+                       formato = EXCLUDED.formato, decisao = EXCLUDED.decisao,
+                       dificuldades = EXCLUDED.dificuldades""",
+                (utilizador, papel, estilo_resposta, formato, decisao, dificuldades)
+            )
+        conn.commit()
+    return {"guardado": True}
+
+def obter_perfil(utilizador: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM perfis WHERE utilizador = %s", (utilizador,))
+            return cur.fetchone()
+
+def memorizar_facto(utilizador: str, facto: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO memoria_utilizador (utilizador, facto) VALUES (%s, %s)",
+                (utilizador, facto)
+            )
+        conn.commit()
+    return {"memorizado": facto}
+
+def esquecer_factos(utilizador: str, termo: str):
+    """Apaga factos que contenham o termo. Devolve quantos apagou."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """DELETE FROM memoria_utilizador
+                   WHERE utilizador = %s AND facto ILIKE %s""",
+                (utilizador, f"%{termo}%")
+            )
+            apagados = cur.rowcount
+        conn.commit()
+    return {"apagados": apagados}
+
+def factos_utilizador(utilizador: str, limite: int = 30) -> list[str]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT facto FROM memoria_utilizador
+                   WHERE utilizador = %s ORDER BY criado_em DESC LIMIT %s""",
+                (utilizador, limite)
+            )
+            return [l["facto"] for l in cur.fetchall()]
+
+def contexto_utilizador(utilizador: str) -> str:
+    """Bloco de texto com perfil + memórias, para injetar no system prompt."""
+    p = obter_perfil(utilizador)
+    if not p:
+        return ""
+    linhas = [
+        f"Estás a falar com: {utilizador}",
+        f"Papel na Interior Guider: {p['papel']}",
+        f"Estilo de resposta preferido: {p['estilo_resposta']}",
+        f"Formato preferido: {p['formato']}",
+        f"Decisões: {p['decisao']}",
+        f"Dificuldades onde a Alma pode ajudar: {p['dificuldades']}",
+    ]
+    factos = factos_utilizador(utilizador)
+    if factos:
+        linhas.append("O que sabes sobre o trabalho recente desta pessoa:")
+        linhas += [f"- {f}" for f in factos]
+    return "\n".join(linhas)
