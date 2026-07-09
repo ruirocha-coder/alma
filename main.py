@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES
 from db import (guardar_mensagem, historico_sessao, log_routing,
-                sessoes_utilizador, eliminar_sessao, perfil_existe)
+                sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import acolhimento, monitor_basecamp
 from db import inicializar_schema
 inicializar_schema()
@@ -79,6 +79,11 @@ def monitorizar_basecamp_agora():
     pedido; os resultados/erros ficam nos logs do servidor."""
     scheduler.add_job(monitor_basecamp.correr_monitorizacao, "date", run_date=datetime.now())
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.get("/basecamp/alertas")
+def alertas_basecamp_recentes(limite: int = 30):
+    """Últimos alertas publicados no Basecamp — para confirmar corridas sem ir aos logs do Railway."""
+    return alertas_recentes(limite)
 
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
