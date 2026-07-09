@@ -228,3 +228,14 @@ def registar_alerta(recording_id: int, prazo: str, comentario: str):
                 (recording_id, prazo, comentario)
             )
         conn.commit()
+
+def alertas_recentes(limite: int = 30) -> list[dict]:
+    """Últimos alertas publicados no Basecamp — para confirmar corridas sem ir aos logs."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT recording_id, prazo, comentario, criado_em
+                   FROM basecamp_alertas ORDER BY criado_em DESC LIMIT %s""",
+                (limite,)
+            )
+            return cur.fetchall()
