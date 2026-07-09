@@ -6,6 +6,14 @@ import db
 
 _a_correr = threading.Lock()
 
+# Itens com mais de tantos dias de atraso são tratados como conteúdo
+# esquecido/abandonado, não trabalho realmente pendente — não geram alerta.
+IDADE_MAXIMA_DIAS = 60
+
+# Máximo de alertas novos publicados por corrida, para não inundar o
+# Basecamp de uma vez; o que ficar de fora entra na corrida seguinte.
+MAX_ALERTAS_POR_CORRIDA = 15
+
 MISSAO_MONITOR = PERSONA + """
 
 Modo atual: monitorização automática do Basecamp. Vais publicar um único
@@ -71,10 +79,16 @@ def correr_monitorizacao() -> list[dict]:
             return [{"erro": str(e), "ok": False}]
 
         print(f"[monitor_basecamp] {len(itens)} itens atrasados encontrados")
+
+        elegiveis = [i for i in itens
+                    if i["dias_atraso"] <= IDADE_MAXIMA_DIAS and not db.ja_alertado(i["id"], i["prazo"])]
+        elegiveis.sort(key=lambda i: -i["dias_atraso"])  # mais urgentes primeiro
+        a_processar = elegiveis[:MAX_ALERTAS_POR_CORRIDA]
+        print(f"[monitor_basecamp] {len(elegiveis)} elegíveis (≤{IDADE_MAXIMA_DIAS}d, ainda não alertados), "
+              f"a processar {len(a_processar)} nesta corrida")
+
         resultado = []
-        for item in itens:
-            if db.ja_alertado(item["id"], item["prazo"]):
-                continue
+        for item in a_processar:
             try:
                 comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
                 texto = _gerar_comentario(item, comentarios, procedimentos_texto)
