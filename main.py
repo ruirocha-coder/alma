@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-from datetime import datetime
+import threading
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -76,8 +76,14 @@ def apagar_sessao(sessao: str, utilizador: str):
 def monitorizar_basecamp_agora():
     """Dispara a monitorização do Basecamp já, em segundo plano — contas com
     muito histórico podem demorar vários minutos, por isso não bloqueia o
-    pedido; os resultados/erros ficam nos logs do servidor."""
-    scheduler.add_job(monitor_basecamp.correr_monitorizacao, "date", run_date=datetime.now())
+    pedido; os resultados/erros ficam nos logs do servidor.
+
+    Uma thread simples em vez de agendar via scheduler.add_job(..., "date",
+    run_date=...): esse caminho exige uma data com fuso horário coerente com
+    o do BackgroundScheduler (Europe/Lisbon) — um datetime.now() "nu" foi
+    interpretado como já sendo hora de Lisboa e disparou sempre um misfire
+    silencioso (a corrida nunca chegava a arrancar)."""
+    threading.Thread(target=monitor_basecamp.correr_monitorizacao, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.get("/basecamp/alertas")
