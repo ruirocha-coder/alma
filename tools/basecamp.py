@@ -38,13 +38,30 @@ def _headers():
         "Content-Type": "application/json",
     }
 
-def _get_paginado(url: str, params: dict = None) -> list:
-    """O Basecamp pagina via header Link: <url>; rel="next"."""
+def _get_paginado(url: str, params: dict = None, etiqueta: str = "") -> list:
+    """O Basecamp pagina via header Link: <url>; rel="next".
+
+    Contas com muito histórico podem ter milhares de itens em aberto (o
+    Basecamp não permite filtrar por prazo no servidor) — isto pode demorar
+    minutos, por isso tem retry ligeiro e imprime progresso para os logs não
+    parecerem "presos" durante uma corrida agendada."""
     itens = []
+    pagina = 0
     while url:
-        r = httpx.get(url, headers=_headers(), params=params, timeout=30)
-        r.raise_for_status()
+        for tentativa in range(3):
+            try:
+                r = httpx.get(url, headers=_headers(), params=params, timeout=30)
+                r.raise_for_status()
+                break
+            except httpx.HTTPError as e:
+                if tentativa == 2:
+                    raise
+                print(f"[basecamp] pedido falhou ({e!r}), tentativa {tentativa + 1}/3")
+                time.sleep(2 * (tentativa + 1))
         itens.extend(r.json())
+        pagina += 1
+        if etiqueta and pagina % 20 == 0:
+            print(f"[basecamp] {etiqueta}: página {pagina}, {len(itens)} itens acumulados")
         url = r.links.get("next", {}).get("url")
         params = None  # já incluído no url de "next"
     return itens
@@ -54,8 +71,12 @@ def tarefas_e_cards_atrasados() -> list[dict]:
     hoje = date.today()
     atrasados = []
     for tipo in TIPOS_MONITORIZADOS:
+        # completed=false evita percorrer todo o histórico de tarefas já
+        # concluídas — só traz o que ainda está em aberto.
         itens = _get_paginado(f"{_base_url()}/projects/recordings.json",
-                              params={"type": tipo, "status": "active"})
+                              params={"type": tipo, "status": "active", "completed": "false"},
+                              etiqueta=tipo)
+        print(f"[basecamp] {tipo}: {len(itens)} em aberto, a filtrar por prazo...")
         for item in itens:
             prazo = item.get("due_on")
             if not prazo or item.get("completed"):

@@ -1,7 +1,10 @@
+import threading
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp, procedimentos
 import db
+
+_a_correr = threading.Lock()
 
 MISSAO_MONITOR = PERSONA + """
 
@@ -48,26 +51,41 @@ Procedimentos da empresa:
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
 def correr_monitorizacao() -> list[dict]:
-    """Verifica tarefas/cards atrasados no Basecamp e publica um alerta em cada um (uma vez por prazo)."""
-    procedimentos_texto = _procedimentos_ou_aviso()
+    """Verifica tarefas/cards atrasados no Basecamp e publica um alerta em cada um (uma vez por prazo).
+
+    Contas com muito histórico podem ter milhares de itens em aberto — isto
+    pode demorar vários minutos (o Basecamp não permite filtrar por prazo no
+    servidor). É sempre corrido em segundo plano (agendado ou via
+    /basecamp/monitorizar), nunca a bloquear um pedido HTTP."""
+    if not _a_correr.acquire(blocking=False):
+        print("[monitor_basecamp] já há uma corrida em curso — ignorado")
+        return [{"erro": "já está a correr uma monitorização", "ok": False}]
 
     try:
-        itens = basecamp.tarefas_e_cards_atrasados()
-    except Exception as e:
-        print(f"[monitor_basecamp] não foi possível obter tarefas do Basecamp: {e!r}")
-        return [{"erro": str(e), "ok": False}]
+        procedimentos_texto = _procedimentos_ou_aviso()
 
-    resultado = []
-    for item in itens:
-        if db.ja_alertado(item["id"], item["prazo"]):
-            continue
         try:
-            comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
-            texto = _gerar_comentario(item, comentarios, procedimentos_texto)
-            basecamp.comentar(item["id"], texto)
-            db.registar_alerta(item["id"], item["prazo"], texto)
-            resultado.append({"item": item, "comentario": texto, "ok": True})
+            itens = basecamp.tarefas_e_cards_atrasados()
         except Exception as e:
-            print(f"[monitor_basecamp] falhou para {item.get('id')}: {e!r}")
-            resultado.append({"item": item, "erro": str(e), "ok": False})
-    return resultado
+            print(f"[monitor_basecamp] não foi possível obter tarefas do Basecamp: {e!r}")
+            return [{"erro": str(e), "ok": False}]
+
+        print(f"[monitor_basecamp] {len(itens)} itens atrasados encontrados")
+        resultado = []
+        for item in itens:
+            if db.ja_alertado(item["id"], item["prazo"]):
+                continue
+            try:
+                comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
+                texto = _gerar_comentario(item, comentarios, procedimentos_texto)
+                basecamp.comentar(item["id"], texto)
+                db.registar_alerta(item["id"], item["prazo"], texto)
+                resultado.append({"item": item, "comentario": texto, "ok": True})
+                print(f"[monitor_basecamp] comentado: {item['titulo']} ({item['dias_atraso']}d atraso)")
+            except Exception as e:
+                print(f"[monitor_basecamp] falhou para {item.get('id')}: {e!r}")
+                resultado.append({"item": item, "erro": str(e), "ok": False})
+        print(f"[monitor_basecamp] concluído — {len(resultado)} alertas novos")
+        return resultado
+    finally:
+        _a_correr.release()

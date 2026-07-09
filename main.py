@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -73,8 +74,11 @@ def apagar_sessao(sessao: str, utilizador: str):
 
 @app.post("/basecamp/monitorizar")
 def monitorizar_basecamp_agora():
-    """Corre a monitorização do Basecamp já, sem esperar pelo agendamento das 8h."""
-    return monitor_basecamp.correr_monitorizacao()
+    """Dispara a monitorização do Basecamp já, em segundo plano — contas com
+    muito histórico podem demorar vários minutos, por isso não bloqueia o
+    pedido; os resultados/erros ficam nos logs do servidor."""
+    scheduler.add_job(monitor_basecamp.correr_monitorizacao, "date", run_date=datetime.now())
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
