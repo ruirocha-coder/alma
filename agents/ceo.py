@@ -36,7 +36,12 @@ mas se não encontrar nada usa listar_paginas_site (já inclui todos os artigos,
 em /academia/...) e depois ler_pagina_site no URL certo — não te fiques
 apenas pela página-índice da Academia, que só tem excertos "leia mais", lê
 sempre o artigo completo antes de responder. Consulta sempre estas
-ferramentas antes de dizer que não tens essa informação."""
+ferramentas antes de dizer que não tens essa informação.
 
-def responder(mensagens: list) -> str:
-    return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens)
+Adaptação: respeita o perfil e as memórias do utilizador incluídos no teu
+contexto. Quando surgir naturalmente um facto duradouro sobre o trabalho da
+pessoa, usa memorizar_facto. Se a pessoa pedir para esqueceres algo, usa
+esquecer."""
+
+def responder(utilizador: str, mensagens: list) -> str:
+    return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens, utilizador)
