@@ -198,6 +198,12 @@ def comentar(recording_id: int, texto: str):
     r.raise_for_status()
     return r.json()
 
+def _get_bytes(url: str) -> bytes:
+    """Descarrega um ficheiro anexado (Upload) — usa a mesma autenticação da API."""
+    r = httpx.get(url, headers=_headers(), timeout=30, follow_redirects=True)
+    r.raise_for_status()
+    return r.content
+
 def obter_recording(url: str) -> dict:
     """Vai buscar a representação completa e atual de um registo (comentário,
     tarefa, card, ...) pelo seu próprio URL da API — útil quando o payload de
