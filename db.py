@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS basecamp_alertas (
     comentario TEXT,
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS basecamp_eventos_processados (
+    comment_id BIGINT PRIMARY KEY,   -- id do comentário/tarefa/card que mencionou a Alma
+    resposta TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 def get_conn():
@@ -226,6 +232,23 @@ def registar_alerta(recording_id: int, prazo: str, comentario: str):
                        prazo = EXCLUDED.prazo, comentario = EXCLUDED.comentario,
                        criado_em = now()""",
                 (recording_id, prazo, comentario)
+            )
+        conn.commit()
+
+def evento_ja_processado(comment_id: int) -> bool:
+    """Evita responder duas vezes à mesma menção (o Basecamp pode reenviar o webhook)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM basecamp_eventos_processados WHERE comment_id = %s", (comment_id,))
+            return cur.fetchone() is not None
+
+def registar_evento_processado(comment_id: int, resposta: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO basecamp_eventos_processados (comment_id, resposta)
+                   VALUES (%s, %s) ON CONFLICT (comment_id) DO NOTHING""",
+                (comment_id, resposta)
             )
         conn.commit()
 

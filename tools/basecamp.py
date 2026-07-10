@@ -108,3 +108,28 @@ def comentar(recording_id: int, texto: str):
                    headers=_headers(), json={"content": texto}, timeout=30)
     r.raise_for_status()
     return r.json()
+
+def meu_perfil() -> dict:
+    """A própria conta Alma no Basecamp (id, nome) — para nunca reagir aos seus próprios comentários."""
+    if "meu_perfil" in _cache:
+        return _cache["meu_perfil"]
+    r = httpx.get(f"{_base_url()}/my/profile.json", headers=_headers(), timeout=30)
+    r.raise_for_status()
+    perfil = r.json()
+    _cache["meu_perfil"] = perfil
+    return perfil
+
+def listar_projetos() -> list[dict]:
+    return _get_paginado(f"{_base_url()}/projects.json")
+
+def listar_webhooks(bucket_id: int) -> list[dict]:
+    return _get_paginado(f"{_base_url()}/buckets/{bucket_id}/webhooks.json")
+
+def criar_webhook(bucket_id: int, payload_url: str, tipos: list[str] = None):
+    corpo = {"payload_url": payload_url}
+    if tipos:
+        corpo["types"] = tipos
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/webhooks.json",
+                   headers=_headers(), json=corpo, timeout=30)
+    r.raise_for_status()
+    return r.json()
