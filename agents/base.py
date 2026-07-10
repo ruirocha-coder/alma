@@ -1,5 +1,5 @@
 import anthropic, json
-from tools import bigcommerce, site, documentos_empresa
+from tools import bigcommerce, site, documentos_empresa, basecamp
 import db
 
 client = anthropic.Anthropic()
@@ -43,16 +43,40 @@ TOOLS_MEMORIA = [
     }
 ]
 
+# Publicar no Mural: disponível a qualquer agente, tal como a memória, mas só
+# executa de facto se quem pedir for uma das pessoas autorizadas — a
+# verificação usa o nome do utilizador (do perfil da consola ou do nome real
+# no Basecamp), não há outra forma de identificar quem está a pedir.
+TOOLS_MURAL = [
+    {
+        "name": "publicar_mural",
+        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. Só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente uma publicação no mural — qualquer outra pessoa que peça isto, recusa e explica que só eles podem pedir.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"assunto": {"type": "string"}, "mensagem": {"type": "string"}},
+            "required": ["assunto", "mensagem"]
+        }
+    }
+]
+
+_AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
+
+def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str):
+    if not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
+        return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural"}
+    return basecamp.publicar_mural(assunto, mensagem)
+
 def correr_agente(system_prompt: str, tools: list, mensagens: list,
                   utilizador: str, modelo: str = "claude-sonnet-4-6") -> str:
     """Loop de agente com memória por utilizador: chama o modelo, executa tools até haver resposta final."""
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
+        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem),
     }
     contexto = db.contexto_utilizador(utilizador)
     system = system_prompt + ("\n\n" + contexto if contexto else "")
-    tools_completas = tools + TOOLS_MEMORIA
+    tools_completas = tools + TOOLS_MEMORIA + TOOLS_MURAL
 
     while True:
         resposta = client.messages.create(

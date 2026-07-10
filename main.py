@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
-from agents import acolhimento, monitor_basecamp, responder_basecamp
+from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
 from tools import basecamp
 from db import inicializar_schema
 inicializar_schema()
@@ -20,6 +20,8 @@ app = FastAPI(title="ALMA")
 # monitorização do Basecamp: todos os dias às 8h (hora de Lisboa)
 scheduler = BackgroundScheduler(timezone="Europe/Lisbon")
 scheduler.add_job(monitor_basecamp.correr_monitorizacao, "cron", hour=8, minute=0)
+# resumo semanal no Mural: segundas-feiras às 9h (hora de Lisboa)
+scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal, "cron", day_of_week="mon", hour=9, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -92,6 +94,12 @@ def monitorizar_basecamp_agora():
 def alertas_basecamp_recentes(limite: int = 30):
     """Últimos alertas publicados no Basecamp — para confirmar corridas sem ir aos logs do Railway."""
     return alertas_recentes(limite)
+
+@app.post("/basecamp/resumo-semanal")
+def resumo_semanal_basecamp_agora():
+    """Dispara já o resumo semanal de atividade no Mural, em segundo plano."""
+    threading.Thread(target=resumo_semanal_basecamp.correr_resumo_semanal, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
