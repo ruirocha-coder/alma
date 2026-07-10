@@ -57,6 +57,17 @@ def _processar(payload: dict):
         print("[responder_basecamp] ignorado: é a própria Alma (evita ciclos)")
         return
 
+    # o conteúdo embutido no payload do webhook vem sem a expansão da menção
+    # (falta a legenda com o nome da pessoa mencionada, ex: "Alma") — só a API
+    # devolve a representação completa e atual do registo, por isso vai
+    # sempre lá buscar antes de decidir se há menção, mesmo que o payload já
+    # pareça ter conteúdo e alvo.
+    if recording.get("url"):
+        try:
+            recording = basecamp.obter_recording(recording["url"])
+        except Exception as e:
+            print(f"[responder_basecamp] não consegui reobter o registo completo: {e!r}")
+
     if "comment" in kind:
         evento_id = recording.get("id")
         texto_bruto = recording.get("content") or ""
@@ -66,18 +77,6 @@ def _processar(payload: dict):
         evento_id = recording.get("id")
         texto_bruto = f"{recording.get('content', '')} {recording.get('title', '')}"
         alvo = recording
-
-    # o payload do webhook pode vir mais resumido do que o pedido direto à API —
-    # se faltar o texto ou o alvo, tenta reobter o registo completo antes de desistir.
-    if (not texto_bruto or not alvo.get("id")) and recording.get("url"):
-        try:
-            completo = basecamp.obter_recording(recording["url"])
-            texto_bruto = texto_bruto or completo.get("content", "")
-            if not alvo.get("id"):
-                alvo = completo.get("parent") or (completo if "comment" not in kind else alvo)
-            print(f"[responder_basecamp] reobtido registo completo de {recording['url']}")
-        except Exception as e:
-            print(f"[responder_basecamp] não consegui reobter o registo completo: {e!r}")
 
     if not evento_id or not _menciona_alma(_texto_simples(texto_bruto)):
         print(f"[responder_basecamp] ignorado: sem menção à Alma no texto ({_texto_simples(texto_bruto)[:120]!r})")
