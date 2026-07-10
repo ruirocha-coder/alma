@@ -3,14 +3,15 @@ load_dotenv()
 
 import os
 import threading
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
-from agents import acolhimento, monitor_basecamp
+from agents import acolhimento, monitor_basecamp, responder_basecamp
+from tools import basecamp
 from db import inicializar_schema
 inicializar_schema()
 
@@ -56,7 +57,8 @@ def health_config():
     variaveis = ["DATABASE_URL", "ANTHROPIC_API_KEY", "BIGCOMMERCE_STORE_HASH",
                  "BIGCOMMERCE_ACCESS_TOKEN", "SITE_URL",
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
-                 "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID"]
+                 "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
+                 "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
@@ -90,6 +92,39 @@ def monitorizar_basecamp_agora():
 def alertas_basecamp_recentes(limite: int = 30):
     """Últimos alertas publicados no Basecamp — para confirmar corridas sem ir aos logs do Railway."""
     return alertas_recentes(limite)
+
+@app.post("/basecamp/webhooks/registar")
+def registar_webhooks_basecamp():
+    """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
+    cada projeto a que a Alma tem acesso, para ela poder reagir a menções em
+    tempo real. Podes correr isto outra vez sempre que houver projetos novos."""
+    payload_url = f"{os.environ['ALMA_APP_URL'].rstrip('/')}/basecamp/webhook?chave={os.environ['BASECAMP_WEBHOOK_SECRET']}"
+    resultado = []
+    for projeto in basecamp.listar_projetos():
+        bucket_id = projeto["id"]
+        ja_existe = any(w.get("payload_url", "").split("?")[0] == payload_url.split("?")[0]
+                       for w in basecamp.listar_webhooks(bucket_id))
+        if ja_existe:
+            resultado.append({"projeto": projeto["name"], "estado": "já existia"})
+            continue
+        try:
+            basecamp.criar_webhook(bucket_id, payload_url, tipos=["Comment", "Todo", "Kanban::Card"])
+            resultado.append({"projeto": projeto["name"], "estado": "criado"})
+        except Exception as e:
+            resultado.append({"projeto": projeto["name"], "estado": f"falhou: {e}"})
+    return resultado
+
+@app.post("/basecamp/webhook")
+async def receber_webhook_basecamp(request: Request, chave: str = ""):
+    """Recebe eventos do Basecamp (comentário/tarefa/card criado ou atualizado).
+    Responde já com 200 e processa em segundo plano — o Basecamp espera uma
+    resposta rápida, e ler o contexto + gerar a resposta pode demorar alguns
+    segundos."""
+    if chave != os.environ.get("BASECAMP_WEBHOOK_SECRET"):
+        raise HTTPException(status_code=403, detail="chave inválida")
+    payload = await request.json()
+    threading.Thread(target=responder_basecamp.processar_evento_webhook, args=(payload,), daemon=True).start()
+    return {"ok": True}
 
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
