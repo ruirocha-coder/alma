@@ -109,6 +109,14 @@ def comentar(recording_id: int, texto: str):
     r.raise_for_status()
     return r.json()
 
+def obter_recording(url: str) -> dict:
+    """Vai buscar a representação completa e atual de um registo (comentário,
+    tarefa, card, ...) pelo seu próprio URL da API — útil quando o payload de
+    um webhook vem mais resumido do que o pedido direto."""
+    r = httpx.get(url, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 def meu_perfil() -> dict:
     """A própria conta Alma no Basecamp (id, nome) — para nunca reagir aos seus próprios comentários."""
     if "meu_perfil" in _cache:
