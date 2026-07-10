@@ -3,7 +3,7 @@
 # Ao contrário do BigCommerce, o Basecamp não usa um token fixo: o access_token
 # expira ao fim de ~2 semanas. Guardamos aqui só o refresh_token (não expira) e
 # trocamo-lo por um access_token novo sempre que necessário, em memória.
-import os, time
+import os, re, time
 from datetime import date
 import httpx
 
@@ -102,10 +102,99 @@ def ler_comentarios(comments_url: str) -> list[dict]:
     return [{"autor": (c.get("creator") or {}).get("name"), "conteudo": c.get("content"),
              "criado_em": c.get("created_at")} for c in comentarios]
 
+def _escapar_html(texto: str) -> str:
+    return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def _markdown_para_basecamp(bruto: str) -> str:
+    """Converte o markdown simples que a Alma escreve (negrito, itálico, títulos,
+    listas, links, código) para HTML — os comentários do Basecamp são HTML puro,
+    por isso markdown sem converter aparece tal e qual (asteriscos, cardinais, ...)
+    em vez de formatado."""
+    blocos_codigo = []
+
+    def _guardar_bloco(m):
+        blocos_codigo.append(f"<pre>{_escapar_html(m.group(1).rstrip(chr(10)))}</pre>")
+        return f"@@CODEBLOCK{len(blocos_codigo) - 1}@@"
+
+    texto = re.sub(r"```[a-zA-Z0-9]*\n?([\s\S]*?)```", _guardar_bloco, bruto)
+    texto = _escapar_html(texto)
+
+    texto = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", texto)
+    texto = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", r'<a href="\2">\1</a>', texto)
+    texto = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", texto)
+    texto = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", texto)
+    texto = re.sub(r"(^|[^*])\*([^*\n]+)\*(?!\*)", r"\1<em>\2</em>", texto)
+    texto = re.sub(r"(^|[^_])_([^_\n]+)_(?!_)", r"\1<em>\2</em>", texto)
+
+    partes = []
+    paragrafo = []
+    em_ul = em_ol = False
+
+    def fechar_paragrafo():
+        nonlocal paragrafo
+        if paragrafo:
+            partes.append(f"<p>{'<br>'.join(paragrafo)}</p>")
+            paragrafo = []
+
+    def fechar_listas():
+        nonlocal em_ul, em_ol
+        if em_ul:
+            partes.append("</ul>")
+            em_ul = False
+        if em_ol:
+            partes.append("</ol>")
+            em_ol = False
+
+    for linha in texto.split("\n"):
+        aparada = linha.strip()
+        bloco_codigo = re.match(r"^@@CODEBLOCK(\d+)@@$", aparada)
+        titulo = re.match(r"^(#{1,3})\s+(.*)", aparada)
+        item_ul = re.match(r"^[-*]\s+(.*)", aparada)
+        item_ol = re.match(r"^\d+\.\s+(.*)", aparada)
+
+        if not aparada:
+            fechar_paragrafo()
+            fechar_listas()
+        elif bloco_codigo:
+            fechar_paragrafo()
+            fechar_listas()
+            partes.append(blocos_codigo[int(bloco_codigo.group(1))])
+        elif titulo:
+            fechar_paragrafo()
+            fechar_listas()
+            # o editor do Basecamp só tem um nível de título — todos os
+            # níveis de markdown (#, ##, ###) mapeiam para o mesmo <h1>
+            partes.append(f"<h1>{titulo.group(2)}</h1>")
+        elif item_ul:
+            fechar_paragrafo()
+            if em_ol:
+                partes.append("</ol>")
+                em_ol = False
+            if not em_ul:
+                partes.append("<ul>")
+                em_ul = True
+            partes.append(f"<li>{item_ul.group(1)}</li>")
+        elif item_ol:
+            fechar_paragrafo()
+            if em_ul:
+                partes.append("</ul>")
+                em_ul = False
+            if not em_ol:
+                partes.append("<ol>")
+                em_ol = True
+            partes.append(f"<li>{item_ol.group(1)}</li>")
+        else:
+            fechar_listas()
+            paragrafo.append(linha)
+
+    fechar_paragrafo()
+    fechar_listas()
+    return "".join(partes)
+
 def comentar(recording_id: int, texto: str):
     """Publica um comentário numa tarefa/card. Única ação de escrita desta integração."""
     r = httpx.post(f"{_base_url()}/recordings/{recording_id}/comments.json",
-                   headers=_headers(), json={"content": texto}, timeout=30)
+                   headers=_headers(), json={"content": _markdown_para_basecamp(texto)}, timeout=30)
     r.raise_for_status()
     return r.json()
 
