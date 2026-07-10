@@ -192,9 +192,24 @@ def _markdown_para_basecamp(bruto: str) -> str:
     return "".join(partes)
 
 def comentar(recording_id: int, texto: str):
-    """Publica um comentário numa tarefa/card. Única ação de escrita desta integração."""
+    """Publica um comentário numa tarefa/card."""
     r = httpx.post(f"{_base_url()}/recordings/{recording_id}/comments.json",
                    headers=_headers(), json={"content": _markdown_para_basecamp(texto)}, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+# Mural (Message Board) do projeto "Gestão" — toda a equipa está lá, por isso
+# serve como mural único para publicações da Alma, mesmo havendo um Mural por
+# projeto no Basecamp.
+MURAL_BUCKET_ID = 603157
+MURAL_BOARD_ID = 85747247
+
+def publicar_mural(assunto: str, mensagem: str):
+    """Publica uma mensagem no Mural (visível a toda a equipa)."""
+    r = httpx.post(f"{_base_url()}/buckets/{MURAL_BUCKET_ID}/message_boards/{MURAL_BOARD_ID}/messages.json",
+                   headers=_headers(),
+                   json={"subject": assunto, "content": _markdown_para_basecamp(mensagem), "status": "active"},
+                   timeout=30)
     r.raise_for_status()
     return r.json()
 
