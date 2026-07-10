@@ -1,0 +1,118 @@
+# tools/documentos_empresa.py — Documentos e Ficheiros do Basecamp, espalhados
+# por vários projetos, como base de conhecimento da empresa para a Alma consultar.
+#
+# Usa o endpoint global de recordings (o mesmo que tarefas_e_cards_atrasados já
+# usa para Todos e Cards) filtrado por type=Document e type=Upload — dá acesso a
+# tudo o que a conta da Alma já vê em qualquer projeto, sem ter de percorrer as
+# pastas (Vaults) de cada projeto uma a uma.
+import io, time
+from bs4 import BeautifulSoup
+from pypdf import PdfReader
+from docx import Document as DocxDocument
+from tools import basecamp
+
+_cache = {}  # {"lista": (timestamp, lista)}
+TTL = 900  # segundos — documentos de empresa não mudam a cada minuto
+
+TIPOS_DE_FICHEIRO_LEGIVEIS = {
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+def _texto_simples(html: str) -> str:
+    if not html:
+        return ""
+    return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+
+def _listar_bruto() -> list[dict]:
+    if "lista" in _cache:
+        ts, lista = _cache["lista"]
+        if time.time() - ts < TTL:
+            return lista
+    itens = []
+    for tipo in ("Document", "Upload"):
+        registos = basecamp._get_paginado(
+            f"{basecamp._base_url()}/projects/recordings.json",
+            params={"type": tipo, "status": "active"}, etiqueta=tipo)
+        for r in registos:
+            itens.append({
+                "id": r["id"],
+                "tipo": "documento" if tipo == "Document" else "ficheiro",
+                "titulo": r.get("title") or r.get("filename") or "(sem título)",
+                "projeto": (r.get("bucket") or {}).get("name"),
+                "pasta": (r.get("parent") or {}).get("title"),
+                "url": r["url"],
+                "app_url": r.get("app_url"),
+                "content_type": r.get("content_type"),
+                "filename": r.get("filename"),
+                "download_url": r.get("download_url"),
+            })
+    _cache["lista"] = (time.time(), itens)
+    return itens
+
+def procurar_documentos_empresa(pesquisa: str) -> list[dict]:
+    """Procura documentos e ficheiros da empresa no Basecamp (id, título, projeto, pasta),
+    em todos os projetos onde a Alma tem acesso. Filtra por título, projeto ou pasta
+    conterem o termo indicado — há mais de mil documentos no total, por isso listar tudo
+    de uma vez não é prático; usa um termo relacionado com o que procuras (ex: nome do
+    documento, do projeto ou do tema). Devolve no máximo 40 resultados."""
+    termo = pesquisa.lower().strip()
+    correspondem = [
+        item for item in _listar_bruto()
+        if termo in item["titulo"].lower()
+        or termo in (item.get("projeto") or "").lower()
+        or termo in (item.get("pasta") or "").lower()
+    ]
+    return [{k: v for k, v in item.items() if k in ("id", "tipo", "titulo", "projeto", "pasta")}
+            for item in correspondem[:40]]
+
+def ler_documento_empresa(id: int) -> dict:
+    """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
+    (de listar_documentos_empresa). Suporta documentos nativos do Basecamp,
+    PDF, Word (.docx), texto simples e CSV."""
+    item = next((i for i in _listar_bruto() if i["id"] == id), None)
+    if not item:
+        return {"erro": "documento não encontrado — confirma o id com procurar_documentos_empresa"}
+
+    if item["tipo"] == "documento":
+        completo = basecamp.obter_recording(item["url"])
+        return {"titulo": item["titulo"], "conteudo": _texto_simples(completo.get("content", ""))[:6000]}
+
+    ctype = item.get("content_type") or ""
+    if ctype not in TIPOS_DE_FICHEIRO_LEGIVEIS:
+        return {"erro": f"não consigo ler o conteúdo deste tipo de ficheiro ({ctype or item.get('filename')})",
+                "titulo": item["titulo"], "app_url": item.get("app_url")}
+
+    bruto = basecamp._get_bytes(item["download_url"])
+    if ctype == "application/pdf":
+        leitor = PdfReader(io.BytesIO(bruto))
+        texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
+    elif ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = DocxDocument(io.BytesIO(bruto))
+        texto = "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
+    else:  # text/plain, text/csv
+        texto = bruto.decode("utf-8", errors="ignore")
+    return {"titulo": item["titulo"], "conteudo": texto[:6000]}
+
+TOOLS_DOCUMENTOS_EMPRESA = [
+    {
+        "name": "procurar_documentos_empresa",
+        "description": "Procura documentos e ficheiros da empresa guardados no Basecamp, em todos os projetos (id, tipo, título, projeto, pasta), por um termo no título/projeto/pasta. Usa isto para descobrir que documentos existem antes de leres um com ler_documento_empresa.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"pesquisa": {"type": "string"}},
+            "required": ["pesquisa"]
+        }
+    },
+    {
+        "name": "ler_documento_empresa",
+        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF, Word (.docx), texto simples e CSV — outros formatos (imagens, folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"]
+        }
+    }
+]
