@@ -1,12 +1,14 @@
 import anthropic, json
-from tools import bigcommerce, site, documentos_empresa, basecamp
+from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp
 import db
 
 client = anthropic.Anthropic()
 
 # Tools que qualquer agente pode incluir — quem adicionar um agente novo só
 # precisa de fazer TOOLS_X = TOOLS_COMUNS + [tools específicas do agente].
-TOOLS_COMUNS = bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
+TOOLS_COMUNS = (bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE
+                + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
+                + documentos_referencia.TOOLS_DOCUMENTOS_REFERENCIA)
 
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
@@ -17,6 +19,7 @@ FUNCOES = {
     "ler_pagina_site": site.ler_pagina_site,
     "procurar_documentos_empresa": documentos_empresa.procurar_documentos_empresa,
     "ler_documento_empresa": documentos_empresa.ler_documento_empresa,
+    "documentos_referencia_empresa": documentos_referencia.documentos_referencia_empresa,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
