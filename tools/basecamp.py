@@ -4,13 +4,19 @@
 # expira ao fim de ~2 semanas. Guardamos aqui só o refresh_token (não expira) e
 # trocamo-lo por um access_token novo sempre que necessário, em memória.
 import os, re, time
-from datetime import date
+from datetime import date, datetime, timezone
 import httpx
 from bs4 import BeautifulSoup
 
 _cache = {}  # {chave: (timestamp, valor)}
 TOKEN_URL = "https://launchpad.37signals.com/authorization/token"
 TIPOS_MONITORIZADOS = ("Todo", "Kanban::Card")
+TTL_ITENS_ATIVOS = 900  # segundos — 15 min chega para pedidos em cadeia (ex: resumo de projeto)
+
+# colunas do Kanban que representam um estado terminal/fechado do fluxo (não
+# trabalho esquecido) — um card parado aqui é esperado, não é sinal de nada.
+COLUNAS_TERMINAIS = {"perdido", "perdidos", "vendido", "vendidos", "done",
+                     "concluído", "concluido", "arquivo", "arquivado", "cancelado"}
 
 def _base_url():
     return f"https://3.basecampapi.com/{os.environ['BASECAMP_ACCOUNT_ID']}"
@@ -72,40 +78,114 @@ def _texto_simples(html: str) -> str:
         return ""
     return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
 
+def _itens_ativos() -> list[dict]:
+    """Todas as tarefas (to-dos) e cards ativos e não concluídos, de todos os
+    projetos — cacheado, porque várias funções (atrasos, cards parados, estado
+    de projeto) partem dos mesmos dados e a conta tem milhares de itens em
+    aberto (percorrê-los pode demorar minutos)."""
+    if "itens_ativos" in _cache:
+        ts, itens = _cache["itens_ativos"]
+        if time.time() - ts < TTL_ITENS_ATIVOS:
+            return itens
+    itens = []
+    for tipo in TIPOS_MONITORIZADOS:
+        # completed=false evita percorrer todo o histórico de tarefas já
+        # concluídas — só traz o que ainda está em aberto.
+        encontrados = _get_paginado(f"{_base_url()}/projects/recordings.json",
+                                    params={"type": tipo, "status": "active", "completed": "false"},
+                                    etiqueta=tipo)
+        print(f"[basecamp] {tipo}: {len(encontrados)} em aberto")
+        itens.extend(encontrados)
+    _cache["itens_ativos"] = (time.time(), itens)
+    return itens
+
+def _formatar_item(item: dict) -> dict:
+    return {
+        "id": item["id"],
+        "tipo": "tarefa" if item.get("type") == "Todo" else "card",
+        "titulo": item.get("title") or item.get("content") or "(sem título)",
+        "notas": _texto_simples(item.get("description", "")),
+        # coluna do Kanban (estado do card) ou lista de tarefas (para Todos)
+        # — dá contexto de onde o item está no fluxo de trabalho
+        "estado": (item.get("parent") or {}).get("title"),
+        "responsaveis": [p["name"] for p in item.get("assignees", [])],
+        "projeto": (item.get("bucket") or {}).get("name"),
+        "prazo": item.get("due_on"),
+        "url": item.get("app_url"),
+        "comments_count": item.get("comments_count", 0),
+        "comments_url": item.get("comments_url"),
+    }
+
 def tarefas_e_cards_atrasados() -> list[dict]:
     """Tarefas (to-dos) e cards, de todos os projetos, com prazo ultrapassado e não concluídos."""
     hoje = date.today()
     atrasados = []
-    for tipo in TIPOS_MONITORIZADOS:
-        # completed=false evita percorrer todo o histórico de tarefas já
-        # concluídas — só traz o que ainda está em aberto.
-        itens = _get_paginado(f"{_base_url()}/projects/recordings.json",
-                              params={"type": tipo, "status": "active", "completed": "false"},
-                              etiqueta=tipo)
-        print(f"[basecamp] {tipo}: {len(itens)} em aberto, a filtrar por prazo...")
-        for item in itens:
-            prazo = item.get("due_on")
-            if not prazo or item.get("completed"):
-                continue
-            if date.fromisoformat(prazo) >= hoje:
-                continue
-            atrasados.append({
-                "id": item["id"],
-                "tipo": "tarefa" if tipo == "Todo" else "card",
-                "titulo": item.get("title") or item.get("content") or "(sem título)",
-                "notas": _texto_simples(item.get("description", "")),
-                # coluna do Kanban (estado do card) ou lista de tarefas (para
-                # Todos) — dá contexto de onde o item está no fluxo de trabalho
-                "estado": (item.get("parent") or {}).get("title"),
-                "responsaveis": [p["name"] for p in item.get("assignees", [])],
-                "projeto": (item.get("bucket") or {}).get("name"),
-                "prazo": prazo,
-                "dias_atraso": (hoje - date.fromisoformat(prazo)).days,
-                "url": item.get("app_url"),
-                "comments_count": item.get("comments_count", 0),
-                "comments_url": item.get("comments_url"),
-            })
+    for item in _itens_ativos():
+        prazo = item.get("due_on")
+        if not prazo or item.get("completed"):
+            continue
+        if date.fromisoformat(prazo) >= hoje:
+            continue
+        formatado = _formatar_item(item)
+        formatado["dias_atraso"] = (hoje - date.fromisoformat(prazo)).days
+        atrasados.append(formatado)
     return atrasados
+
+def cards_parados_sem_prazo(dias_sem_atividade: int = 14) -> list[dict]:
+    """Cards do Kanban sem prazo definido e sem atividade há mais de X dias —
+    não aparecem em tarefas_e_cards_atrasados (não têm due_on), mas podem
+    estar igualmente esquecidos. Ignora colunas de estado terminal/fechado
+    (ex: Perdido, Vendido, Done) onde um card parado é esperado, não um
+    sinal de negligência."""
+    agora = datetime.now(timezone.utc)
+    parados = []
+    for item in _itens_ativos():
+        if item.get("type") != "Kanban::Card" or item.get("due_on") or item.get("completed"):
+            continue
+        estado = ((item.get("parent") or {}).get("title") or "").strip().lower()
+        if estado in COLUNAS_TERMINAIS:
+            continue
+        atualizado_em = item.get("updated_at")
+        if not atualizado_em:
+            continue
+        dias = (agora - datetime.fromisoformat(atualizado_em.replace("Z", "+00:00"))).days
+        if dias < dias_sem_atividade:
+            continue
+        formatado = _formatar_item(item)
+        formatado["dias_parado"] = dias
+        parados.append(formatado)
+    return parados
+
+def estado_projeto_basecamp(projeto: str) -> dict:
+    """Panorama de um projeto do Basecamp: tarefas/cards ativos agrupados por
+    estado/coluna, com contagens de atraso e cards parados sem prazo. `projeto`
+    é um termo de pesquisa pelo nome (não precisa de ser exato)."""
+    termo = projeto.lower().strip()
+    itens = [i for i in _itens_ativos() if termo in ((i.get("bucket") or {}).get("name") or "").lower()]
+    if not itens:
+        return {"erro": f"nenhum item ativo encontrado para um projeto que corresponda a {projeto!r}"}
+
+    hoje = date.today()
+    por_estado = {}
+    atrasados = []
+    for item in itens:
+        estado = (item.get("parent") or {}).get("title") or "(sem estado)"
+        por_estado[estado] = por_estado.get(estado, 0) + 1
+        prazo = item.get("due_on")
+        if prazo and not item.get("completed") and date.fromisoformat(prazo) < hoje:
+            formatado = _formatar_item(item)
+            formatado["dias_atraso"] = (hoje - date.fromisoformat(prazo)).days
+            atrasados.append(formatado)
+
+    parados = [p for p in cards_parados_sem_prazo() if p["projeto"] == itens[0]["bucket"]["name"]]
+
+    return {
+        "projeto": itens[0]["bucket"]["name"],
+        "total_ativos": len(itens),
+        "por_estado": por_estado,
+        "atrasados": sorted(atrasados, key=lambda i: -i["dias_atraso"])[:30],
+        "cards_parados_sem_prazo": sorted(parados, key=lambda i: -i["dias_parado"])[:30],
+    }
 
 def ler_comentarios(comments_url: str) -> list[dict]:
     """Lê os comentários já existentes numa tarefa/card (comments_url vem de tarefas_e_cards_atrasados)."""
@@ -262,3 +342,15 @@ def criar_webhook(bucket_id: int, payload_url: str, tipos: list[str] = None):
                    headers=_headers(), json=corpo, timeout=30)
     r.raise_for_status()
     return r.json()
+
+TOOLS_ESTADO_PROJETO = [
+    {
+        "name": "estado_projeto_basecamp",
+        "description": "Dá um panorama de um projeto do Basecamp: quantas tarefas/cards ativos existem por estado/coluna, quais estão atrasados e quais são cards do Kanban sem prazo parados há semanas (ignorando colunas de estado fechado como Perdido/Vendido/Done). Usa isto quando alguém perguntar como está um projeto ou pedir um resumo de atividade. `projeto` é um termo de pesquisa pelo nome (não precisa de ser exato).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"projeto": {"type": "string"}},
+            "required": ["projeto"]
+        }
+    }
+]
