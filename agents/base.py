@@ -57,7 +57,7 @@ TOOLS_MEMORIA = [
 TOOLS_MURAL = [
     {
         "name": "publicar_mural",
-        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. Na consola de chat qualquer pessoa pode pedir. Vindo de uma menção no Basecamp, só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente — qualquer outra pessoa a pedir isso a partir do Basecamp, recusa e explica que só eles podem pedir por ali.",
+        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. USA ISTO SÓ quando o pedido for estrita e explicitamente para publicares no mural (ex: \"publica isto no mural\") — nunca por iniciativa própria, por achares um assunto importante, ou como forma de responder a uma pergunta geral. Qualquer outra situação (incluindo responder a uma menção numa tarefa/card) é sempre um comentário normal, nunca isto. Na consola de chat qualquer pessoa pode pedir. Vindo de uma menção no Basecamp, só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente — qualquer outra pessoa a pedir isso a partir do Basecamp, recusa e explica que só eles podem pedir por ali.",
         "input_schema": {
             "type": "object",
             "properties": {"assunto": {"type": "string"}, "mensagem": {"type": "string"}},
