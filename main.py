@@ -3,7 +3,7 @@ load_dotenv()
 
 import os
 import threading
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -11,7 +11,7 @@ from orchestrator import encaminhar, AGENTES
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
-from tools import basecamp
+from tools import basecamp, ficheiros
 from db import inicializar_schema
 inicializar_schema()
 
@@ -29,25 +29,51 @@ class Pedido(BaseModel):
     sessao: str
     mensagem: str
 
-@app.post("/alma")
-def alma(p: Pedido):
-    mensagens = historico_sessao(p.sessao, p.utilizador)   # memória por utilizador
-    mensagens.append({"role": "user", "content": p.mensagem})
+def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None):
+    """Núcleo partilhado por /alma e /alma/ficheiro: o que é enviado ao agente
+    (mensagem_agente) pode ser maior do que o que fica guardado no histórico
+    (mensagem_visivel) — ex: um ficheiro anexado não deve inchar todas as
+    chamadas futuras à API com o texto extraído inteiro outra vez."""
+    mensagens = historico_sessao(sessao, utilizador)   # memória por utilizador
+    mensagens.append({"role": "user", "content": mensagem_agente})
 
     try:
-        if not perfil_existe(p.utilizador):
-            resposta = acolhimento.responder(p.utilizador, mensagens)
+        if not perfil_existe(utilizador):
+            resposta = acolhimento.responder(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(p.mensagem)
-            log_routing(p.mensagem, agente)
-            resposta = AGENTES[agente](p.utilizador, mensagens)
+            agente = encaminhar(mensagem_agente[:500])
+            log_routing(mensagem_agente[:500], agente)
+            resposta = AGENTES[agente](utilizador, mensagens)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao obter resposta do agente: {e}")
 
-    guardar_mensagem(p.utilizador, p.sessao, "user", p.mensagem)
-    guardar_mensagem(p.utilizador, p.sessao, "assistant", resposta, agente)
+    guardar_mensagem(utilizador, sessao, "user", mensagem_visivel or mensagem_agente)
+    guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
     return {"resposta": resposta}                    # o agente nunca é exposto
+
+@app.post("/alma")
+def alma(p: Pedido):
+    return _responder_e_guardar(p.utilizador, p.sessao, p.mensagem)
+
+@app.post("/alma/ficheiro")
+async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
+                            mensagem: str = Form(""), ficheiro: UploadFile = File(...)):
+    """Recebe um ficheiro anexado na consola de chat (PDF, Word, imagem, texto)
+    e responde com o seu conteúdo já disponível ao agente."""
+    bruto = await ficheiro.read()
+    if len(bruto) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Ficheiro demasiado grande (máx. 15 MB)")
+
+    texto = ficheiros.extrair_texto(bruto, ficheiro.content_type, ficheiro.filename)
+    if texto is None:
+        raise HTTPException(status_code=415,
+                            detail=f"Não consigo ler ficheiros do tipo {ficheiro.content_type or '(desconhecido)'}")
+
+    mensagem_visivel = f"📎 {ficheiro.filename}" + (f"\n{mensagem}" if mensagem else "")
+    mensagem_agente = (f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}\n\n'
+                       f'{mensagem or "O que achas deste ficheiro?"}')
+    return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel)
 
 @app.get("/health")
 def health():

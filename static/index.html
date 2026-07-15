@@ -384,6 +384,36 @@
     color: var(--text-dim);
     margin-top: 8px;
   }
+  .icon-btn-composer {
+    background: transparent !important;
+    color: var(--text-dim) !important;
+    width: 30px !important;
+    height: 34px !important;
+    font-size: 17px !important;
+  }
+  .icon-btn-composer:hover { color: var(--text) !important; }
+  .anexo-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text);
+    max-width: fit-content;
+  }
+  .anexo-chip button {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+  }
+  .anexo-chip button:hover { color: var(--text); }
 </style>
 </head>
 <body>
@@ -419,7 +449,13 @@
       </div>
       <div id="composer">
         <div class="composer-inner">
+          <div id="anexo-chip" class="anexo-chip" hidden>
+            <span id="anexo-nome"></span>
+            <button id="anexo-remover" type="button" aria-label="Remover anexo">✕</button>
+          </div>
           <form id="form">
+            <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
+            <input id="ficheiro-input" type="file" hidden accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
           </form>
@@ -451,6 +487,12 @@
   const menuToggle = document.getElementById("menu-toggle");
   const newChatBtn = document.getElementById("new-chat");
   const sessionsList = document.getElementById("sessions-list");
+  const anexarBtn = document.getElementById("anexar");
+  const ficheiroInput = document.getElementById("ficheiro-input");
+  const anexoChip = document.getElementById("anexo-chip");
+  const anexoNome = document.getElementById("anexo-nome");
+  const anexoRemover = document.getElementById("anexo-remover");
+  let ficheiroAnexado = null;
 
   function scrollToBottom() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
@@ -728,24 +770,59 @@
     }
   });
 
+  anexarBtn.addEventListener("click", () => ficheiroInput.click());
+
+  ficheiroInput.addEventListener("change", () => {
+    const ficheiro = ficheiroInput.files[0];
+    if (!ficheiro) return;
+    if (ficheiro.size > 15 * 1024 * 1024) {
+      addMessage("error", "Ficheiro demasiado grande (máx. 15 MB).");
+      ficheiroInput.value = "";
+      return;
+    }
+    ficheiroAnexado = ficheiro;
+    anexoNome.textContent = "📎 " + ficheiro.name;
+    anexoChip.hidden = false;
+  });
+
+  function limparAnexo() {
+    ficheiroAnexado = null;
+    ficheiroInput.value = "";
+    anexoChip.hidden = true;
+  }
+  anexoRemover.addEventListener("click", limparAnexo);
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const mensagem = input.value.trim();
-    if (!mensagem) return;
+    const ficheiro = ficheiroAnexado;
+    if (!mensagem && !ficheiro) return;
 
-    addMessage("user", mensagem);
+    addMessage("user", (ficheiro ? `📎 ${ficheiro.name}\n` : "") + mensagem);
     input.value = "";
     input.style.height = "auto";
+    limparAnexo();
     input.disabled = true;
     sendBtn.disabled = true;
+    anexarBtn.disabled = true;
     addTyping();
 
     try {
-      const resp = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utilizador: UTILIZADOR, sessao, mensagem })
-      });
+      let resp;
+      if (ficheiro) {
+        const dados = new FormData();
+        dados.append("utilizador", UTILIZADOR);
+        dados.append("sessao", sessao);
+        dados.append("mensagem", mensagem);
+        dados.append("ficheiro", ficheiro);
+        resp = await fetch("/alma/ficheiro", { method: "POST", body: dados });
+      } else {
+        resp = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ utilizador: UTILIZADOR, sessao, mensagem })
+        });
+      }
 
       removeTyping();
 
@@ -767,6 +844,7 @@
     } finally {
       input.disabled = false;
       sendBtn.disabled = false;
+      anexarBtn.disabled = false;
       input.focus();
     }
   });
