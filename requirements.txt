@@ -10,3 +10,4 @@ pypdf
 python-docx
 pymupdf
 Pillow
+python-multipart
