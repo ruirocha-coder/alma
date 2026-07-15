@@ -94,6 +94,10 @@ def tarefas_e_cards_atrasados() -> list[dict]:
                 "tipo": "tarefa" if tipo == "Todo" else "card",
                 "titulo": item.get("title") or item.get("content") or "(sem título)",
                 "notas": _texto_simples(item.get("description", "")),
+                # coluna do Kanban (estado do card) ou lista de tarefas (para
+                # Todos) — dá contexto de onde o item está no fluxo de trabalho
+                "estado": (item.get("parent") or {}).get("title"),
+                "responsaveis": [p["name"] for p in item.get("assignees", [])],
                 "projeto": (item.get("bucket") or {}).get("name"),
                 "prazo": prazo,
                 "dias_atraso": (hoje - date.fromisoformat(prazo)).days,
