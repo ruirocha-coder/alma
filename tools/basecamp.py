@@ -6,6 +6,7 @@
 import os, re, time
 from datetime import date
 import httpx
+from bs4 import BeautifulSoup
 
 _cache = {}  # {chave: (timestamp, valor)}
 TOKEN_URL = "https://launchpad.37signals.com/authorization/token"
@@ -66,6 +67,11 @@ def _get_paginado(url: str, params: dict = None, etiqueta: str = "") -> list:
         params = None  # já incluído no url de "next"
     return itens
 
+def _texto_simples(html: str) -> str:
+    if not html:
+        return ""
+    return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+
 def tarefas_e_cards_atrasados() -> list[dict]:
     """Tarefas (to-dos) e cards, de todos os projetos, com prazo ultrapassado e não concluídos."""
     hoje = date.today()
@@ -87,6 +93,7 @@ def tarefas_e_cards_atrasados() -> list[dict]:
                 "id": item["id"],
                 "tipo": "tarefa" if tipo == "Todo" else "card",
                 "titulo": item.get("title") or item.get("content") or "(sem título)",
+                "notas": _texto_simples(item.get("description", "")),
                 "projeto": (item.get("bucket") or {}).get("name"),
                 "prazo": prazo,
                 "dias_atraso": (hoje - date.fromisoformat(prazo)).days,

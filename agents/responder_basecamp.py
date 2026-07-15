@@ -89,12 +89,25 @@ def _processar(payload: dict):
         print(f"[responder_basecamp] ignorado: evento {evento_id} já processado")
         return
 
+    # quando a menção vem de um comentário, "alvo" é só a referência resumida
+    # ao pai (id/título/tipo/url) — não tem as notas da tarefa/card. Vai
+    # sempre buscar o registo completo do alvo antes de escrever o contexto,
+    # exceto quando já o temos (menção dentro do próprio card/tarefa).
+    alvo_completo = alvo
+    if "description" not in alvo and alvo.get("url"):
+        try:
+            alvo_completo = basecamp.obter_recording(alvo["url"])
+        except Exception as e:
+            print(f"[responder_basecamp] não consegui reobter as notas do alvo: {e!r}")
+
     comentarios = basecamp.ler_comentarios(f"{basecamp._base_url()}/recordings/{alvo_id}/comments.json")
-    titulo = alvo.get("title") or "(sem título)"
+    titulo = alvo_completo.get("title") or alvo.get("title") or "(sem título)"
+    notas = _texto_simples(alvo_completo.get("description", ""))
     historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
 
-Conteúdo/descrição: {_texto_simples(alvo.get('content', ''))}
+Notas da tarefa/card:
+{notas or "(sem notas)"}
 
 Conversa/comentários existentes:
 {historico}"""
