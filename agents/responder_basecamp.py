@@ -103,8 +103,12 @@ def _processar(payload: dict):
     comentarios = basecamp.ler_comentarios(f"{basecamp._base_url()}/recordings/{alvo_id}/comments.json")
     titulo = alvo_completo.get("title") or alvo.get("title") or "(sem título)"
     notas = _texto_simples(alvo_completo.get("description", ""))
+    estado = (alvo_completo.get("parent") or {}).get("title") or "(sem estado)"
+    responsaveis = ", ".join(p["name"] for p in alvo_completo.get("assignees", [])) or "(sem responsável atribuído)"
     historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
+Estado/coluna: {estado}
+Responsáveis: {responsaveis}
 
 Notas da tarefa/card:
 {notas or "(sem notas)"}
