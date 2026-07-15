@@ -48,14 +48,16 @@ TOOLS_MEMORIA = [
     }
 ]
 
-# Publicar no Mural: disponível a qualquer agente, tal como a memória, mas só
-# executa de facto se quem pedir for uma das pessoas autorizadas — a
-# verificação usa o nome do utilizador (do perfil da consola ou do nome real
-# no Basecamp), não há outra forma de identificar quem está a pedir.
+# Publicar no Mural: disponível a qualquer agente, tal como a memória. Na
+# consola de chat qualquer utilizador pode pedir — quem lá está já é alguém
+# de confiança da equipa. Vindo do Basecamp (onde qualquer pessoa com acesso
+# a um projeto pode comentar/mencionar) mantém-se restrito ao Rui, à Beatriz
+# ou à Isa; o responder_basecamp identifica a origem acrescentando
+# " (Basecamp)" ao nome do utilizador.
 TOOLS_MURAL = [
     {
         "name": "publicar_mural",
-        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. Só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente uma publicação no mural — qualquer outra pessoa que peça isto, recusa e explica que só eles podem pedir.",
+        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. Na consola de chat qualquer pessoa pode pedir. Vindo de uma menção no Basecamp, só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente — qualquer outra pessoa a pedir isso a partir do Basecamp, recusa e explica que só eles podem pedir por ali.",
         "input_schema": {
             "type": "object",
             "properties": {"assunto": {"type": "string"}, "mensagem": {"type": "string"}},
@@ -67,8 +69,9 @@ TOOLS_MURAL = [
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
 def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str):
-    if not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
-        return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural"}
+    veio_do_basecamp = utilizador.strip().endswith("(Basecamp)")
+    if veio_do_basecamp and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
+        return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
     return basecamp.publicar_mural(assunto, mensagem)
 
 def correr_agente(system_prompt: str, tools: list, mensagens: list,
