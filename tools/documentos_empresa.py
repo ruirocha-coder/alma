@@ -9,7 +9,7 @@ import io, time
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from tools import basecamp
+from tools import basecamp, visao
 
 _cache = {}  # {"lista": (timestamp, lista)}
 TTL = 900  # segundos — documentos de empresa não mudam a cada minuto
@@ -81,6 +81,11 @@ def ler_documento_empresa(id: int) -> dict:
         return {"titulo": item["titulo"], "conteudo": _texto_simples(completo.get("content", ""))[:6000]}
 
     ctype = item.get("content_type") or ""
+
+    if ctype in visao.TIPOS_DE_IMAGEM:
+        bruto = basecamp._get_bytes(item["download_url"])
+        return {"titulo": item["titulo"], "conteudo": visao.descrever_imagem(bruto, ctype)}
+
     if ctype not in TIPOS_DE_FICHEIRO_LEGIVEIS:
         return {"erro": f"não consigo ler o conteúdo deste tipo de ficheiro ({ctype or item.get('filename')})",
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
@@ -89,6 +94,13 @@ def ler_documento_empresa(id: int) -> dict:
     if ctype == "application/pdf":
         leitor = PdfReader(io.BytesIO(bruto))
         texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
+        if not texto:
+            # sem texto extraível — provavelmente um PDF só de design/imagem;
+            # tenta ler a primeira página como imagem antes de desistir.
+            try:
+                texto = visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
+            except Exception as e:
+                texto = f"(não consegui extrair texto nem imagem deste PDF: {e})"
     elif ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         doc = DocxDocument(io.BytesIO(bruto))
         texto = "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
@@ -108,7 +120,7 @@ TOOLS_DOCUMENTOS_EMPRESA = [
     },
     {
         "name": "ler_documento_empresa",
-        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF, Word (.docx), texto simples e CSV — outros formatos (imagens, folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
+        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF (mesmo quando o PDF é só design/imagem sem texto), Word (.docx), imagens (JPG, PNG, GIF, WebP — descritas/transcritas por visão), texto simples e CSV — outros formatos (folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "integer"}},

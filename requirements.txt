@@ -8,3 +8,5 @@ beautifulsoup4
 apscheduler
 pypdf
 python-docx
+pymupdf
+Pillow

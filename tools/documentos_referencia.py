@@ -10,14 +10,19 @@ import io, os, time
 import httpx
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
-from tools import basecamp, procedimentos
+from tools import basecamp, procedimentos, visao
 
 _cache = {}  # {"conteudo": (timestamp, dict)}
 TTL = 3600  # segundos
 
 def _extrair_pdf(bruto: bytes) -> str:
     leitor = PdfReader(io.BytesIO(bruto))
-    return "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
+    texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
+    if texto:
+        return texto
+    # sem texto extraível — provavelmente um PDF só de design/imagem; tenta
+    # ler a primeira página como imagem antes de desistir.
+    return visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
 
 def _texto_simples(html: str) -> str:
     if not html:
