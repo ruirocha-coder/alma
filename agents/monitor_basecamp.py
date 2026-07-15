@@ -23,6 +23,9 @@ sentido, uma sugestão relacionada com os procedimentos da empresa.
 Regras deste comentário:
 - Curto (3 a 5 linhas), tom calmo e construtivo — nunca acusatório.
 - Refere quantos dias de atraso tem.
+- Lê sempre as notas da tarefa/card — costumam ter contexto essencial
+  (quem é responsável, o que falta, condições combinadas) que muda o que
+  faz sentido dizer.
 - Se os comentários já existentes explicarem o atraso (ex: à espera de
   aprovação, cliente não respondeu), reconhece isso em vez de repetir o óbvio.
 - Se os procedimentos da empresa (abaixo, quando disponíveis) forem
@@ -45,6 +48,9 @@ def _gerar_comentario(item: dict, comentarios: list, procedimentos_texto: str) -
 Projeto: {item['projeto']}
 Tipo: {item['tipo']}
 Prazo: {item['prazo']} ({item['dias_atraso']} dias de atraso)
+
+Notas da tarefa/card:
+{item.get('notas') or '(sem notas)'}
 
 Comentários existentes:
 {historico}
