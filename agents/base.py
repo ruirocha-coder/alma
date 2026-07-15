@@ -8,7 +8,8 @@ client = anthropic.Anthropic()
 # precisa de fazer TOOLS_X = TOOLS_COMUNS + [tools específicas do agente].
 TOOLS_COMUNS = (bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE
                 + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
-                + documentos_referencia.TOOLS_DOCUMENTOS_REFERENCIA)
+                + documentos_referencia.TOOLS_DOCUMENTOS_REFERENCIA
+                + basecamp.TOOLS_ESTADO_PROJETO)
 
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
@@ -20,6 +21,7 @@ FUNCOES = {
     "procurar_documentos_empresa": documentos_empresa.procurar_documentos_empresa,
     "ler_documento_empresa": documentos_empresa.ler_documento_empresa,
     "documentos_referencia_empresa": documentos_referencia.documentos_referencia_empresa,
+    "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
