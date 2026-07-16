@@ -262,6 +262,29 @@
   .msg .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .msg.user .avatar { background: var(--bubble-user); color: var(--text); }
   .msg.assistant .avatar { background: var(--accent); color: var(--accent-text); }
+  .msg-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+  .msg-actions {
+    display: flex;
+    gap: 2px;
+    padding-left: 2px;
+  }
+  .msg-action-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    line-height: 1;
+  }
+  .msg-action-btn:hover { background: var(--bubble-user); color: var(--text); }
   .bubble {
     padding: 10px 14px;
     border-radius: 12px;
@@ -702,6 +725,62 @@
     return avatar;
   }
 
+  function copiarParaClipboard(texto) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(texto);
+    }
+    // recurso para contextos sem a Clipboard API (ex: http não seguro)
+    return new Promise((resolve, reject) => {
+      const textarea = document.createElement("textarea");
+      textarea.value = texto;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    });
+  }
+
+  function criarBarraAcoes(texto) {
+    const barra = document.createElement("div");
+    barra.className = "msg-actions";
+
+    const copiarBtn = document.createElement("button");
+    copiarBtn.type = "button";
+    copiarBtn.className = "msg-action-btn";
+    copiarBtn.textContent = "📋";
+    copiarBtn.title = "Copiar mensagem";
+    copiarBtn.addEventListener("click", async () => {
+      try {
+        await copiarParaClipboard(texto);
+        copiarBtn.textContent = "✓";
+        setTimeout(() => { copiarBtn.textContent = "📋"; }, 1200);
+      } catch (_) { /* falha silenciosa — o botão simplesmente não muda */ }
+    });
+    barra.appendChild(copiarBtn);
+
+    if (navigator.share) {
+      const partilharBtn = document.createElement("button");
+      partilharBtn.type = "button";
+      partilharBtn.className = "msg-action-btn";
+      partilharBtn.textContent = "⤴";
+      partilharBtn.title = "Partilhar mensagem";
+      partilharBtn.addEventListener("click", () => {
+        navigator.share({ text: texto }).catch(() => {});
+      });
+      barra.appendChild(partilharBtn);
+    }
+
+    return barra;
+  }
+
   function addMessage(role, text) {
     const emptyState = messagesInner.querySelector(".empty-state");
     if (emptyState) emptyState.remove();
@@ -714,8 +793,14 @@
     } else {
       bubble.textContent = text;
     }
+    const content = document.createElement("div");
+    content.className = "msg-content";
+    content.appendChild(bubble);
+    if (role === "user" || role === "assistant") {
+      content.appendChild(criarBarraAcoes(text));
+    }
     wrap.appendChild(makeAvatar(role));
-    wrap.appendChild(bubble);
+    wrap.appendChild(content);
     messagesInner.appendChild(wrap);
     scrollToBottom();
     return bubble;
