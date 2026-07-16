@@ -434,6 +434,38 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.45; }
   }
+  .reuniao-banner:not([hidden]) {
+    display: flex;
+  }
+  .reuniao-banner {
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: var(--error);
+    color: #fff;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .reuniao-banner span:nth-of-type(2) { flex: 1; }
+  .reuniao-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #fff;
+    flex-shrink: 0;
+    animation: pulsar 1s infinite;
+  }
+  .reuniao-banner button {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #fff !important;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .reuniao-banner button:hover { background: rgba(255, 255, 255, 0.32) !important; }
   .anexo-chip {
     align-items: center;
     gap: 8px;
@@ -528,6 +560,11 @@
         <h1>Alma</h1>
         <span class="sub"><span id="utilizador-label"></span> · sessão <input id="sessao-label" type="text" readonly></span>
       </header>
+      <div id="reuniao-banner" class="reuniao-banner" hidden>
+        <span class="reuniao-dot"></span>
+        <span>A Alma está a ouvir a reunião — só responde se for chamada pelo nome.</span>
+        <button id="reuniao-terminar" type="button">Terminar reunião</button>
+      </div>
       <div id="messages">
         <div id="messages-inner">
           <div class="empty-state">Escreve uma pergunta para começares a testar a Alma.</div>
@@ -543,6 +580,7 @@
             <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
             <input id="ficheiro-input" type="file" hidden accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
             <button id="microfone" type="button" class="icon-btn-composer" aria-label="Falar com a Alma" title="Mantém premido para falar">🎤</button>
+            <button id="reuniao-btn" type="button" class="icon-btn-composer" aria-label="Modo reunião" title="Começar/terminar modo reunião">🎙️</button>
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
           </form>
@@ -756,6 +794,163 @@
       microfoneBtn.disabled = false;
     }
   }
+
+  // modo reunião — em vez de push-to-talk, a Alma ouve em excertos curtos e
+  // contínuos; só entra na conversa quando alguém a chama pelo nome. O
+  // excerto seguinte começa a gravar logo que o anterior termina (sem
+  // esperar pela resposta de rede), para não perder o que se diz entretanto.
+  const reuniaoBtn = document.getElementById("reuniao-btn");
+  const reuniaoBanner = document.getElementById("reuniao-banner");
+  const reuniaoTerminarBtn = document.getElementById("reuniao-terminar");
+  let reuniaoAtiva = false;
+  let reuniaoStreamMic = null;
+  let reuniaoRecorder = null;
+  const DURACAO_EXCERTO_REUNIAO_MS = 8000;
+
+  async function iniciarModoReuniao() {
+    if (reuniaoAtiva) return;
+    try {
+      reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
+      return;
+    }
+    try {
+      await fetch("/alma/reuniao/iniciar", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sessao })
+      });
+    } catch (_) {
+      addMessage("error", "Não consegui começar o modo reunião — falha de rede.");
+      reuniaoStreamMic.getTracks().forEach((t) => t.stop());
+      reuniaoStreamMic = null;
+      return;
+    }
+    reuniaoAtiva = true;
+    reuniaoBtn.classList.add("a-gravar");
+    reuniaoBtn.textContent = "🔴";
+    reuniaoBanner.hidden = false;
+    gravarProximoExcertoReuniao();
+  }
+
+  function gravarProximoExcertoReuniao() {
+    if (!reuniaoAtiva || !reuniaoStreamMic) return;
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+               : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+    const rec = new MediaRecorder(reuniaoStreamMic, { mimeType: mime });
+    const pedacos = [];
+    rec.addEventListener("dataavailable", (e) => { if (e.data && e.data.size > 0) pedacos.push(e.data); });
+    rec.addEventListener("stop", () => {
+      const blob = new Blob(pedacos, { type: rec.mimeType });
+      if (reuniaoAtiva) {
+        gravarProximoExcertoReuniao();
+      } else if (reuniaoStreamMic) {
+        reuniaoStreamMic.getTracks().forEach((t) => t.stop());
+        reuniaoStreamMic = null;
+      }
+      enviarExcertoReuniao(blob);
+    });
+    reuniaoRecorder = rec;
+    rec.start();
+    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, DURACAO_EXCERTO_REUNIAO_MS);
+  }
+
+  async function enviarExcertoReuniao(blob) {
+    if (blob.size < 500) return;  // excerto demasiado curto/silêncio, ignora
+    try {
+      const dados = new FormData();
+      dados.append("utilizador", UTILIZADOR);
+      dados.append("sessao", sessao);
+      dados.append("audio", blob, "excerto.webm");
+      const resp = await fetch("/alma/reuniao/chunk", { method: "POST", body: dados });
+
+      if (resp.status === 409) return;  // a reunião já terminou entretanto
+      if (!resp.ok) {
+        console.error("Falha num excerto da reunião:", resp.status, resp.statusText);
+        return;
+      }
+
+      const tipo = resp.headers.get("content-type") || "";
+      if (tipo.startsWith("application/json")) return;  // não foi chamada, nada a mostrar
+
+      let msg = null;
+      let textoCompleto = "";
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let bufferSSE = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bufferSSE += decoder.decode(value, { stream: true });
+        const linhas = bufferSSE.split("\n\n");
+        bufferSSE = linhas.pop();
+        for (const linha of linhas) {
+          if (!linha.startsWith("data: ")) continue;
+          let ev;
+          try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+          if (ev.transcricao) {
+            addMessage("user", ev.transcricao);
+            addTyping();
+          } else if (ev.delta) {
+            if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
+            textoCompleto += ev.delta;
+            msg.atualizar(textoCompleto);
+          } else if (ev.audio) {
+            enfileirarAudio(ev.audio);
+          } else if (ev.erro) {
+            removeTyping();
+            addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
+          }
+        }
+      }
+      fetchSessions();
+    } catch (err) {
+      console.error("Falha de rede num excerto da reunião:", err);
+    }
+  }
+
+  function pararModoReuniao() {
+    if (!reuniaoAtiva) return;
+    reuniaoAtiva = false;
+    if (reuniaoRecorder && reuniaoRecorder.state === "recording") reuniaoRecorder.stop();
+    else if (reuniaoStreamMic) {
+      reuniaoStreamMic.getTracks().forEach((t) => t.stop());
+      reuniaoStreamMic = null;
+    }
+    reuniaoBtn.classList.remove("a-gravar");
+    reuniaoBtn.textContent = "🎙️";
+    reuniaoBanner.hidden = true;
+    terminarModoReuniao();
+  }
+
+  async function terminarModoReuniao() {
+    addTyping();
+    try {
+      const resp = await fetch("/alma/reuniao/terminar", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ utilizador: UTILIZADOR, sessao })
+      });
+      removeTyping();
+      if (!resp.ok) {
+        addMessage("error", "Não consegui gerar o resumo da reunião.");
+        return;
+      }
+      const data = await resp.json();
+      addMessage("assistant", data.resumo || "(sem resumo)");
+      fetchSessions();
+    } catch (err) {
+      removeTyping();
+      addMessage("error", "Falha de rede ao terminar a reunião: " + err.message);
+    }
+  }
+
+  reuniaoBtn.addEventListener("click", () => {
+    if (reuniaoAtiva) pararModoReuniao();
+    else iniciarModoReuniao();
+  });
+  reuniaoTerminarBtn.addEventListener("click", pararModoReuniao);
 
   function scrollToBottom() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
@@ -1074,6 +1269,7 @@
   }
 
   async function switchSession(novaSessao) {
+    if (reuniaoAtiva) pararModoReuniao();
     if (isMobile()) fecharSidebar();
     sessao = novaSessao;
     sessionStorage.setItem("alma_sessao", sessao);
@@ -1091,6 +1287,7 @@
   }
 
   function novaConversa() {
+    if (reuniaoAtiva) pararModoReuniao();
     if (isMobile()) fecharSidebar();
     sessao = "web-" + Math.random().toString(36).slice(2, 10);
     sessionStorage.setItem("alma_sessao", sessao);
