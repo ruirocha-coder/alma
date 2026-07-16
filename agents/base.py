@@ -52,8 +52,10 @@ TOOLS_MEMORIA = [
 # consola de chat qualquer utilizador pode pedir — quem lá está já é alguém
 # de confiança da equipa. Vindo do Basecamp (onde qualquer pessoa com acesso
 # a um projeto pode comentar/mencionar) mantém-se restrito ao Rui, à Beatriz
-# ou à Isa; o responder_basecamp identifica a origem acrescentando
-# " (Basecamp)" ao nome do utilizador.
+# ou à Isa. A origem chega como parâmetro explícito (não como sufixo no nome
+# do utilizador) precisamente para o utilizador poder ser a mesma pessoa/
+# identificador em ambos os canais — assim o perfil e a memória são
+# partilhados, só a autorização do mural distingue o canal.
 TOOLS_MURAL = [
     {
         "name": "publicar_mural",
@@ -68,19 +70,24 @@ TOOLS_MURAL = [
 
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
-def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str):
-    veio_do_basecamp = utilizador.strip().endswith("(Basecamp)")
-    if veio_do_basecamp and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
+def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, origem: str):
+    if origem == "basecamp" and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
         return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
     return basecamp.publicar_mural(assunto, mensagem)
 
 def correr_agente(system_prompt: str, tools: list, mensagens: list,
-                  utilizador: str, modelo: str = "claude-sonnet-4-6") -> str:
-    """Loop de agente com memória por utilizador: chama o modelo, executa tools até haver resposta final."""
+                  utilizador: str, modelo: str = "claude-sonnet-4-6", origem: str = "consola") -> str:
+    """Loop de agente com memória por utilizador: chama o modelo, executa tools até haver resposta final.
+
+    `utilizador` deve ser o identificador real da pessoa (o mesmo em qualquer
+    canal), para o perfil e a memória de longo prazo serem partilhados —
+    `origem` ("consola" ou "basecamp") é só para decidir permissões
+    (ex: quem pode pedir uma publicação no mural), nunca para identificar
+    quem é a pessoa."""
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
-        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem),
+        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem, origem),
     }
     contexto = db.contexto_utilizador(utilizador)
     system = system_prompt + ("\n\n" + contexto if contexto else "")

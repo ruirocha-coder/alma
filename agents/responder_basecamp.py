@@ -23,10 +23,14 @@ que a pessoa deve fazer a seguir. Só usa publicar_mural se o pedido for
 estrita e explicitamente para publicares no mural — nunca por iniciativa
 própria, mesmo que o assunto pareça relevante para toda a equipa.
 
+Quando surgir naturalmente um facto duradouro sobre esta pessoa ou o seu
+trabalho, usa memorizar_facto — assim vais conhecendo melhor quem fala
+contigo, mesmo quando é só por menções no Basecamp.
+
 Não escrevas saudações nem te apresentes — vai direto à resposta."""
 
 def responder(utilizador: str, mensagens: list) -> str:
-    return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador)
+    return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador, origem="basecamp")
 
 def _texto_simples(html: str) -> str:
     if not html:
@@ -119,7 +123,9 @@ Notas da tarefa/card:
 Conversa/comentários existentes:
 {historico}"""
 
-    utilizador_basecamp = f"{criador.get('name', 'alguém')} (Basecamp)"
+    # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
+    # usa, para o perfil e a memória serem partilhados entre os dois canais
+    utilizador_basecamp = criador.get("name") or "Alguém do Basecamp"
     resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}])
     basecamp.comentar(alvo_id, resposta)
     db.registar_evento_processado(evento_id, resposta)
