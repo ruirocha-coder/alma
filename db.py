@@ -183,7 +183,7 @@ def esquecer_factos(utilizador: str, termo: str):
         conn.commit()
     return {"apagados": apagados}
 
-def factos_utilizador(utilizador: str, limite: int = 30) -> list[str]:
+def factos_utilizador(utilizador: str, limite: int = 50) -> list[str]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

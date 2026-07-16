@@ -30,7 +30,7 @@ FUNCOES = {
 TOOLS_MEMORIA = [
     {
         "name": "memorizar_facto",
-        "description": "Guarda um facto relevante e duradouro sobre o trabalho deste utilizador (projeto em curso, preferência expressa, contexto que ajudará em conversas futuras). Não guardar trivialidades nem informação sensível.",
+        "description": "Guarda um facto relevante e duradouro sobre o trabalho deste utilizador (projeto em curso, preferência expressa, contexto que ajudará em conversas futuras). Não guardar trivialidades nem informação sensível. Só se guardam os factos mais recentes de cada pessoa — se o que vais guardar atualiza ou substitui um facto que já vês na tua lista de contexto (ex: mudou de projeto, deixou de ter uma preferência), usa esquecer nesse facto antigo primeiro, para não ficarem os dois a ocupar espaço; se for um facto novo e distinto, guarda-o sem mais.",
         "input_schema": {
             "type": "object",
             "properties": {"facto": {"type": "string"}},
@@ -39,7 +39,7 @@ TOOLS_MEMORIA = [
     },
     {
         "name": "esquecer",
-        "description": "Apaga da memória os factos que contenham o termo indicado. Usar quando o utilizador pedir para esqueceres algo.",
+        "description": "Apaga da memória os factos que contenham o termo indicado. Usar quando o utilizador pedir para esqueceres algo, ou quando um facto novo tornar um facto antigo desatualizado (ver memorizar_facto).",
         "input_schema": {
             "type": "object",
             "properties": {"termo": {"type": "string"}},
