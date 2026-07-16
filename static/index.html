@@ -414,6 +414,48 @@
     padding: 0;
   }
   .anexo-chip button:hover { color: var(--text); }
+
+  #sidebar-scrim {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 55;
+  }
+  #sidebar-scrim.visible { display: block; }
+
+  @media (max-width: 768px) {
+    #app { position: relative; overflow: hidden; }
+    #sidebar {
+      /* começa abaixo do header (nunca por cima) — evita qualquer disputa de
+         z-index com o botão ☰ ou com o resto do cabeçalho */
+      position: fixed;
+      top: var(--header-h, 52px);
+      bottom: 0;
+      left: 0;
+      z-index: 60;
+      width: min(300px, 82vw);
+      box-shadow: 2px 0 24px rgba(0, 0, 0, 0.3);
+    }
+    #sidebar.collapsed { width: 0; box-shadow: none; }
+    #sidebar > * { width: min(300px, 82vw); }
+    #sidebar-scrim { top: var(--header-h, 52px); }
+
+    header { padding: 10px 14px; gap: 8px; }
+    header h1 { font-size: 14px; }
+    header .sub { font-size: 10.5px; }
+    header .sub input { width: 56px; }
+
+    #messages { padding: 16px 12px 8px; }
+    #messages-inner { max-width: 100%; }
+    .bubble { font-size: 14px; }
+
+    #composer { padding: 10px 12px 16px; }
+    .composer-inner { max-width: 100%; }
+    /* 16px evita o Safari/iOS ampliar a página ao focar o campo */
+    #composer textarea, .identidade-card input { font-size: 16px; }
+    #composer button, .icon-btn-composer { width: 38px; height: 38px; }
+  }
 </style>
 </head>
 <body>
@@ -435,6 +477,7 @@
         <div class="sessions-empty">Sem conversas anteriores.</div>
       </div>
     </aside>
+    <div id="sidebar-scrim"></div>
     <div id="main-col">
       <header>
         <button id="menu-toggle" class="icon-btn" type="button" aria-label="Mostrar/ocultar histórico">☰</button>
@@ -484,9 +527,30 @@
   const sendBtn = document.getElementById("send");
   const sessaoLabel = document.getElementById("sessao-label");
   const sidebar = document.getElementById("sidebar");
+  const sidebarScrim = document.getElementById("sidebar-scrim");
   const menuToggle = document.getElementById("menu-toggle");
   const newChatBtn = document.getElementById("new-chat");
   const sessionsList = document.getElementById("sessions-list");
+
+  const isMobile = () => window.matchMedia("(max-width: 768px)").matches;
+
+  const headerEl = document.querySelector("header");
+  function atualizarAlturaHeader() {
+    document.documentElement.style.setProperty("--header-h", headerEl.offsetHeight + "px");
+  }
+  atualizarAlturaHeader();
+  window.addEventListener("resize", atualizarAlturaHeader);
+
+  function abrirSidebar() {
+    sidebar.classList.remove("collapsed");
+    if (isMobile()) sidebarScrim.classList.add("visible");
+  }
+  function fecharSidebar() {
+    sidebar.classList.add("collapsed");
+    sidebarScrim.classList.remove("visible");
+  }
+  if (isMobile()) sidebar.classList.add("collapsed");  // no telemóvel começa fechada
+  sidebarScrim.addEventListener("click", fecharSidebar);
   const anexarBtn = document.getElementById("anexar");
   const ficheiroInput = document.getElementById("ficheiro-input");
   const anexoChip = document.getElementById("anexo-chip");
@@ -677,7 +741,10 @@
     if (el) el.remove();
   }
 
-  menuToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
+  menuToggle.addEventListener("click", () => {
+    if (sidebar.classList.contains("collapsed")) abrirSidebar();
+    else fecharSidebar();
+  });
 
   async function fetchSessions() {
     try {
@@ -733,6 +800,7 @@
   }
 
   async function switchSession(novaSessao) {
+    if (isMobile()) fecharSidebar();
     sessao = novaSessao;
     sessionStorage.setItem("alma_sessao", sessao);
     sessaoLabel.value = sessao;
@@ -749,6 +817,7 @@
   }
 
   function novaConversa() {
+    if (isMobile()) fecharSidebar();
     sessao = "web-" + Math.random().toString(36).slice(2, 10);
     sessionStorage.setItem("alma_sessao", sessao);
     sessaoLabel.value = sessao;
@@ -757,6 +826,17 @@
     input.focus();
   }
   newChatBtn.addEventListener("click", novaConversa);
+
+  // no telemóvel, o autofocus do <textarea> abre o teclado logo ao carregar a
+  // página — o browser aplica-o de forma assíncrona (depois deste script
+  // correr), por isso um blur() a direito perde sempre a corrida. Em vez de
+  // adivinhar o timing, suprime-se qualquer foco no campo até o utilizador
+  // interagir mesmo com a página pela primeira vez.
+  let interagiuComAPagina = false;
+  document.addEventListener("pointerdown", () => { interagiuComAPagina = true; }, { once: true, capture: true });
+  input.addEventListener("focus", () => {
+    if (isMobile() && !interagiuComAPagina) input.blur();
+  });
 
   input.addEventListener("input", () => {
     input.style.height = "auto";
