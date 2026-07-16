@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import json, os
+import base64, json, os
 import threading
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -12,7 +12,7 @@ from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
-from tools import basecamp, ficheiros
+from tools import basecamp, ficheiros, voz
 from db import inicializar_schema
 inicializar_schema()
 
@@ -99,6 +99,83 @@ def alma_stream(p: Pedido):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
+def _evento_audio(frase: str) -> str:
+    """Sintetiza uma frase já fechada em voz e devolve-a como evento SSE — se
+    falhar, não interrompe a resposta, só fica sem áudio para essa frase (o
+    texto já chegou por 'delta' de qualquer forma)."""
+    try:
+        audio_b64 = base64.b64encode(voz.sintetizar(frase)).decode()
+        return f"data: {json.dumps({'audio': audio_b64}, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        print(f"[voz] falha ao sintetizar frase: {e!r}")
+        return ""
+
+def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem: str):
+    """Como _fluxo_resposta_agente, mas sintetiza voz frase a frase à medida
+    que o texto da resposta vai chegando — a Alma começa a falar sem esperar
+    pela resposta toda estar pronta."""
+    yield f"data: {json.dumps({'transcricao': mensagem}, ensure_ascii=False)}\n\n"
+
+    mensagens = historico_sessao(sessao, utilizador)
+    mensagens.append({"role": "user", "content": mensagem})
+
+    try:
+        if not perfil_existe(utilizador):
+            gerador = acolhimento.responder_stream(utilizador, mensagens)
+            agente = "acolhimento"
+        else:
+            agente = encaminhar(mensagem[:500])
+            log_routing(mensagem[:500], agente)
+            gerador = AGENTES_STREAM[agente](utilizador, mensagens)
+    except Exception as e:
+        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
+        return
+
+    partes, buffer_frase = [], ""
+    try:
+        for pedaco in gerador:
+            partes.append(pedaco)
+            yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
+            buffer_frase += pedaco
+            frases_prontas, buffer_frase = voz.dividir_em_frases_prontas(buffer_frase)
+            for frase in frases_prontas:
+                if frase.strip():
+                    yield _evento_audio(frase)
+        if buffer_frase.strip():
+            yield _evento_audio(buffer_frase)
+    except Exception as e:
+        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
+        return
+
+    resposta = "".join(partes)
+    guardar_mensagem(utilizador, sessao, "user", mensagem)
+    guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+@app.post("/alma/voz")
+async def alma_por_voz(utilizador: str = Form(...), sessao: str = Form(...),
+                       audio: UploadFile = File(...)):
+    """Pergunta à Alma por voz: transcreve a gravação, pergunta como de
+    costume, e devolve a resposta em stream (texto + voz sintetizada frase a
+    frase, à medida que a resposta vai sendo gerada)."""
+    bruto = await audio.read()
+    if len(bruto) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Áudio demasiado grande (máx. 15 MB)")
+
+    try:
+        mensagem = voz.transcrever(bruto, audio.filename or "audio.webm", audio.content_type or "audio/webm")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao transcrever o áudio: {e}")
+    if not mensagem:
+        raise HTTPException(status_code=422,
+                            detail="Não consegui perceber o áudio — tenta falar mais perto do microfone.")
+
+    return StreamingResponse(
+        _fluxo_resposta_por_voz(utilizador, sessao, mensagem),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
                             mensagem: str = Form(""), ficheiro: UploadFile = File(...)):
@@ -129,7 +206,7 @@ def health_config():
                  "BIGCOMMERCE_ACCESS_TOKEN", "SITE_URL",
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
                  "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
-                 "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET"]
+                 "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET", "OPENAI_API_KEY"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")

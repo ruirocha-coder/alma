@@ -429,6 +429,11 @@
     font-size: 17px !important;
   }
   .icon-btn-composer:hover { color: var(--text) !important; }
+  .icon-btn-composer.a-gravar { color: var(--error) !important; animation: pulsar 1s infinite; }
+  @keyframes pulsar {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
   .anexo-chip {
     align-items: center;
     gap: 8px;
@@ -537,6 +542,7 @@
           <form id="form">
             <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
             <input id="ficheiro-input" type="file" hidden accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
+            <button id="microfone" type="button" class="icon-btn-composer" aria-label="Falar com a Alma" title="Mantém premido para falar">🎤</button>
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
           </form>
@@ -602,6 +608,154 @@
   const anexoNome = document.getElementById("anexo-nome");
   const anexoRemover = document.getElementById("anexo-remover");
   let ficheiroAnexado = null;
+
+  const microfoneBtn = document.getElementById("microfone");
+  let mediaRecorder = null;
+  let chunksAudio = [];
+  let streamMic = null;
+
+  // fila de reprodução — as frases de voz vão chegando uma a uma (por SSE) e
+  // têm de tocar em sequência, mesmo que a síntese da frase seguinte já
+  // tenha chegado antes de a anterior acabar de tocar
+  const filaAudio = [];
+  let aTocarAudio = false;
+
+  function enfileirarAudio(base64) {
+    const binario = atob(base64);
+    const bytes = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+    filaAudio.push(url);
+    tocarProximoAudio();
+  }
+
+  function tocarProximoAudio() {
+    if (aTocarAudio || filaAudio.length === 0) return;
+    aTocarAudio = true;
+    const url = filaAudio.shift();
+    const audioEl = new Audio(url);
+    const seguinte = () => {
+      URL.revokeObjectURL(url);
+      aTocarAudio = false;
+      tocarProximoAudio();
+    };
+    audioEl.addEventListener("ended", seguinte);
+    audioEl.addEventListener("error", seguinte);
+    audioEl.play().catch(seguinte);
+  }
+
+  async function iniciarGravacao() {
+    if (mediaRecorder && mediaRecorder.state === "recording") return;
+    try {
+      streamMic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
+      return;
+    }
+    chunksAudio = [];
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+               : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+    mediaRecorder = new MediaRecorder(streamMic, { mimeType: mime });
+    mediaRecorder.addEventListener("dataavailable", (e) => {
+      if (e.data && e.data.size > 0) chunksAudio.push(e.data);
+    });
+    mediaRecorder.addEventListener("stop", () => {
+      const blob = new Blob(chunksAudio, { type: mediaRecorder.mimeType });
+      streamMic.getTracks().forEach((t) => t.stop());
+      streamMic = null;
+      enviarAudioGravado(blob);
+    });
+    mediaRecorder.start();
+    microfoneBtn.classList.add("a-gravar");
+    microfoneBtn.textContent = "🔴";
+  }
+
+  function pararGravacao() {
+    if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+    microfoneBtn.classList.remove("a-gravar");
+    microfoneBtn.textContent = "🎤";
+  }
+
+  microfoneBtn.addEventListener("mousedown", (e) => { e.preventDefault(); iniciarGravacao(); });
+  microfoneBtn.addEventListener("touchstart", (e) => { e.preventDefault(); iniciarGravacao(); });
+  microfoneBtn.addEventListener("mouseup", pararGravacao);
+  microfoneBtn.addEventListener("touchend", pararGravacao);
+  microfoneBtn.addEventListener("mouseleave", () => { if (mediaRecorder && mediaRecorder.state === "recording") pararGravacao(); });
+
+  async function enviarAudioGravado(blob) {
+    if (blob.size < 500) return;  // gravação demasiado curta (toque acidental), ignora
+    input.disabled = true;
+    sendBtn.disabled = true;
+    anexarBtn.disabled = true;
+    microfoneBtn.disabled = true;
+    addTyping();
+
+    try {
+      const dados = new FormData();
+      dados.append("utilizador", UTILIZADOR);
+      dados.append("sessao", sessao);
+      dados.append("audio", blob, "gravacao.webm");
+      const resp = await fetch("/alma/voz", { method: "POST", body: dados });
+
+      if (!resp.ok) {
+        removeTyping();
+        let detalhe = resp.status + " " + resp.statusText;
+        try {
+          const err = await resp.json();
+          if (err.detail) detalhe = err.detail;
+        } catch (_) {}
+        addMessage("error", "Erro ao contactar a Alma: " + detalhe);
+      } else {
+        let msg = null;
+        let textoCompleto = "";
+        let erro = null;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let bufferSSE = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bufferSSE += decoder.decode(value, { stream: true });
+          const linhas = bufferSSE.split("\n\n");
+          bufferSSE = linhas.pop();
+          for (const linha of linhas) {
+            if (!linha.startsWith("data: ")) continue;
+            let ev;
+            try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+            if (ev.transcricao) {
+              removeTyping();
+              addMessage("user", ev.transcricao);
+              addTyping();
+            } else if (ev.delta) {
+              if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
+              textoCompleto += ev.delta;
+              msg.atualizar(textoCompleto);
+            } else if (ev.audio) {
+              enfileirarAudio(ev.audio);
+            } else if (ev.erro) {
+              erro = ev.erro;
+            }
+          }
+        }
+        if (erro) {
+          removeTyping();
+          addMessage("error", "Erro ao contactar a Alma: " + erro);
+        } else if (!msg) {
+          removeTyping();
+          addMessage("assistant", "(sem resposta)");
+        }
+        fetchSessions();
+      }
+    } catch (err) {
+      removeTyping();
+      addMessage("error", "Falha de rede: " + err.message);
+    } finally {
+      input.disabled = false;
+      sendBtn.disabled = false;
+      anexarBtn.disabled = false;
+      microfoneBtn.disabled = false;
+    }
+  }
 
   function scrollToBottom() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
