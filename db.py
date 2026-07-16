@@ -194,19 +194,25 @@ def factos_utilizador(utilizador: str, limite: int = 30) -> list[str]:
             return [l["facto"] for l in cur.fetchall()]
 
 def contexto_utilizador(utilizador: str) -> str:
-    """Bloco de texto com perfil + memórias, para injetar no system prompt."""
+    """Bloco de texto com perfil + memórias, para injetar no system prompt.
+
+    O perfil (acolhimento) só existe para quem passou pela consola — mas os
+    factos memorizados podem existir mesmo sem perfil (ex: alguém só conhecido
+    por menções no Basecamp, que nunca fez o acolhimento). Por isso os dois
+    são independentes: só devolve vazio se não houver mesmo nada."""
     p = obter_perfil(utilizador)
-    if not p:
-        return ""
-    linhas = [
-        f"Estás a falar com: {utilizador}",
-        f"Papel na Interior Guider: {p['papel']}",
-        f"Estilo de resposta preferido: {p['estilo_resposta']}",
-        f"Formato preferido: {p['formato']}",
-        f"Decisões: {p['decisao']}",
-        f"Dificuldades onde a Alma pode ajudar: {p['dificuldades']}",
-    ]
     factos = factos_utilizador(utilizador)
+    if not p and not factos:
+        return ""
+    linhas = [f"Estás a falar com: {utilizador}"]
+    if p:
+        linhas += [
+            f"Papel na Interior Guider: {p['papel']}",
+            f"Estilo de resposta preferido: {p['estilo_resposta']}",
+            f"Formato preferido: {p['formato']}",
+            f"Decisões: {p['decisao']}",
+            f"Dificuldades onde a Alma pode ajudar: {p['dificuldades']}",
+        ]
     if factos:
         linhas.append("O que sabes sobre o trabalho recente desta pessoa:")
         linhas += [f"- {f}" for f in factos]
