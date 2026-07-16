@@ -171,12 +171,15 @@ def reuniao_iniciar(sessao: str = Form(...)):
 
 @app.post("/alma/reuniao/chunk")
 async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
-                        audio: UploadFile = File(...)):
-    """Recebe mais um excerto curto da reunião em curso. Transcreve-o e
-    acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
-    excerto não mencionar a Alma, devolve só a transcrição (para uma
-    legenda ao vivo, se a consola quiser mostrar); se a mencionar, devolve
-    antes um stream com a resposta (texto + voz)."""
+                        indice: int = Form(...), audio: UploadFile = File(...)):
+    """Recebe mais um excerto curto da reunião em curso (indice identifica a
+    posição deste excerto na ordem de gravação, para a transcrição acumulada
+    ficar sempre correta mesmo que os pedidos cheguem trocados). Transcreve-o
+    e acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
+    excerto não mencionar a Alma — ou se a Alma já estiver a responder a uma
+    chamada anterior — devolve só a transcrição (para uma legenda ao vivo, se
+    a consola quiser mostrar); caso contrário devolve um stream com a
+    resposta (texto + voz)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
@@ -190,23 +193,37 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
         raise HTTPException(status_code=502, detail=f"Falha ao transcrever o áudio: {e}")
 
     if not texto:
-        return {"transcricao": "", "acionado": False}
+        return {"transcricao": "", "acionado": False,
+                "processados": reuniao.excertos_processados(sessao)}
 
-    reuniao.registar(sessao, texto)
-    if not reuniao.foi_chamada(texto):
-        return {"transcricao": texto, "acionado": False}
+    reuniao.registar(sessao, indice, texto)
+    processados = reuniao.excertos_processados(sessao)
+    # se já está a responder a uma chamada anterior, este excerto fica só
+    # como contexto — evita duas respostas da Alma a sobrepor-se na mesma
+    # reunião
+    if not reuniao.foi_chamada(texto) or reuniao.esta_a_responder(sessao):
+        return {"transcricao": texto, "acionado": False, "processados": processados}
 
-    contexto = reuniao.transcricao_ate_agora(sessao)
+    contexto = reuniao.contexto_ao_vivo(sessao)
     mensagem_agente = (
         "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
-        "direta como de costume). Isto é o que já se disse até agora, transcrito "
+        "direta como de costume). Isto é o mais recente que se disse, transcrito "
         f"automaticamente (pode ter erros ou sobreposição de vozes):\n\n{contexto}\n\n"
         f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto}"\n\n'
         "Responde diretamente a essa pessoa, como se estivesses presente na sala."
     )
+
+    def _gerador():
+        reuniao.marcar_a_responder(sessao, True)
+        try:
+            yield from _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
+                                               mensagem_visivel=f"🎙️ (reunião) {texto}",
+                                               texto_transcricao=texto)
+        finally:
+            reuniao.marcar_a_responder(sessao, False)
+
     return StreamingResponse(
-        _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
-                                mensagem_visivel=f"🎙️ (reunião) {texto}", texto_transcricao=texto),
+        _gerador(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )

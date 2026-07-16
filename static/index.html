@@ -562,7 +562,7 @@
       </header>
       <div id="reuniao-banner" class="reuniao-banner" hidden>
         <span class="reuniao-dot"></span>
-        <span>A Alma está a ouvir a reunião — só responde se for chamada pelo nome.</span>
+        <span id="reuniao-status">A Alma está a ouvir a reunião — só responde se for chamada pelo nome.</span>
         <button id="reuniao-terminar" type="button">Terminar reunião</button>
       </div>
       <div id="messages">
@@ -682,16 +682,26 @@
   // esperar pela resposta de rede), para não perder o que se diz entretanto.
   const reuniaoBtn = document.getElementById("reuniao-btn");
   const reuniaoBanner = document.getElementById("reuniao-banner");
+  const reuniaoStatusEl = document.getElementById("reuniao-status");
   const reuniaoTerminarBtn = document.getElementById("reuniao-terminar");
   let reuniaoAtiva = false;
   let reuniaoStreamMic = null;
   let reuniaoRecorder = null;
   const DURACAO_EXCERTO_REUNIAO_MS = 8000;
-  // fila que garante que os excertos chegam ao servidor pela mesma ordem em
-  // que foram gravados, mesmo que a rede entregue as respostas fora de
-  // ordem (ex: um excerto demora mais a transcrever que o seguinte) — sem
-  // isto, a transcrição acumulada podia ficar com a ordem trocada
-  let filaEnvioReuniao = Promise.resolve();
+  // cada excerto é enviado ao servidor assim que fica pronto (em paralelo,
+  // sem esperar pelos anteriores) — uma reunião longa ou muito faladora não
+  // pode ficar à espera de uma resposta lenta antes de processar o que se
+  // disse a seguir. A ordem correta na transcrição acumulada é garantida
+  // por um índice (não pela ordem de chegada da rede).
+  let proximoIndiceExcerto = 0;
+  let excertosProcessados = 0;
+  let respondendoAtivo = false;
+
+  function atualizarEstadoReuniao() {
+    reuniaoStatusEl.textContent = respondendoAtivo
+      ? "A Alma está a responder…"
+      : `A Alma está a ouvir a reunião (${excertosProcessados} excerto(s) processados) — só responde se for chamada pelo nome.`;
+  }
 
   async function iniciarModoReuniao() {
     if (reuniaoAtiva) return;
@@ -720,14 +730,19 @@
       return;
     }
     reuniaoAtiva = true;
+    proximoIndiceExcerto = 0;
+    excertosProcessados = 0;
+    respondendoAtivo = false;
     reuniaoBtn.classList.add("a-gravar");
     reuniaoBtn.textContent = "🔴";
     reuniaoBanner.hidden = false;
+    atualizarEstadoReuniao();
     gravarProximoExcertoReuniao();
   }
 
   function gravarProximoExcertoReuniao() {
     if (!reuniaoAtiva || !reuniaoStreamMic) return;
+    const indice = proximoIndiceExcerto++;
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
                : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
     const rec = new MediaRecorder(reuniaoStreamMic, { mimeType: mime });
@@ -741,8 +756,7 @@
         reuniaoStreamMic.getTracks().forEach((t) => t.stop());
         reuniaoStreamMic = null;
       }
-      // encadeado na fila (não disparado em paralelo): garante a ordem
-      filaEnvioReuniao = filaEnvioReuniao.then(() => enviarExcertoReuniao(blob));
+      enviarExcertoReuniao(blob, indice);  // enviado logo, em paralelo com o próximo excerto
     });
     rec.addEventListener("error", (e) => {
       console.error("Erro no MediaRecorder do modo reunião:", e.error || e);
@@ -759,12 +773,13 @@
     setTimeout(() => { if (rec.state === "recording") rec.stop(); }, DURACAO_EXCERTO_REUNIAO_MS);
   }
 
-  async function enviarExcertoReuniao(blob) {
+  async function enviarExcertoReuniao(blob, indice) {
     if (blob.size < 500) return;  // excerto demasiado curto/silêncio, ignora
     try {
       const dados = new FormData();
       dados.append("utilizador", UTILIZADOR);
       dados.append("sessao", sessao);
+      dados.append("indice", indice);
       dados.append("audio", blob, "excerto.webm");
       const resp = await fetch("/alma/reuniao/chunk", { method: "POST", body: dados });
 
@@ -775,39 +790,53 @@
       }
 
       const tipo = resp.headers.get("content-type") || "";
-      if (tipo.startsWith("application/json")) return;  // não foi chamada, nada a mostrar
+      if (tipo.startsWith("application/json")) {
+        // não foi chamada (ou a Alma já estava a responder a outra chamada)
+        // — nada a mostrar, mas conta como sinal de vida
+        excertosProcessados++;
+        atualizarEstadoReuniao();
+        return;
+      }
 
-      let msg = null;
-      let textoCompleto = "";
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let bufferSSE = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        bufferSSE += decoder.decode(value, { stream: true });
-        const linhas = bufferSSE.split("\n\n");
-        bufferSSE = linhas.pop();
-        for (const linha of linhas) {
-          if (!linha.startsWith("data: ")) continue;
-          let ev;
-          try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
-          if (ev.transcricao) {
-            addMessage("user", ev.transcricao);
-            addTyping();
-          } else if (ev.delta) {
-            if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
-            textoCompleto += ev.delta;
-            msg.atualizar(textoCompleto);
-          } else if (ev.audio) {
-            enfileirarAudio(ev.audio);
-          } else if (ev.erro) {
-            removeTyping();
-            addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
+      respondendoAtivo = true;
+      atualizarEstadoReuniao();
+      try {
+        let msg = null;
+        let textoCompleto = "";
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let bufferSSE = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bufferSSE += decoder.decode(value, { stream: true });
+          const linhas = bufferSSE.split("\n\n");
+          bufferSSE = linhas.pop();
+          for (const linha of linhas) {
+            if (!linha.startsWith("data: ")) continue;
+            let ev;
+            try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+            if (ev.transcricao) {
+              addMessage("user", ev.transcricao);
+              addTyping();
+            } else if (ev.delta) {
+              if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
+              textoCompleto += ev.delta;
+              msg.atualizar(textoCompleto);
+            } else if (ev.audio) {
+              enfileirarAudio(ev.audio);
+            } else if (ev.erro) {
+              removeTyping();
+              addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
+            }
           }
         }
+        fetchSessions();
+      } finally {
+        respondendoAtivo = false;
+        excertosProcessados++;
+        atualizarEstadoReuniao();
       }
-      fetchSessions();
     } catch (err) {
       console.error("Falha de rede num excerto da reunião:", err);
     }
