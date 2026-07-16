@@ -72,6 +72,20 @@
     text-align: left;
   }
   .new-chat:hover { background: var(--bubble-user); }
+  .logout-btn {
+    margin: 8px 14px 14px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: left;
+    flex-shrink: 0;
+  }
+  .logout-btn:hover { background: var(--bubble-user); color: var(--error); }
   #sessions-list {
     flex: 1;
     overflow-y: auto;
@@ -499,6 +513,7 @@
       <div id="sessions-list">
         <div class="sessions-empty">Sem conversas anteriores.</div>
       </div>
+      <button id="logout-btn" class="logout-btn" type="button">Sair</button>
     </aside>
     <div id="sidebar-scrim"></div>
     <div id="main-col">
@@ -554,6 +569,14 @@
   const menuToggle = document.getElementById("menu-toggle");
   const newChatBtn = document.getElementById("new-chat");
   const sessionsList = document.getElementById("sessions-list");
+  const logoutBtn = document.getElementById("logout-btn");
+
+  logoutBtn.addEventListener("click", () => {
+    if (!confirm("Sair da sessão? Da próxima vez vais ter de introduzir o teu nome outra vez.")) return;
+    localStorage.removeItem("alma_utilizador");
+    sessionStorage.removeItem("alma_sessao");
+    location.reload();
+  });
 
   const isMobile = () => window.matchMedia("(max-width: 768px)").matches;
 
