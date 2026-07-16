@@ -12,7 +12,7 @@ from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
-from tools import basecamp, ficheiros, voz
+from tools import basecamp, ficheiros, voz, reuniao
 from db import inicializar_schema
 inicializar_schema()
 
@@ -110,22 +110,32 @@ def _evento_audio(frase: str) -> str:
         print(f"[voz] falha ao sintetizar frase: {e!r}")
         return ""
 
-def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem: str):
+def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
+                            mensagem_visivel: str = None, texto_transcricao: str = None):
     """Como _fluxo_resposta_agente, mas sintetiza voz frase a frase à medida
     que o texto da resposta vai chegando — a Alma começa a falar sem esperar
-    pela resposta toda estar pronta."""
-    yield f"data: {json.dumps({'transcricao': mensagem}, ensure_ascii=False)}\n\n"
+    pela resposta toda estar pronta.
+
+    mensagem_agente é o que o modelo recebe (pode incluir contexto extra, ex:
+    a transcrição de uma reunião em curso); mensagem_visivel e
+    texto_transcricao (por omissão, iguais a mensagem_agente) são o que fica
+    no histórico e o que é mostrado como "ouvi isto", respetivamente — úteis
+    quando o que se ouviu não deve ser, ao mesmo tempo, o texto todo enviado
+    ao modelo."""
+    mensagem_visivel = mensagem_visivel or mensagem_agente
+    texto_transcricao = texto_transcricao if texto_transcricao is not None else mensagem_agente
+    yield f"data: {json.dumps({'transcricao': texto_transcricao}, ensure_ascii=False)}\n\n"
 
     mensagens = historico_sessao(sessao, utilizador)
-    mensagens.append({"role": "user", "content": mensagem})
+    mensagens.append({"role": "user", "content": mensagem_agente})
 
     try:
         if not perfil_existe(utilizador):
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem[:500])
-            log_routing(mensagem[:500], agente)
+            agente = encaminhar(mensagem_agente[:500])
+            log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
@@ -148,7 +158,7 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem: str):
         return
 
     resposta = "".join(partes)
-    guardar_mensagem(utilizador, sessao, "user", mensagem)
+    guardar_mensagem(utilizador, sessao, "user", mensagem_visivel)
     guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
     yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
@@ -175,6 +185,77 @@ async def alma_por_voz(utilizador: str = Form(...), sessao: str = Form(...),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+@app.post("/alma/reuniao/iniciar")
+def reuniao_iniciar(sessao: str = Form(...)):
+    """Começa o modo reunião: a Alma passa a ouvir em contínuo (excertos
+    curtos, um após o outro) e só responde quando for chamada pelo nome."""
+    reuniao.iniciar(sessao)
+    return {"ok": True}
+
+@app.post("/alma/reuniao/chunk")
+async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
+                        audio: UploadFile = File(...)):
+    """Recebe mais um excerto curto da reunião em curso. Transcreve-o e
+    acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
+    excerto não mencionar a Alma, devolve só a transcrição (para uma
+    legenda ao vivo, se a consola quiser mostrar); se a mencionar, devolve
+    antes um stream com a resposta (texto + voz), tal como em /alma/voz."""
+    if not reuniao.em_curso(sessao):
+        raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
+
+    bruto = await audio.read()
+    if len(bruto) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Áudio demasiado grande (máx. 15 MB)")
+
+    try:
+        texto = voz.transcrever(bruto, audio.filename or "audio.webm", audio.content_type or "audio/webm")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao transcrever o áudio: {e}")
+
+    if not texto:
+        return {"transcricao": "", "acionado": False}
+
+    reuniao.registar(sessao, texto)
+    if not reuniao.foi_chamada(texto):
+        return {"transcricao": texto, "acionado": False}
+
+    contexto = reuniao.transcricao_ate_agora(sessao)
+    mensagem_agente = (
+        "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
+        "direta como de costume). Isto é o que já se disse até agora, transcrito "
+        f"automaticamente (pode ter erros ou sobreposição de vozes):\n\n{contexto}\n\n"
+        f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto}"\n\n'
+        "Responde diretamente a essa pessoa, como se estivesses presente na sala."
+    )
+    return StreamingResponse(
+        _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
+                                mensagem_visivel=f"🎙️ (reunião) {texto}", texto_transcricao=texto),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+@app.post("/alma/reuniao/terminar")
+def reuniao_terminar(utilizador: str = Form(...), sessao: str = Form(...)):
+    """Termina o modo reunião e gera um resumo/ata a partir de tudo o que foi
+    ouvido — esse resumo é o único registo que fica guardado; a transcrição
+    bruta é descartada a partir daqui."""
+    transcricao = reuniao.terminar(sessao)
+    if not transcricao.strip():
+        return {"resumo": "Não ouvi conversa suficiente para gerar um resumo desta reunião."}
+
+    mensagem_agente = (
+        "Acabaste de ouvir esta reunião do início ao fim, em modo contínuo "
+        "(transcrição automática — pode ter erros e alguma sobreposição de vozes):\n\n"
+        f"{transcricao}\n\n"
+        "Escreve um resumo/ata claro e conciso: principais pontos discutidos, decisões "
+        "tomadas e ações com responsável, se forem identificáveis."
+    )
+    resultado = _responder_e_guardar(
+        utilizador, sessao, mensagem_agente,
+        mensagem_visivel="🎙️ (fim da reunião) Gera o resumo desta reunião."
+    )
+    return {"resumo": resultado["resposta"]}
 
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
