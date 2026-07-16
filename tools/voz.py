@@ -35,6 +35,15 @@ def sintetizar(texto: str) -> bytes:
         json={
             "text": texto,
             "model_id": "eleven_flash_v2_5",  # multilingue (inclui português) e o mais rápido
+            "voice_settings": {
+                # stability mais baixa dá mais variação de entoação (menos "monótono
+                # e sério"); style acrescenta um pouco de exagero expressivo — o
+                # resultado é um tom mais alegre, sem exagerar ao ponto de soar instável.
+                "stability": 0.35,
+                "similarity_boost": 0.8,
+                "style": 0.45,
+                "use_speaker_boost": True,
+            },
         },
         timeout=60,
     )
