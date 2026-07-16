@@ -579,7 +579,6 @@
           <form id="form">
             <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
             <input id="ficheiro-input" type="file" hidden accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
-            <button id="microfone" type="button" class="icon-btn-composer" aria-label="Falar com a Alma" title="Mantém premido para falar">🎤</button>
             <button id="reuniao-btn" type="button" class="icon-btn-composer" aria-label="Modo reunião" title="Começar/terminar modo reunião">🎙️</button>
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
@@ -647,11 +646,6 @@
   const anexoRemover = document.getElementById("anexo-remover");
   let ficheiroAnexado = null;
 
-  const microfoneBtn = document.getElementById("microfone");
-  let mediaRecorder = null;
-  let chunksAudio = [];
-  let streamMic = null;
-
   // fila de reprodução — as frases de voz vão chegando uma a uma (por SSE) e
   // têm de tocar em sequência, mesmo que a síntese da frase seguinte já
   // tenha chegado antes de a anterior acabar de tocar
@@ -682,119 +676,6 @@
     audioEl.play().catch(seguinte);
   }
 
-  async function iniciarGravacao() {
-    if (mediaRecorder && mediaRecorder.state === "recording") return;
-    try {
-      streamMic = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (_) {
-      addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
-      return;
-    }
-    chunksAudio = [];
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
-               : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-    mediaRecorder = new MediaRecorder(streamMic, { mimeType: mime });
-    mediaRecorder.addEventListener("dataavailable", (e) => {
-      if (e.data && e.data.size > 0) chunksAudio.push(e.data);
-    });
-    mediaRecorder.addEventListener("stop", () => {
-      const blob = new Blob(chunksAudio, { type: mediaRecorder.mimeType });
-      streamMic.getTracks().forEach((t) => t.stop());
-      streamMic = null;
-      enviarAudioGravado(blob);
-    });
-    mediaRecorder.start();
-    microfoneBtn.classList.add("a-gravar");
-    microfoneBtn.textContent = "🔴";
-  }
-
-  function pararGravacao() {
-    if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
-    microfoneBtn.classList.remove("a-gravar");
-    microfoneBtn.textContent = "🎤";
-  }
-
-  microfoneBtn.addEventListener("mousedown", (e) => { e.preventDefault(); iniciarGravacao(); });
-  microfoneBtn.addEventListener("touchstart", (e) => { e.preventDefault(); iniciarGravacao(); });
-  microfoneBtn.addEventListener("mouseup", pararGravacao);
-  microfoneBtn.addEventListener("touchend", pararGravacao);
-  microfoneBtn.addEventListener("mouseleave", () => { if (mediaRecorder && mediaRecorder.state === "recording") pararGravacao(); });
-
-  async function enviarAudioGravado(blob) {
-    if (blob.size < 500) return;  // gravação demasiado curta (toque acidental), ignora
-    input.disabled = true;
-    sendBtn.disabled = true;
-    anexarBtn.disabled = true;
-    microfoneBtn.disabled = true;
-    addTyping();
-
-    try {
-      const dados = new FormData();
-      dados.append("utilizador", UTILIZADOR);
-      dados.append("sessao", sessao);
-      dados.append("audio", blob, "gravacao.webm");
-      const resp = await fetch("/alma/voz", { method: "POST", body: dados });
-
-      if (!resp.ok) {
-        removeTyping();
-        let detalhe = resp.status + " " + resp.statusText;
-        try {
-          const err = await resp.json();
-          if (err.detail) detalhe = err.detail;
-        } catch (_) {}
-        addMessage("error", "Erro ao contactar a Alma: " + detalhe);
-      } else {
-        let msg = null;
-        let textoCompleto = "";
-        let erro = null;
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let bufferSSE = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          bufferSSE += decoder.decode(value, { stream: true });
-          const linhas = bufferSSE.split("\n\n");
-          bufferSSE = linhas.pop();
-          for (const linha of linhas) {
-            if (!linha.startsWith("data: ")) continue;
-            let ev;
-            try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
-            if (ev.transcricao) {
-              removeTyping();
-              addMessage("user", ev.transcricao);
-              addTyping();
-            } else if (ev.delta) {
-              if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
-              textoCompleto += ev.delta;
-              msg.atualizar(textoCompleto);
-            } else if (ev.audio) {
-              enfileirarAudio(ev.audio);
-            } else if (ev.erro) {
-              erro = ev.erro;
-            }
-          }
-        }
-        if (erro) {
-          removeTyping();
-          addMessage("error", "Erro ao contactar a Alma: " + erro);
-        } else if (!msg) {
-          removeTyping();
-          addMessage("assistant", "(sem resposta)");
-        }
-        fetchSessions();
-      }
-    } catch (err) {
-      removeTyping();
-      addMessage("error", "Falha de rede: " + err.message);
-    } finally {
-      input.disabled = false;
-      sendBtn.disabled = false;
-      anexarBtn.disabled = false;
-      microfoneBtn.disabled = false;
-    }
-  }
-
   // modo reunião — em vez de push-to-talk, a Alma ouve em excertos curtos e
   // contínuos; só entra na conversa quando alguém a chama pelo nome. O
   // excerto seguinte começa a gravar logo que o anterior termina (sem
@@ -806,6 +687,11 @@
   let reuniaoStreamMic = null;
   let reuniaoRecorder = null;
   const DURACAO_EXCERTO_REUNIAO_MS = 8000;
+  // fila que garante que os excertos chegam ao servidor pela mesma ordem em
+  // que foram gravados, mesmo que a rede entregue as respostas fora de
+  // ordem (ex: um excerto demora mais a transcrever que o seguinte) — sem
+  // isto, a transcrição acumulada podia ficar com a ordem trocada
+  let filaEnvioReuniao = Promise.resolve();
 
   async function iniciarModoReuniao() {
     if (reuniaoAtiva) return;
@@ -815,6 +701,12 @@
       addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
       return;
     }
+    reuniaoStreamMic.getAudioTracks()[0].addEventListener("ended", () => {
+      if (reuniaoAtiva) {
+        addMessage("error", "Perdi o acesso ao microfone — terminei o modo reunião.");
+        pararModoReuniao();
+      }
+    });
     try {
       await fetch("/alma/reuniao/iniciar", {
         method: "POST",
@@ -844,15 +736,26 @@
     rec.addEventListener("stop", () => {
       const blob = new Blob(pedacos, { type: rec.mimeType });
       if (reuniaoAtiva) {
-        gravarProximoExcertoReuniao();
+        gravarProximoExcertoReuniao();  // continua a ouvir já, sem esperar pelo envio deste excerto
       } else if (reuniaoStreamMic) {
         reuniaoStreamMic.getTracks().forEach((t) => t.stop());
         reuniaoStreamMic = null;
       }
-      enviarExcertoReuniao(blob);
+      // encadeado na fila (não disparado em paralelo): garante a ordem
+      filaEnvioReuniao = filaEnvioReuniao.then(() => enviarExcertoReuniao(blob));
+    });
+    rec.addEventListener("error", (e) => {
+      console.error("Erro no MediaRecorder do modo reunião:", e.error || e);
+      if (reuniaoAtiva) gravarProximoExcertoReuniao();  // não deixa a escuta morrer em silêncio
     });
     reuniaoRecorder = rec;
-    rec.start();
+    try {
+      rec.start();
+    } catch (e) {
+      console.error("Falha ao iniciar a gravação de um excerto:", e);
+      if (reuniaoAtiva) setTimeout(gravarProximoExcertoReuniao, 500);
+      return;
+    }
     setTimeout(() => { if (rec.state === "recording") rec.stop(); }, DURACAO_EXCERTO_REUNIAO_MS);
   }
 
