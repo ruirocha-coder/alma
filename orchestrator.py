@@ -4,6 +4,7 @@ from agents import ceo
 client = anthropic.Anthropic()
 
 AGENTES = {"ceo": ceo.responder}
+AGENTES_STREAM = {"ceo": ceo.responder_stream}
 # semana 5+: "orcamentos": orcamentos.responder, "design": design.responder, ...
 
 def encaminhar(pergunta: str) -> str:

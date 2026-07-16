@@ -1,13 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import os
+import json, os
 import threading
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
-from orchestrator import encaminhar, AGENTES
+from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
@@ -55,6 +56,48 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
 @app.post("/alma")
 def alma(p: Pedido):
     return _responder_e_guardar(p.utilizador, p.sessao, p.mensagem)
+
+def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None):
+    """Generator SSE: transmite a resposta do agente à medida que o modelo a
+    gera (rondas de tool-use são resolvidas em silêncio antes disso — só o
+    texto final visível é transmitido), e no fim guarda a troca completa no
+    histórico, tal como _responder_e_guardar faz na versão não-streaming."""
+    mensagens = historico_sessao(sessao, utilizador)
+    mensagens.append({"role": "user", "content": mensagem_agente})
+
+    try:
+        if not perfil_existe(utilizador):
+            gerador = acolhimento.responder_stream(utilizador, mensagens)
+            agente = "acolhimento"
+        else:
+            agente = encaminhar(mensagem_agente[:500])
+            log_routing(mensagem_agente[:500], agente)
+            gerador = AGENTES_STREAM[agente](utilizador, mensagens)
+    except Exception as e:
+        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
+        return
+
+    partes = []
+    try:
+        for pedaco in gerador:
+            partes.append(pedaco)
+            yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
+        return
+
+    resposta = "".join(partes)
+    guardar_mensagem(utilizador, sessao, "user", mensagem_visivel or mensagem_agente)
+    guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+@app.post("/alma/stream")
+def alma_stream(p: Pedido):
+    return StreamingResponse(
+        _fluxo_resposta_agente(p.utilizador, p.sessao, p.mensagem),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),

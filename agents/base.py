@@ -75,6 +75,51 @@ def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, orige
         return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
     return basecamp.publicar_mural(assunto, mensagem)
 
+def _system_com_cache(system_prompt: str, contexto: str) -> list:
+    """A parte fixa do system prompt (persona + missão do agente) é sempre a
+    mesma entre pedidos — marcá-la para cache poupa reprocessar os mesmos
+    milhares de tokens em cada chamada. O contexto do utilizador (perfil +
+    memória) muda por pessoa, por isso fica depois, fora do bloco cacheado."""
+    blocos = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+    if contexto:
+        blocos.append({"type": "text", "text": contexto})
+    return blocos
+
+def _tools_com_cache(tools: list) -> list:
+    """As ferramentas de um agente são sempre as mesmas entre pedidos — marca
+    a última para cache (a API cacheia tudo até esse bloco, inclusive)."""
+    if not tools:
+        return tools
+    return [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
+
+def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> list:
+    resultados = []
+    for bloco in blocos:
+        if bloco.type == "tool_use":
+            try:
+                funcao = funcoes_utilizador.get(bloco.name) or FUNCOES[bloco.name]
+                out = funcao(**bloco.input)
+            except Exception as e:
+                print(f"[ferramenta] {bloco.name}({bloco.input}) falhou: {e!r}")
+                out = {"erro": str(e)}
+            resultados.append({
+                "type": "tool_result",
+                "tool_use_id": bloco.id,
+                "content": json.dumps(out, ensure_ascii=False, default=str)
+            })
+    return resultados
+
+def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str):
+    contexto = db.contexto_utilizador(utilizador)
+    system = _system_com_cache(system_prompt, contexto)
+    tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL)
+    funcoes_utilizador = {
+        "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
+        "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
+        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem, origem),
+    }
+    return system, tools_completas, funcoes_utilizador
+
 def correr_agente(system_prompt: str, tools: list, mensagens: list,
                   utilizador: str, modelo: str = "claude-sonnet-4-6", origem: str = "consola") -> str:
     """Loop de agente com memória por utilizador: chama o modelo, executa tools até haver resposta final.
@@ -84,14 +129,7 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list,
     `origem` ("consola" ou "basecamp") é só para decidir permissões
     (ex: quem pode pedir uma publicação no mural), nunca para identificar
     quem é a pessoa."""
-    funcoes_utilizador = {
-        "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
-        "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
-        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem, origem),
-    }
-    contexto = db.contexto_utilizador(utilizador)
-    system = system_prompt + ("\n\n" + contexto if contexto else "")
-    tools_completas = tools + TOOLS_MEMORIA + TOOLS_MURAL
+    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem)
 
     while True:
         resposta = client.messages.create(
@@ -102,18 +140,27 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list,
             return "".join(b.text for b in resposta.content if b.type == "text")
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        resultados = []
-        for bloco in resposta.content:
-            if bloco.type == "tool_use":
-                try:
-                    funcao = funcoes_utilizador.get(bloco.name) or FUNCOES[bloco.name]
-                    out = funcao(**bloco.input)
-                except Exception as e:
-                    print(f"[ferramenta] {bloco.name}({bloco.input}) falhou: {e!r}")
-                    out = {"erro": str(e)}
-                resultados.append({
-                    "type": "tool_result",
-                    "tool_use_id": bloco.id,
-                    "content": json.dumps(out, ensure_ascii=False, default=str)
-                })
-        mensagens.append({"role": "user", "content": resultados})
+        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes_utilizador)})
+
+def correr_agente_stream(system_prompt: str, tools: list, mensagens: list,
+                         utilizador: str, modelo: str = "claude-sonnet-4-6", origem: str = "consola"):
+    """Generator: dá 'yield' a pedaços de texto da resposta final, à medida
+    que chegam do modelo. Rondas de tool-use são resolvidas por completo (sem
+    stream) antes disso — só a resposta final visível à pessoa é transmitida
+    em tempo real."""
+    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem)
+
+    while True:
+        with client.messages.stream(
+            model=modelo, max_tokens=2000,
+            system=system, tools=tools_completas, messages=mensagens
+        ) as stream:
+            for texto in stream.text_stream:
+                yield texto
+            resposta = stream.get_final_message()
+
+        if resposta.stop_reason != "tool_use":
+            return
+
+        mensagens.append({"role": "assistant", "content": resposta.content})
+        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes_utilizador)})

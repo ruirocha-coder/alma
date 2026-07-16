@@ -548,7 +548,6 @@
 
 <script>
 (function () {
-  const API_URL = "/alma";
   let UTILIZADOR = localStorage.getItem("alma_utilizador");
 
   let sessao = sessionStorage.getItem("alma_sessao");
@@ -771,7 +770,7 @@
     });
   }
 
-  function criarBarraAcoes(texto) {
+  function criarBarraAcoes(obterTexto) {
     const barra = document.createElement("div");
     barra.className = "msg-actions";
 
@@ -782,7 +781,7 @@
     copiarBtn.title = "Copiar mensagem";
     copiarBtn.addEventListener("click", async () => {
       try {
-        await copiarParaClipboard(texto);
+        await copiarParaClipboard(obterTexto());
         copiarBtn.textContent = "✓";
         setTimeout(() => { copiarBtn.textContent = "📋"; }, 1200);
       } catch (_) { /* falha silenciosa — o botão simplesmente não muda */ }
@@ -796,7 +795,7 @@
       partilharBtn.textContent = "⤴";
       partilharBtn.title = "Partilhar mensagem";
       partilharBtn.addEventListener("click", () => {
-        navigator.share({ text: texto }).catch(() => {});
+        navigator.share({ text: obterTexto() }).catch(() => {});
       });
       barra.appendChild(partilharBtn);
     }
@@ -804,29 +803,42 @@
     return barra;
   }
 
+  // devolve { bubble, atualizar(novoTexto) } — usado tal e qual para mensagens
+  // normais (texto fixo) e para respostas em streaming (texto vai crescendo)
   function addMessage(role, text) {
     const emptyState = messagesInner.querySelector(".empty-state");
     if (emptyState) emptyState.remove();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
+    let textoAtual = text;
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    if (role === "assistant") {
-      bubble.innerHTML = renderMarkdown(text);
-    } else {
-      bubble.textContent = text;
+    function renderizar() {
+      if (role === "assistant") {
+        bubble.innerHTML = renderMarkdown(textoAtual);
+      } else {
+        bubble.textContent = textoAtual;
+      }
     }
+    renderizar();
     const content = document.createElement("div");
     content.className = "msg-content";
     content.appendChild(bubble);
     if (role === "user" || role === "assistant") {
-      content.appendChild(criarBarraAcoes(text));
+      content.appendChild(criarBarraAcoes(() => textoAtual));
     }
     wrap.appendChild(makeAvatar(role));
     wrap.appendChild(content);
     messagesInner.appendChild(wrap);
     scrollToBottom();
-    return bubble;
+    return {
+      bubble,
+      atualizar(novoTexto) {
+        textoAtual = novoTexto;
+        renderizar();
+        scrollToBottom();
+      }
+    };
   }
 
   function addTyping() {
@@ -996,35 +1008,79 @@
     addTyping();
 
     try {
-      let resp;
       if (ficheiro) {
         const dados = new FormData();
         dados.append("utilizador", UTILIZADOR);
         dados.append("sessao", sessao);
         dados.append("mensagem", mensagem);
         dados.append("ficheiro", ficheiro);
-        resp = await fetch("/alma/ficheiro", { method: "POST", body: dados });
+        const resp = await fetch("/alma/ficheiro", { method: "POST", body: dados });
+        removeTyping();
+        if (!resp.ok) {
+          let detalhe = resp.status + " " + resp.statusText;
+          try {
+            const err = await resp.json();
+            if (err.detail) detalhe = err.detail;
+          } catch (_) {}
+          addMessage("error", "Erro ao contactar a Alma: " + detalhe);
+        } else {
+          const data = await resp.json();
+          addMessage("assistant", data.resposta || "(sem resposta)");
+          fetchSessions();
+        }
       } else {
-        resp = await fetch(API_URL, {
+        const resp = await fetch("/alma/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ utilizador: UTILIZADOR, sessao, mensagem })
         });
-      }
 
-      removeTyping();
-
-      if (!resp.ok) {
-        let detalhe = resp.status + " " + resp.statusText;
-        try {
-          const err = await resp.json();
-          if (err.detail) detalhe = err.detail;
-        } catch (_) {}
-        addMessage("error", "Erro ao contactar a Alma: " + detalhe);
-      } else {
-        const data = await resp.json();
-        addMessage("assistant", data.resposta || "(sem resposta)");
-        fetchSessions();
+        if (!resp.ok) {
+          removeTyping();
+          let detalhe = resp.status + " " + resp.statusText;
+          try {
+            const err = await resp.json();
+            if (err.detail) detalhe = err.detail;
+          } catch (_) {}
+          addMessage("error", "Erro ao contactar a Alma: " + detalhe);
+        } else {
+          // a resposta chega em pedaços (SSE) — a bolha só aparece quando o
+          // primeiro pedaço de texto chegar, o indicador "a escrever" fica
+          // visível até lá
+          let msg = null;
+          let textoCompleto = "";
+          let erro = null;
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let bufferSSE = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            bufferSSE += decoder.decode(value, { stream: true });
+            const linhas = bufferSSE.split("\n\n");
+            bufferSSE = linhas.pop();  // pedaço incompleto fica para a próxima leitura
+            for (const linha of linhas) {
+              if (!linha.startsWith("data: ")) continue;
+              let dados;
+              try { dados = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+              if (dados.delta) {
+                if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
+                textoCompleto += dados.delta;
+                msg.atualizar(textoCompleto);
+              } else if (dados.erro) {
+                erro = dados.erro;
+              }
+            }
+          }
+          if (erro) {
+            removeTyping();
+            addMessage("error", "Erro ao contactar a Alma: " + erro);
+          } else if (!msg) {
+            removeTyping();
+            addMessage("assistant", "(sem resposta)");
+          }
+          fetchSessions();
+        }
       }
     } catch (err) {
       removeTyping();

@@ -1,6 +1,6 @@
 from persona import PERSONA
 from tools.bigcommerce import TOOL_RESUMO_VENDAS
-from agents.base import correr_agente, TOOLS_COMUNS
+from agents.base import correr_agente, correr_agente_stream, TOOLS_COMUNS
 
 TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS]
 
@@ -58,3 +58,6 @@ esquecer."""
 
 def responder(utilizador: str, mensagens: list) -> str:
     return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens, utilizador)
+
+def responder_stream(utilizador: str, mensagens: list):
+    return correr_agente_stream(MISSAO_CEO, TOOLS_CEO, mensagens, utilizador)

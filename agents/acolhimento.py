@@ -1,6 +1,5 @@
-import json
 from persona import PERSONA
-from agents.base import client
+from agents.base import client, _system_com_cache, _tools_com_cache, _executar_tool_uses
 import db
 
 MISSAO_ACOLHIMENTO = PERSONA + """
@@ -44,27 +43,38 @@ TOOLS_ACOLHIMENTO = [
     }
 ]
 
+def _preparar(utilizador: str):
+    system = _system_com_cache(MISSAO_ACOLHIMENTO, "")
+    tools = _tools_com_cache(TOOLS_ACOLHIMENTO)
+    funcoes = {"guardar_perfil": lambda **kwargs: db.guardar_perfil(utilizador=utilizador, **kwargs)}
+    return system, tools, funcoes
+
 def responder(utilizador: str, mensagens: list) -> str:
+    system, tools, funcoes = _preparar(utilizador)
     while True:
         resposta = client.messages.create(
             model="claude-sonnet-4-6", max_tokens=1500,
-            system=MISSAO_ACOLHIMENTO, tools=TOOLS_ACOLHIMENTO, messages=mensagens
+            system=system, tools=tools, messages=mensagens
         )
         if resposta.stop_reason != "tool_use":
             return "".join(b.text for b in resposta.content if b.type == "text")
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        resultados = []
-        for bloco in resposta.content:
-            if bloco.type == "tool_use":
-                try:
-                    out = db.guardar_perfil(utilizador=utilizador, **bloco.input)
-                except Exception as e:
-                    print(f"[ferramenta] guardar_perfil({bloco.input}) falhou: {e!r}")
-                    out = {"erro": str(e)}
-                resultados.append({
-                    "type": "tool_result",
-                    "tool_use_id": bloco.id,
-                    "content": json.dumps(out, ensure_ascii=False, default=str)
-                })
-        mensagens.append({"role": "user", "content": resultados})
+        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes)})
+
+def responder_stream(utilizador: str, mensagens: list):
+    system, tools, funcoes = _preparar(utilizador)
+    while True:
+        with client.messages.stream(
+            model="claude-sonnet-4-6", max_tokens=1500,
+            system=system, tools=tools, messages=mensagens
+        ) as stream:
+            for texto in stream.text_stream:
+                yield texto
+            resposta = stream.get_final_message()
+
+        if resposta.stop_reason != "tool_use":
+            return
+
+        mensagens.append({"role": "assistant", "content": resposta.content})
+        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes)})
