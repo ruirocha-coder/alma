@@ -162,30 +162,6 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
     guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
     yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
-@app.post("/alma/voz")
-async def alma_por_voz(utilizador: str = Form(...), sessao: str = Form(...),
-                       audio: UploadFile = File(...)):
-    """Pergunta à Alma por voz: transcreve a gravação, pergunta como de
-    costume, e devolve a resposta em stream (texto + voz sintetizada frase a
-    frase, à medida que a resposta vai sendo gerada)."""
-    bruto = await audio.read()
-    if len(bruto) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Áudio demasiado grande (máx. 15 MB)")
-
-    try:
-        mensagem = voz.transcrever(bruto, audio.filename or "audio.webm", audio.content_type or "audio/webm")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Falha ao transcrever o áudio: {e}")
-    if not mensagem:
-        raise HTTPException(status_code=422,
-                            detail="Não consegui perceber o áudio — tenta falar mais perto do microfone.")
-
-    return StreamingResponse(
-        _fluxo_resposta_por_voz(utilizador, sessao, mensagem),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    )
-
 @app.post("/alma/reuniao/iniciar")
 def reuniao_iniciar(sessao: str = Form(...)):
     """Começa o modo reunião: a Alma passa a ouvir em contínuo (excertos
@@ -200,7 +176,7 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
     excerto não mencionar a Alma, devolve só a transcrição (para uma
     legenda ao vivo, se a consola quiser mostrar); se a mencionar, devolve
-    antes um stream com a resposta (texto + voz), tal como em /alma/voz."""
+    antes um stream com a resposta (texto + voz)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
