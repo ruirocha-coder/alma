@@ -83,15 +83,6 @@ def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, orige
         return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
     return basecamp.publicar_mural(assunto, mensagem, projeto=projeto)
 
-def _mural_da_empresa(utilizador: str) -> str:
-    """Alguém da equipa Ecos Largos que peça para publicar no mural deve
-    publicar no mural deles (só visível à sua equipa), não no da Gestão."""
-    try:
-        return "Ecos Largos" if basecamp.pertence_a_ecos_largos(utilizador) else "Gestão"
-    except Exception as e:
-        print(f"[base] não consegui verificar a equipa Ecos Largos para o mural, a assumir Gestão: {e!r}")
-        return "Gestão"
-
 def _system_com_cache(system_prompt: str, contexto: str) -> list:
     """A parte fixa do system prompt (persona + missão do agente) é sempre a
     mesma entre pedidos — marcá-la para cache poupa reprocessar os mesmos
@@ -126,11 +117,10 @@ def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> list:
             })
     return resultados
 
-def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str):
+def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, projeto_mural: str):
     contexto = db.contexto_utilizador(utilizador)
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL)
-    projeto_mural = _mural_da_empresa(utilizador)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
@@ -139,16 +129,20 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str):
     }
     return system, tools_completas, funcoes_utilizador
 
-def correr_agente(system_prompt: str, tools: list, mensagens: list,
-                  utilizador: str, modelo: str = "claude-sonnet-4-6", origem: str = "consola") -> str:
+def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: str,
+                  modelo: str = "claude-sonnet-4-6", origem: str = "consola",
+                  projeto_mural: str = "Gestão") -> str:
     """Loop de agente com memória por utilizador: chama o modelo, executa tools até haver resposta final.
 
     `utilizador` deve ser o identificador real da pessoa (o mesmo em qualquer
     canal), para o perfil e a memória de longo prazo serem partilhados —
     `origem` ("consola" ou "basecamp") é só para decidir permissões
     (ex: quem pode pedir uma publicação no mural), nunca para identificar
-    quem é a pessoa."""
-    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem)
+    quem é a pessoa. `projeto_mural` é o mural onde publicar_mural publica —
+    cada agente declara o seu (ex: o da Ecos Largos usa "Ecos Largos"),
+    porque é o agente escolhido para esta mensagem que sabe isso, não o
+    utilizador em si (alguém pode trabalhar com as duas equipas)."""
+    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem, projeto_mural)
 
     while True:
         resposta = client.messages.create(
@@ -161,8 +155,9 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list,
         mensagens.append({"role": "assistant", "content": resposta.content})
         mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes_utilizador)})
 
-def correr_agente_stream(system_prompt: str, tools: list, mensagens: list,
-                         utilizador: str, modelo: str = "claude-sonnet-4-6", origem: str = "consola"):
+def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utilizador: str,
+                         modelo: str = "claude-sonnet-4-6", origem: str = "consola",
+                         projeto_mural: str = "Gestão"):
     """Generator: dá 'yield' a pedaços de texto da resposta final, à medida
     que chegam do modelo. Rondas de tool-use são resolvidas por completo (sem
     stream) antes disso — só a resposta final visível à pessoa é transmitida
@@ -173,7 +168,7 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list,
     None de vez em quando — um sinal de vida, não texto real — para quem
     consome o stream saber que a Alma continua a tratar do pedido, em vez de
     parecer parada."""
-    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem)
+    system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem, projeto_mural)
 
     while True:
         with client.messages.stream(

@@ -34,7 +34,7 @@ pessoa, usa memorizar_facto. Se a pessoa pedir para esqueceres algo, usa
 esquecer."""
 
 def responder(utilizador: str, mensagens: list) -> str:
-    return correr_agente(MISSAO_ECOS_LARGOS, TOOLS_ECOS_LARGOS, mensagens, utilizador)
+    return correr_agente(MISSAO_ECOS_LARGOS, TOOLS_ECOS_LARGOS, mensagens, utilizador, projeto_mural="Ecos Largos")
 
 def responder_stream(utilizador: str, mensagens: list):
-    return correr_agente_stream(MISSAO_ECOS_LARGOS, TOOLS_ECOS_LARGOS, mensagens, utilizador)
+    return correr_agente_stream(MISSAO_ECOS_LARGOS, TOOLS_ECOS_LARGOS, mensagens, utilizador, projeto_mural="Ecos Largos")
