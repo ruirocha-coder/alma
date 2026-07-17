@@ -1,5 +1,5 @@
 import anthropic, json, threading
-from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp
+from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos
 import db
 
 # entre rondas de tool-use (ex: a consultar o Basecamp, que pode demorar
@@ -29,6 +29,7 @@ FUNCOES = {
     "documentos_referencia_empresa": documentos_referencia.documentos_referencia_empresa,
     "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
     "resumo_pessoa_basecamp": basecamp.resumo_pessoa_basecamp,
+    "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
@@ -66,7 +67,7 @@ TOOLS_MEMORIA = [
 TOOLS_MURAL = [
     {
         "name": "publicar_mural",
-        "description": "Publica uma mensagem no Mural do Basecamp, visível a toda a equipa. USA ISTO SÓ quando o pedido for estrita e explicitamente para publicares no mural (ex: \"publica isto no mural\") — nunca por iniciativa própria, por achares um assunto importante, ou como forma de responder a uma pergunta geral. Qualquer outra situação (incluindo responder a uma menção numa tarefa/card) é sempre um comentário normal, nunca isto. Na consola de chat qualquer pessoa pode pedir. Vindo de uma menção no Basecamp, só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente — qualquer outra pessoa a pedir isso a partir do Basecamp, recusa e explica que só eles podem pedir por ali.",
+        "description": "Publica uma mensagem no Mural do Basecamp do teu projeto/equipa (o da Gestão, ou o da Ecos Largos se for alguém dessa equipa) — visível a quem lá está. USA ISTO SÓ quando o pedido for estrita e explicitamente para publicares no mural (ex: \"publica isto no mural\") — nunca por iniciativa própria, por achares um assunto importante, ou como forma de responder a uma pergunta geral. Qualquer outra situação (incluindo responder a uma menção numa tarefa/card) é sempre um comentário normal, nunca isto. Na consola de chat qualquer pessoa pode pedir. Vindo de uma menção no Basecamp, só podes usar isto quando o Rui, a Beatriz ou a Isa pedirem explicitamente — qualquer outra pessoa a pedir isso a partir do Basecamp, recusa e explica que só eles podem pedir por ali.",
         "input_schema": {
             "type": "object",
             "properties": {"assunto": {"type": "string"}, "mensagem": {"type": "string"}},
@@ -77,10 +78,19 @@ TOOLS_MURAL = [
 
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
-def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, origem: str):
+def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, origem: str, projeto: str):
     if origem == "basecamp" and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
         return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
-    return basecamp.publicar_mural(assunto, mensagem)
+    return basecamp.publicar_mural(assunto, mensagem, projeto=projeto)
+
+def _mural_da_empresa(utilizador: str) -> str:
+    """Alguém da equipa Ecos Largos que peça para publicar no mural deve
+    publicar no mural deles (só visível à sua equipa), não no da Gestão."""
+    try:
+        return "Ecos Largos" if basecamp.pertence_a_ecos_largos(utilizador) else "Gestão"
+    except Exception as e:
+        print(f"[base] não consegui verificar a equipa Ecos Largos para o mural, a assumir Gestão: {e!r}")
+        return "Gestão"
 
 def _system_com_cache(system_prompt: str, contexto: str) -> list:
     """A parte fixa do system prompt (persona + missão do agente) é sempre a
@@ -120,10 +130,12 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str):
     contexto = db.contexto_utilizador(utilizador)
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL)
+    projeto_mural = _mural_da_empresa(utilizador)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
-        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(utilizador, assunto, mensagem, origem),
+        "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
+            utilizador, assunto, mensagem, origem, projeto_mural),
     }
     return system, tools_completas, funcoes_utilizador
 
