@@ -1,6 +1,12 @@
-import anthropic, json
+import anthropic, json, threading
 from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp
 import db
+
+# entre rondas de tool-use (ex: a consultar o Basecamp, que pode demorar
+# bastante numa conta com muito histórico) o stream fica sem nada para
+# transmitir — sem isto, a consola ficava sem sinal de que a Alma continua a
+# tratar do pedido durante esse tempo.
+_INTERVALO_SINAL_DE_VIDA = 8
 
 client = anthropic.Anthropic()
 
@@ -148,7 +154,13 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list,
     """Generator: dá 'yield' a pedaços de texto da resposta final, à medida
     que chegam do modelo. Rondas de tool-use são resolvidas por completo (sem
     stream) antes disso — só a resposta final visível à pessoa é transmitida
-    em tempo real."""
+    em tempo real.
+
+    Enquanto uma tool está a correr (pode demorar bastante, ex: uma consulta
+    ao Basecamp numa conta com muito histórico), o generator dá 'yield' a
+    None de vez em quando — um sinal de vida, não texto real — para quem
+    consome o stream saber que a Alma continua a tratar do pedido, em vez de
+    parecer parada."""
     system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem)
 
     while True:
@@ -164,4 +176,15 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list,
             return
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes_utilizador)})
+
+        resultado = {}
+        def _correr_tools():
+            resultado["saida"] = _executar_tool_uses(resposta.content, funcoes_utilizador)
+        tarefa = threading.Thread(target=_correr_tools, daemon=True)
+        tarefa.start()
+        while tarefa.is_alive():
+            tarefa.join(timeout=_INTERVALO_SINAL_DE_VIDA)
+            if tarefa.is_alive():
+                yield None
+
+        mensagens.append({"role": "user", "content": resultado["saida"]})
