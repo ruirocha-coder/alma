@@ -68,27 +68,24 @@ def procurar_documentos_empresa(pesquisa: str) -> list[dict]:
     return [{k: v for k, v in item.items() if k in ("id", "tipo", "titulo", "projeto", "pasta")}
             for item in correspondem[:40]]
 
-def ler_documento_empresa(id: int) -> dict:
-    """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
-    (de listar_documentos_empresa). Suporta documentos nativos do Basecamp,
-    PDF, Word (.docx), texto simples e CSV."""
-    item = next((i for i in _listar_bruto() if i["id"] == id), None)
-    if not item:
-        return {"erro": "documento não encontrado — confirma o id com procurar_documentos_empresa"}
-
+def _ler_conteudo(item: dict) -> str:
+    """Extrai o texto de um documento/ficheiro (item de _listar_bruto()) —
+    partilhado entre ler_documento_empresa (um id específico) e outros
+    sítios que precisem de ler vários documentos de uma vez (ex: um projeto
+    inteiro tratado como fonte de confiança). Devolve None quando o tipo de
+    ficheiro não é legível (quem chamar decide o que fazer nesse caso)."""
     if item["tipo"] == "documento":
         completo = basecamp.obter_recording(item["url"])
-        return {"titulo": item["titulo"], "conteudo": _texto_simples(completo.get("content", ""))[:6000]}
+        return _texto_simples(completo.get("content", ""))[:6000]
 
     ctype = item.get("content_type") or ""
 
     if ctype in visao.TIPOS_DE_IMAGEM:
         bruto = basecamp._get_bytes(item["download_url"])
-        return {"titulo": item["titulo"], "conteudo": visao.descrever_imagem(bruto, ctype)}
+        return visao.descrever_imagem(bruto, ctype)
 
     if ctype not in TIPOS_DE_FICHEIRO_LEGIVEIS:
-        return {"erro": f"não consigo ler o conteúdo deste tipo de ficheiro ({ctype or item.get('filename')})",
-                "titulo": item["titulo"], "app_url": item.get("app_url")}
+        return None
 
     bruto = basecamp._get_bytes(item["download_url"])
     if ctype == "application/pdf":
@@ -106,7 +103,22 @@ def ler_documento_empresa(id: int) -> dict:
         texto = "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
     else:  # text/plain, text/csv
         texto = bruto.decode("utf-8", errors="ignore")
-    return {"titulo": item["titulo"], "conteudo": texto[:6000]}
+    return texto[:6000]
+
+def ler_documento_empresa(id: int) -> dict:
+    """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
+    (de listar_documentos_empresa). Suporta documentos nativos do Basecamp,
+    PDF, Word (.docx), texto simples e CSV."""
+    item = next((i for i in _listar_bruto() if i["id"] == id), None)
+    if not item:
+        return {"erro": "documento não encontrado — confirma o id com procurar_documentos_empresa"}
+
+    conteudo = _ler_conteudo(item)
+    if conteudo is None:
+        ctype = item.get("content_type") or ""
+        return {"erro": f"não consigo ler o conteúdo deste tipo de ficheiro ({ctype or item.get('filename')})",
+                "titulo": item["titulo"], "app_url": item.get("app_url")}
+    return {"titulo": item["titulo"], "conteudo": conteudo}
 
 TOOLS_DOCUMENTOS_EMPRESA = [
     {
