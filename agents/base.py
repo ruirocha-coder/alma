@@ -22,6 +22,7 @@ FUNCOES = {
     "ler_documento_empresa": documentos_empresa.ler_documento_empresa,
     "documentos_referencia_empresa": documentos_referencia.documentos_referencia_empresa,
     "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
+    "resumo_pessoa_basecamp": basecamp.resumo_pessoa_basecamp,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,

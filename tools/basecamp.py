@@ -4,7 +4,7 @@
 # expira ao fim de ~2 semanas. Guardamos aqui só o refresh_token (não expira) e
 # trocamo-lo por um access_token novo sempre que necessário, em memória.
 import os, re, time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import httpx
 from bs4 import BeautifulSoup
 
@@ -12,6 +12,7 @@ _cache = {}  # {chave: (timestamp, valor)}
 TOKEN_URL = "https://launchpad.37signals.com/authorization/token"
 TIPOS_MONITORIZADOS = ("Todo", "Kanban::Card")
 TTL_ITENS_ATIVOS = 900  # segundos — 15 min chega para pedidos em cadeia (ex: resumo de projeto)
+TTL_CONCLUIDOS_RECENTES = 900
 
 # colunas do Kanban que representam um estado terminal/fechado do fluxo (não
 # trabalho esquecido) — um card parado aqui é esperado, não é sinal de nada.
@@ -187,6 +188,106 @@ def estado_projeto_basecamp(projeto: str) -> dict:
         "cards_parados_sem_prazo": sorted(parados, key=lambda i: -i["dias_parado"])[:30],
     }
 
+def _concluidos_recentemente(dias: int = 7) -> list[dict]:
+    """Tarefas (to-dos) concluídas nos últimos `dias` dias, de todos os
+    projetos — usado para saber "o que fez" alguém numa reunião 1:1. Só
+    Todos (cards do Kanban não têm um estado "concluído" fiável neste fluxo
+    — representam posição numa coluna, não conclusão de trabalho).
+
+    A conta tem milhares de tarefas já concluídas ao longo dos anos, e a API
+    do Basecamp não filtra por data no servidor — por isso pede-se ordenado
+    por atualização mais recente e para de percorrer páginas assim que
+    aparece uma tarefa mais antiga que o corte (tudo o resto, a seguir,
+    também seria). O limite de páginas é só uma rede de segurança caso essa
+    ordenação não se verifique."""
+    chave = f"concluidos_{dias}"
+    if chave in _cache:
+        ts, itens = _cache[chave]
+        if time.time() - ts < TTL_CONCLUIDOS_RECENTES:
+            return itens
+
+    corte = datetime.now(timezone.utc) - timedelta(days=dias)
+    itens = []
+    url = f"{_base_url()}/projects/recordings.json"
+    params = {"type": "Todo", "status": "active", "completed": "true",
+              "sort": "updated_at", "direction": "desc"}
+    for _ in range(50):
+        if not url:
+            break
+        r = httpx.get(url, headers=_headers(), params=params, timeout=30)
+        r.raise_for_status()
+        parar = False
+        for item in r.json():
+            atualizado_em = item.get("updated_at")
+            if not atualizado_em:
+                continue
+            if datetime.fromisoformat(atualizado_em.replace("Z", "+00:00")) < corte:
+                parar = True
+                break
+            itens.append(item)
+        if parar:
+            break
+        url = r.links.get("next", {}).get("url")
+        params = None  # já incluído no url de "next"
+
+    _cache[chave] = (time.time(), itens)
+    return itens
+
+def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
+    """Panorama de uma pessoa da equipa, pensado para preparar uma reunião
+    1:1: o que concluiu nos últimos `dias` dias, o que tem em aberto agora
+    (e o que está atrasado), e como a quantidade de trabalho ativo que tem
+    compara com a média de quem mais tem itens atribuídos — para ajudar a
+    perceber se a carga está ajustada. `nome` é um termo de pesquisa (não
+    precisa de ser o nome completo)."""
+    termo = nome.lower().strip()
+
+    def _e_da_pessoa(item: dict) -> bool:
+        return any(termo in p["name"].lower() for p in item.get("assignees", []))
+
+    ativos = _itens_ativos()
+    itens_pessoa = [i for i in ativos if _e_da_pessoa(i)]
+    concluidos_pessoa = [_formatar_item(i) for i in _concluidos_recentemente(dias) if _e_da_pessoa(i)]
+
+    if not itens_pessoa and not concluidos_pessoa:
+        return {"erro": f"não encontrei nenhum item (ativo ou concluído recentemente) "
+                        f"atribuído a alguém que corresponda a {nome!r}"}
+
+    hoje = date.today()
+    atrasados = []
+    for item in itens_pessoa:
+        prazo = item.get("due_on")
+        if prazo and not item.get("completed") and date.fromisoformat(prazo) < hoje:
+            formatado = _formatar_item(item)
+            formatado["dias_atraso"] = (hoje - date.fromisoformat(prazo)).days
+            atrasados.append(formatado)
+
+    # carga de trabalho: quantos itens ativos cada pessoa com trabalho
+    # atribuído tem neste momento, para comparar esta pessoa com a média
+    contagem_por_pessoa = {}
+    for item in ativos:
+        for p in item.get("assignees", []):
+            contagem_por_pessoa[p["name"]] = contagem_por_pessoa.get(p["name"], 0) + 1
+    media_equipa = (sum(contagem_por_pessoa.values()) / len(contagem_por_pessoa)) if contagem_por_pessoa else 0
+
+    return {
+        "pessoa": nome,
+        "concluido_ultimos_dias": {
+            "dias": dias,
+            "total": len(concluidos_pessoa),
+            "itens": concluidos_pessoa[:40],
+        },
+        "em_aberto_agora": {
+            "total": len(itens_pessoa),
+            "atrasados": sorted(atrasados, key=lambda i: -i["dias_atraso"])[:30],
+            "itens": [_formatar_item(i) for i in itens_pessoa][:40],
+        },
+        "carga_de_trabalho": {
+            "itens_ativos_desta_pessoa": len(itens_pessoa),
+            "media_da_equipa_com_itens_atribuidos": round(media_equipa, 1),
+        },
+    }
+
 def ler_comentarios(comments_url: str) -> list[dict]:
     """Lê os comentários já existentes numa tarefa/card (comments_url vem de tarefas_e_cards_atrasados)."""
     comentarios = _get_paginado(comments_url)
@@ -351,6 +452,18 @@ TOOLS_ESTADO_PROJETO = [
             "type": "object",
             "properties": {"projeto": {"type": "string"}},
             "required": ["projeto"]
+        }
+    },
+    {
+        "name": "resumo_pessoa_basecamp",
+        "description": "Dá um panorama de uma pessoa da equipa no Basecamp, pensado para preparar uma reunião individual (1:1): o que concluiu nos últimos dias (por omissão, 7 — a última semana), o que tem em aberto agora e o que está atrasado, e como a quantidade de trabalho ativo que tem compara com a média de quem tem itens atribuídos (para ajudar a avaliar se a carga está ajustada). Usa isto quando pedirem um resumo de uma pessoa específica antes de uma reunião com ela. `nome` é um termo de pesquisa (não precisa de ser o nome completo).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nome": {"type": "string"},
+                "dias": {"type": "integer", "description": "Quantos dias para trás considerar como \"semana anterior\" — por omissão 7"}
+            },
+            "required": ["nome"]
         }
     }
 ]
