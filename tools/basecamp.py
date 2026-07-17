@@ -117,13 +117,28 @@ def _formatar_item(item: dict) -> dict:
         "comments_url": item.get("comments_url"),
     }
 
+def _em_coluna_terminal(item: dict) -> bool:
+    """O item está numa coluna/lista de estado terminal (Perdido, Vendido,
+    Done, Concluído, Arquivo, Cancelado). A API do Basecamp só marca
+    'completed' quando alguém fecha a checkbox de uma tarefa — um card do
+    Kanban fica "fechado" ao mudar de coluna, não por isso; por isso não
+    basta olhar para completed=false para saber se algo ainda está mesmo em
+    aberto. Sempre que a Alma reporta o que está ativo/atrasado, tem de
+    ignorar o que já está aqui — não é trabalho esquecido, é trabalho já
+    fechado (ganho, perdido, ou concluído de outra forma)."""
+    estado = ((item.get("parent") or {}).get("title") or "").strip().lower()
+    return estado in COLUNAS_TERMINAIS
+
 def tarefas_e_cards_atrasados() -> list[dict]:
-    """Tarefas (to-dos) e cards, de todos os projetos, com prazo ultrapassado e não concluídos."""
+    """Tarefas (to-dos) e cards, de todos os projetos, com prazo ultrapassado
+    e não concluídos — ignora o que já está numa coluna/lista de estado
+    terminal (Perdido, Vendido, Done, ...), que não é atraso, é trabalho já
+    fechado."""
     hoje = date.today()
     atrasados = []
     for item in _itens_ativos():
         prazo = item.get("due_on")
-        if not prazo or item.get("completed"):
+        if not prazo or item.get("completed") or _em_coluna_terminal(item):
             continue
         if date.fromisoformat(prazo) >= hoje:
             continue
@@ -143,8 +158,7 @@ def cards_parados_sem_prazo(dias_sem_atividade: int = 14) -> list[dict]:
     for item in _itens_ativos():
         if item.get("type") != "Kanban::Card" or item.get("due_on") or item.get("completed"):
             continue
-        estado = ((item.get("parent") or {}).get("title") or "").strip().lower()
-        if estado in COLUNAS_TERMINAIS:
+        if _em_coluna_terminal(item):
             continue
         atualizado_em = item.get("updated_at")
         if not atualizado_em:
@@ -158,13 +172,18 @@ def cards_parados_sem_prazo(dias_sem_atividade: int = 14) -> list[dict]:
     return parados
 
 def estado_projeto_basecamp(projeto: str) -> dict:
-    """Panorama de um projeto do Basecamp: tarefas/cards ativos agrupados por
-    estado/coluna, com contagens de atraso e cards parados sem prazo. `projeto`
-    é um termo de pesquisa pelo nome (não precisa de ser exato)."""
+    """Panorama de um projeto do Basecamp: tarefas/cards genuinamente em
+    aberto agrupados por estado/coluna, com contagens de atraso e cards
+    parados sem prazo. Ignora tudo o que já está numa coluna/lista de estado
+    terminal (Perdido, Vendido, Done, ...) — é trabalho já fechado, não
+    trabalho ativo. `projeto` é um termo de pesquisa pelo nome (não precisa
+    de ser exato)."""
     termo = projeto.lower().strip()
-    itens = [i for i in _itens_ativos() if termo in ((i.get("bucket") or {}).get("name") or "").lower()]
+    itens = [i for i in _itens_ativos()
+             if termo in ((i.get("bucket") or {}).get("name") or "").lower()
+             and not _em_coluna_terminal(i)]
     if not itens:
-        return {"erro": f"nenhum item ativo encontrado para um projeto que corresponda a {projeto!r}"}
+        return {"erro": f"nenhum item em aberto encontrado para um projeto que corresponda a {projeto!r}"}
 
     hoje = date.today()
     por_estado = {}
@@ -238,19 +257,22 @@ def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
     1:1: o que concluiu nos últimos `dias` dias, o que tem em aberto agora
     (e o que está atrasado), e como a quantidade de trabalho ativo que tem
     compara com a média de quem mais tem itens atribuídos — para ajudar a
-    perceber se a carga está ajustada. `nome` é um termo de pesquisa (não
-    precisa de ser o nome completo)."""
+    perceber se a carga está ajustada. Ignora tudo o que já está numa
+    coluna/lista de estado terminal (Perdido, Vendido, Done, ...) — não
+    conta como trabalho em aberto nem entra na carga de trabalho, mesmo que
+    a Basecamp não o marque como "completed". `nome` é um termo de pesquisa
+    (não precisa de ser o nome completo)."""
     termo = nome.lower().strip()
 
     def _e_da_pessoa(item: dict) -> bool:
         return any(termo in p["name"].lower() for p in item.get("assignees", []))
 
-    ativos = _itens_ativos()
+    ativos = [i for i in _itens_ativos() if not _em_coluna_terminal(i)]
     itens_pessoa = [i for i in ativos if _e_da_pessoa(i)]
     concluidos_pessoa = [_formatar_item(i) for i in _concluidos_recentemente(dias) if _e_da_pessoa(i)]
 
     if not itens_pessoa and not concluidos_pessoa:
-        return {"erro": f"não encontrei nenhum item (ativo ou concluído recentemente) "
+        return {"erro": f"não encontrei nenhum item (em aberto ou concluído recentemente) "
                         f"atribuído a alguém que corresponda a {nome!r}"}
 
     hoje = date.today()
@@ -262,8 +284,8 @@ def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
             formatado["dias_atraso"] = (hoje - date.fromisoformat(prazo)).days
             atrasados.append(formatado)
 
-    # carga de trabalho: quantos itens ativos cada pessoa com trabalho
-    # atribuído tem neste momento, para comparar esta pessoa com a média
+    # carga de trabalho: quantos itens genuinamente em aberto cada pessoa
+    # tem neste momento, para comparar esta pessoa com a média
     contagem_por_pessoa = {}
     for item in ativos:
         for p in item.get("assignees", []):
