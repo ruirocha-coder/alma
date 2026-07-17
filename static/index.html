@@ -860,6 +860,10 @@
             } else if (ev.erro) {
               removeTyping();
               addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
+            } else if (ev.a_processar) {
+              // sinal de vida (ex: a meio de uma consulta ao Basecamp) —
+              // sem texto novo ainda, mas o indicador "a escrever" já está
+              // visível desde o início, por isso não há nada a fazer aqui
             }
           }
         }
@@ -1387,6 +1391,9 @@
                 msg.atualizar(textoCompleto);
               } else if (dados.erro) {
                 erro = dados.erro;
+              } else if (dados.a_processar) {
+                // sinal de vida (ex: a meio de uma consulta ao Basecamp) —
+                // o indicador "a escrever" já está visível desde o envio
               }
             }
           }

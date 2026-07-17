@@ -80,6 +80,10 @@ def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, m
     partes = []
     try:
         for pedaco in gerador:
+            if pedaco is None:
+                # sinal de vida (ex: a meio de uma tool a demorar) — não é texto
+                yield f"data: {json.dumps({'a_processar': True})}\n\n"
+                continue
             partes.append(pedaco)
             yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
     except Exception as e:
@@ -157,6 +161,10 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
                 interrompida = True
                 gerador.close()
                 break
+            if pedaco is None:
+                # sinal de vida (ex: a meio de uma tool a demorar) — não é texto
+                yield f"data: {json.dumps({'a_processar': True})}\n\n"
+                continue
             partes.append(pedaco)
             yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
             buffer_frase += pedaco
