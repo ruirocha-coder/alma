@@ -319,11 +319,37 @@ def ler_comentarios(comments_url: str) -> list[dict]:
 def _escapar_html(texto: str) -> str:
     return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+def _dividir_linha_tabela(linha: str) -> list:
+    l = linha.strip()
+    if l.startswith("|"):
+        l = l[1:]
+    if l.endswith("|"):
+        l = l[:-1]
+    return [c.strip() for c in l.split("|")]
+
+def _e_separador_tabela(linha: str) -> bool:
+    celulas = _dividir_linha_tabela(linha)
+    return bool(celulas) and all(re.match(r"^:?-+:?$", c) for c in celulas)
+
+def _tabela_para_html(cabecalho: list, linhas: list) -> str:
+    partes = ["<table><thead><tr>"]
+    for h in cabecalho:
+        partes.append(f"<th>{h}</th>")
+    partes.append("</tr></thead><tbody>")
+    for linha in linhas:
+        partes.append("<tr>")
+        for i in range(len(cabecalho)):
+            partes.append(f"<td>{linha[i] if i < len(linha) else ''}</td>")
+        partes.append("</tr>")
+    partes.append("</tbody></table>")
+    return "".join(partes)
+
 def _markdown_para_basecamp(bruto: str) -> str:
     """Converte o markdown simples que a Alma escreve (negrito, itálico, títulos,
-    listas, links, código) para HTML — os comentários do Basecamp são HTML puro,
-    por isso markdown sem converter aparece tal e qual (asteriscos, cardinais, ...)
-    em vez de formatado."""
+    listas, links, código, tabelas, linhas horizontais) para HTML — os
+    comentários do Basecamp são HTML puro, por isso markdown sem converter
+    aparece tal e qual (asteriscos, cardinais, barras verticais, ...) em vez
+    de formatado."""
     blocos_codigo = []
 
     def _guardar_bloco(m):
@@ -359,16 +385,39 @@ def _markdown_para_basecamp(bruto: str) -> str:
             partes.append("</ol>")
             em_ol = False
 
-    for linha in texto.split("\n"):
+    linhas = texto.split("\n")
+    i = 0
+    while i < len(linhas):
+        linha = linhas[i]
         aparada = linha.strip()
         bloco_codigo = re.match(r"^@@CODEBLOCK(\d+)@@$", aparada)
         titulo = re.match(r"^(#{1,3})\s+(.*)", aparada)
         item_ul = re.match(r"^[-*]\s+(.*)", aparada)
         item_ol = re.match(r"^\d+\.\s+(.*)", aparada)
+        # tabela: esta linha tem pipes e a seguinte é a linha de separação
+        # (---|---|---) — só aí é que vale a pena tratar como tabela, para
+        # não confundir uma frase qualquer que tenha um "|" à mistura
+        e_tabela = "|" in aparada and i + 1 < len(linhas) and _e_separador_tabela(linhas[i + 1])
+        e_linha_horizontal = re.match(r"^-{3,}$", aparada) is not None
 
-        if not aparada:
+        if e_tabela:
             fechar_paragrafo()
             fechar_listas()
+            cabecalho = _dividir_linha_tabela(aparada)
+            i += 2  # salta a linha de separação
+            linhas_tabela = []
+            while i < len(linhas) and "|" in linhas[i]:
+                linhas_tabela.append(_dividir_linha_tabela(linhas[i]))
+                i += 1
+            partes.append(_tabela_para_html(cabecalho, linhas_tabela))
+            continue
+        elif not aparada:
+            fechar_paragrafo()
+            fechar_listas()
+        elif e_linha_horizontal:
+            fechar_paragrafo()
+            fechar_listas()
+            partes.append("<hr>")
         elif bloco_codigo:
             fechar_paragrafo()
             fechar_listas()
@@ -400,6 +449,7 @@ def _markdown_para_basecamp(bruto: str) -> str:
         else:
             fechar_listas()
             paragrafo.append(linha)
+        i += 1
 
     fechar_paragrafo()
     fechar_listas()
