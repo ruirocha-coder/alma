@@ -412,15 +412,38 @@ def comentar(recording_id: int, texto: str):
     r.raise_for_status()
     return r.json()
 
-# Mural (Message Board) do projeto "Gestão" — toda a equipa está lá, por isso
-# serve como mural único para publicações da Alma, mesmo havendo um Mural por
-# projeto no Basecamp.
+# Mural (Message Board) do projeto "Gestão" — toda a equipa da Interior
+# Guider está lá, por isso serve como mural por omissão. Outros projetos
+# (ex: Ecos Largos, uma equipa parceira à parte) têm o seu próprio Mural,
+# resolvido dinamicamente pelo nome em vez de hardcoded, já que só a Gestão
+# é usada com frequência suficiente para valer a pena poupar esse pedido.
 MURAL_BUCKET_ID = 603157
 MURAL_BOARD_ID = 85747247
 
-def publicar_mural(assunto: str, mensagem: str):
-    """Publica uma mensagem no Mural (visível a toda a equipa)."""
-    r = httpx.post(f"{_base_url()}/buckets/{MURAL_BUCKET_ID}/message_boards/{MURAL_BOARD_ID}/messages.json",
+def _resolver_mural(projeto: str) -> tuple:
+    """Descobre o bucket_id e o id do Mural (message_board) de um projeto
+    pelo nome — usado para publicar no mural de projetos que não sejam a
+    Gestão (ex: o mural próprio da Ecos Largos, só visível à equipa deles)."""
+    termo = projeto.lower().strip()
+    for p in listar_projetos():
+        if termo not in p["name"].lower():
+            continue
+        for ferramenta in p.get("dock", []):
+            if ferramenta.get("name") == "message_board" and ferramenta.get("enabled"):
+                return p["id"], ferramenta["id"]
+        raise ValueError(f"o projeto {p['name']!r} não tem Mural (message board) ativado")
+    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+
+def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
+    """Publica uma mensagem no Mural de um projeto (visível a quem tem
+    acesso a esse projeto). Por omissão, o mural da Gestão (toda a equipa da
+    Interior Guider); passa `projeto` para publicar no mural de outro
+    projeto (ex: "Ecos Largos")."""
+    if projeto.strip().lower() == "gestão":
+        bucket_id, board_id = MURAL_BUCKET_ID, MURAL_BOARD_ID
+    else:
+        bucket_id, board_id = _resolver_mural(projeto)
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/message_boards/{board_id}/messages.json",
                    headers=_headers(),
                    json={"subject": assunto, "content": _markdown_para_basecamp(mensagem), "status": "active"},
                    timeout=30)
@@ -453,6 +476,32 @@ def meu_perfil() -> dict:
 
 def listar_projetos() -> list[dict]:
     return _get_paginado(f"{_base_url()}/projects.json")
+
+TTL_PESSOAS_PROJETO = 3600  # 1h — a equipa de um projeto não muda de hora a hora
+
+def pessoas_projeto(projeto: str) -> list[dict]:
+    """Pessoas com acesso a um projeto específico do Basecamp (pelo nome) —
+    usado para a Alma saber automaticamente quem pertence a que equipa (ex:
+    Ecos Largos, uma equipa parceira gerida no mesmo Basecamp mas à parte da
+    Interior Guider), sem precisar de uma lista de nomes fixa no código."""
+    chave = f"pessoas_{projeto.lower().strip()}"
+    if chave in _cache:
+        ts, pessoas = _cache[chave]
+        if time.time() - ts < TTL_PESSOAS_PROJETO:
+            return pessoas
+    termo = projeto.lower().strip()
+    encontrados = [p for p in listar_projetos() if termo in p["name"].lower()]
+    pessoas = _get_paginado(f"{_base_url()}/buckets/{encontrados[0]['id']}/people.json") if encontrados else []
+    _cache[chave] = (time.time(), pessoas)
+    return pessoas
+
+def pertence_a_projeto(nome: str, projeto: str) -> bool:
+    """Se alguém (pelo nome) tem acesso a um projeto específico do Basecamp."""
+    termo = nome.lower().strip()
+    return any(termo in p["name"].lower() for p in pessoas_projeto(projeto))
+
+def pertence_a_ecos_largos(nome: str) -> bool:
+    return pertence_a_projeto(nome, "Ecos Largos")
 
 def listar_webhooks(bucket_id: int) -> list[dict]:
     return _get_paginado(f"{_base_url()}/buckets/{bucket_id}/webhooks.json")

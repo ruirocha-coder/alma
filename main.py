@@ -11,7 +11,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
-from agents import acolhimento, monitor_basecamp, responder_basecamp, resumo_semanal_basecamp
+from agents import (acolhimento, monitor_basecamp, responder_basecamp,
+                    resumo_semanal_basecamp, resumo_diario_ecos_largos)
 from tools import basecamp, ficheiros, voz, reuniao
 from db import inicializar_schema
 inicializar_schema()
@@ -21,8 +22,10 @@ app = FastAPI(title="ALMA")
 # monitorização do Basecamp: todos os dias às 8h (hora de Lisboa)
 scheduler = BackgroundScheduler(timezone="Europe/Lisbon")
 scheduler.add_job(monitor_basecamp.correr_monitorizacao, "cron", hour=8, minute=0)
-# resumo semanal no Mural: segundas-feiras às 9h (hora de Lisboa)
+# resumo semanal no Mural (Gestão, Interior Guider): segundas-feiras às 9h
 scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal, "cron", day_of_week="mon", hour=9, minute=0)
+# análise diária do dashboard de produção, no Mural da Ecos Largos: todos os dias às 19h
+scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron", hour=19, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -43,7 +46,7 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
             resposta = acolhimento.responder(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500])
+            agente = encaminhar(mensagem_agente[:500], utilizador)
             log_routing(mensagem_agente[:500], agente)
             resposta = AGENTES[agente](utilizador, mensagens)
     except Exception as e:
@@ -70,7 +73,7 @@ def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, m
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500])
+            agente = encaminhar(mensagem_agente[:500], utilizador)
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
@@ -144,7 +147,7 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500])
+            agente = encaminhar(mensagem_agente[:500], utilizador)
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
@@ -306,7 +309,7 @@ def health_config():
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
                  "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
                  "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET", "OPENAI_API_KEY",
-                 "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]
+                 "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ECOS_LARGOS_DASHBOARD_URL"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
@@ -345,6 +348,12 @@ def alertas_basecamp_recentes(limite: int = 30):
 def resumo_semanal_basecamp_agora():
     """Dispara já o resumo semanal de atividade no Mural, em segundo plano."""
     threading.Thread(target=resumo_semanal_basecamp.correr_resumo_semanal, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/ecos-largos/resumo-diario")
+def resumo_diario_ecos_largos_agora():
+    """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
+    threading.Thread(target=resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/basecamp/webhooks/registar")
