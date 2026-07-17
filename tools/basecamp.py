@@ -3,10 +3,18 @@
 # Ao contrário do BigCommerce, o Basecamp não usa um token fixo: o access_token
 # expira ao fim de ~2 semanas. Guardamos aqui só o refresh_token (não expira) e
 # trocamo-lo por um access_token novo sempre que necessário, em memória.
-import os, re, time
+import os, re, time, unicodedata
 from datetime import date, datetime, timedelta, timezone
 import httpx
 from bs4 import BeautifulSoup
+
+def _normalizar(texto: str) -> str:
+    """Baixa para minúsculas e remove acentos — para comparar nomes de forma
+    tolerante a diferenças de acentuação entre como alguém escreve o seu
+    nome na consola e como está registado no Basecamp (ex: "Eugénia" vs
+    "Eugenia" têm de contar como a mesma pessoa)."""
+    sem_acentos = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return sem_acentos.lower().strip()
 
 _cache = {}  # {chave: (timestamp, valor)}
 TOKEN_URL = "https://launchpad.37signals.com/authorization/token"
@@ -262,10 +270,10 @@ def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
     conta como trabalho em aberto nem entra na carga de trabalho, mesmo que
     a Basecamp não o marque como "completed". `nome` é um termo de pesquisa
     (não precisa de ser o nome completo)."""
-    termo = nome.lower().strip()
+    termo = _normalizar(nome)
 
     def _e_da_pessoa(item: dict) -> bool:
-        return any(termo in p["name"].lower() for p in item.get("assignees", []))
+        return any(termo in _normalizar(p["name"]) for p in item.get("assignees", []))
 
     ativos = [i for i in _itens_ativos() if not _em_coluna_terminal(i)]
     itens_pessoa = [i for i in ativos if _e_da_pessoa(i)]
@@ -547,8 +555,8 @@ def pessoas_projeto(projeto: str) -> list[dict]:
 
 def pertence_a_projeto(nome: str, projeto: str) -> bool:
     """Se alguém (pelo nome) tem acesso a um projeto específico do Basecamp."""
-    termo = nome.lower().strip()
-    return any(termo in p["name"].lower() for p in pessoas_projeto(projeto))
+    termo = _normalizar(nome)
+    return any(termo in _normalizar(p["name"]) for p in pessoas_projeto(projeto))
 
 def pertence_a_ecos_largos(nome: str) -> bool:
     return pertence_a_projeto(nome, "Ecos Largos")
