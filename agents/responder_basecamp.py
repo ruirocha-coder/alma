@@ -30,7 +30,18 @@ contigo, mesmo quando é só por menções no Basecamp.
 Não escrevas saudações nem te apresentes — vai direto à resposta."""
 
 def responder(utilizador: str, mensagens: list) -> str:
-    return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador, origem="basecamp")
+    # este fluxo não passa pelo orchestrator (é sempre a mesma missão,
+    # qualquer que seja o projeto onde a menção aconteceu), por isso o
+    # mural certo tem de ser decidido aqui, pela equipa da pessoa que
+    # mencionou — tal como no resto da Alma, alguém da Ecos Largos que peça
+    # para publicar deve publicar no mural deles, não no da Gestão.
+    try:
+        projeto_mural = "Ecos Largos" if basecamp.pertence_a_ecos_largos(utilizador) else "Gestão"
+    except Exception as e:
+        print(f"[responder_basecamp] não consegui verificar a equipa Ecos Largos para o mural, a assumir Gestão: {e!r}")
+        projeto_mural = "Gestão"
+    return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador,
+                         origem="basecamp", projeto_mural=projeto_mural)
 
 def _texto_simples(html: str) -> str:
     if not html:
