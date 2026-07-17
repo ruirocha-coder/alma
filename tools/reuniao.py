@@ -24,13 +24,18 @@ _LIMITE_CONTEXTO_AO_VIVO = 6000
 
 _transcricoes: dict[str, dict[int, str]] = {}
 _processados: dict[str, int] = {}
-_a_responder: dict[str, bool] = {}
+# número da "geração" de resposta em curso nesta sessão — sempre que uma
+# nova chamada chega, a geração avança, e qualquer resposta ainda a decorrer
+# de uma geração anterior sabe que deve parar (interrompida): é assim que a
+# Alma para de falar assim que é chamada de novo, em vez de acabar a frase
+# toda primeiro.
+_geracao: dict[str, int] = {}
 
 def iniciar(sessao: str) -> None:
     """Começa (ou reinicia) a escuta de uma reunião para esta sessão."""
     _transcricoes[sessao] = {}
     _processados[sessao] = 0
-    _a_responder[sessao] = False
+    _geracao[sessao] = 0
 
 def em_curso(sessao: str) -> bool:
     return sessao in _transcricoes
@@ -50,11 +55,17 @@ def excertos_processados(sessao: str) -> int:
     quando não há nada para responder)."""
     return _processados.get(sessao, 0)
 
-def esta_a_responder(sessao: str) -> bool:
-    return _a_responder.get(sessao, False)
+def nova_geracao(sessao: str) -> int:
+    """Chamar sempre que se vai começar a responder a uma nova chamada —
+    invalida (interrompe) qualquer resposta anterior ainda em curso nesta
+    sessão. Devolve o número que a nova resposta deve usar para, por sua
+    vez, saber se foi interrompida por uma chamada ainda mais recente."""
+    nova = _geracao.get(sessao, 0) + 1
+    _geracao[sessao] = nova
+    return nova
 
-def marcar_a_responder(sessao: str, valor: bool) -> None:
-    _a_responder[sessao] = valor
+def foi_interrompida(sessao: str, minha_geracao: int) -> bool:
+    return _geracao.get(sessao, 0) != minha_geracao
 
 def foi_chamada(texto: str) -> bool:
     """Verifica se este excerto menciona a Alma diretamente (ex: "Alma, o que achas...")."""
@@ -79,5 +90,5 @@ def terminar(sessao: str) -> str:
     texto = transcricao_ate_agora(sessao)
     _transcricoes.pop(sessao, None)
     _processados.pop(sessao, None)
-    _a_responder.pop(sessao, None)
+    _geracao.pop(sessao, None)
     return texto

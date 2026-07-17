@@ -111,7 +111,8 @@ def _evento_audio(frase: str) -> str:
         return ""
 
 def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
-                            mensagem_visivel: str = None, texto_transcricao: str = None):
+                            mensagem_visivel: str = None, texto_transcricao: str = None,
+                            minha_geracao: int = None):
     """Como _fluxo_resposta_agente, mas sintetiza voz frase a frase à medida
     que o texto da resposta vai chegando — a Alma começa a falar sem esperar
     pela resposta toda estar pronta.
@@ -121,7 +122,12 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
     texto_transcricao (por omissão, iguais a mensagem_agente) são o que fica
     no histórico e o que é mostrado como "ouvi isto", respetivamente — úteis
     quando o que se ouviu não deve ser, ao mesmo tempo, o texto todo enviado
-    ao modelo."""
+    ao modelo.
+
+    minha_geracao (modo reunião): se dado, a resposta para assim que reuniao
+    marcar uma geração mais recente para esta sessão — é o que permite
+    interromper a Alma a meio quando alguém a chama de novo antes de ela
+    acabar de responder."""
     mensagem_visivel = mensagem_visivel or mensagem_agente
     texto_transcricao = texto_transcricao if texto_transcricao is not None else mensagem_agente
     yield f"data: {json.dumps({'transcricao': texto_transcricao}, ensure_ascii=False)}\n\n"
@@ -141,26 +147,44 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
 
-    partes, buffer_frase = [], ""
+    def _interrompida() -> bool:
+        return minha_geracao is not None and reuniao.foi_interrompida(sessao, minha_geracao)
+
+    partes, buffer_frase, interrompida = [], "", False
     try:
         for pedaco in gerador:
+            if _interrompida():
+                interrompida = True
+                gerador.close()
+                break
             partes.append(pedaco)
             yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
             buffer_frase += pedaco
             frases_prontas, buffer_frase = voz.dividir_em_frases_prontas(buffer_frase)
             for frase in frases_prontas:
+                if _interrompida():
+                    interrompida = True
+                    break
                 if frase.strip():
                     yield _evento_audio(frase)
-        if buffer_frase.strip():
+            if interrompida:
+                gerador.close()
+                break
+        if not interrompida and buffer_frase.strip():
             yield _evento_audio(buffer_frase)
     except Exception as e:
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
 
+    if interrompida:
+        nota = "\n\n_(interrompida — foi chamada de novo)_"
+        partes.append(nota)
+        yield f"data: {json.dumps({'delta': nota}, ensure_ascii=False)}\n\n"
+
     resposta = "".join(partes)
     guardar_mensagem(utilizador, sessao, "user", mensagem_visivel)
     guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
-    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'done': True, 'interrompida': interrompida}, ensure_ascii=False)}\n\n"
 
 @app.post("/alma/reuniao/iniciar")
 def reuniao_iniciar(sessao: str = Form(...)):
@@ -176,10 +200,11 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     posição deste excerto na ordem de gravação, para a transcrição acumulada
     ficar sempre correta mesmo que os pedidos cheguem trocados). Transcreve-o
     e acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
-    excerto não mencionar a Alma — ou se a Alma já estiver a responder a uma
-    chamada anterior — devolve só a transcrição (para uma legenda ao vivo, se
-    a consola quiser mostrar); caso contrário devolve um stream com a
-    resposta (texto + voz)."""
+    excerto não mencionar a Alma, devolve só a transcrição (para uma legenda
+    ao vivo, se a consola quiser mostrar). Se mencionar, devolve um stream
+    com a resposta (texto + voz) — e se já havia uma resposta anterior em
+    curso nesta sessão, essa é interrompida na hora (a Alma para de falar a
+    meio para ouvir e responder à nova chamada)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
@@ -198,12 +223,12 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
 
     reuniao.registar(sessao, indice, texto)
     processados = reuniao.excertos_processados(sessao)
-    # se já está a responder a uma chamada anterior, este excerto fica só
-    # como contexto — evita duas respostas da Alma a sobrepor-se na mesma
-    # reunião
-    if not reuniao.foi_chamada(texto) or reuniao.esta_a_responder(sessao):
+    if not reuniao.foi_chamada(texto):
         return {"transcricao": texto, "acionado": False, "processados": processados}
 
+    # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
+    # que interrompe, de imediato, qualquer resposta anterior ainda em curso
+    minha_geracao = reuniao.nova_geracao(sessao)
     contexto = reuniao.contexto_ao_vivo(sessao)
     mensagem_agente = (
         "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
@@ -212,18 +237,10 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
         f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto}"\n\n'
         "Responde diretamente a essa pessoa, como se estivesses presente na sala."
     )
-
-    def _gerador():
-        reuniao.marcar_a_responder(sessao, True)
-        try:
-            yield from _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
-                                               mensagem_visivel=f"🎙️ (reunião) {texto}",
-                                               texto_transcricao=texto)
-        finally:
-            reuniao.marcar_a_responder(sessao, False)
-
     return StreamingResponse(
-        _gerador(),
+        _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
+                                mensagem_visivel=f"🎙️ (reunião) {texto}",
+                                texto_transcricao=texto, minha_geracao=minha_geracao),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )

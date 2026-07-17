@@ -652,6 +652,8 @@
   const filaAudio = [];
   let aTocarAudio = false;
 
+  let audioAtual = null;
+
   function enfileirarAudio(base64) {
     const binario = atob(base64);
     const bytes = new Uint8Array(binario.length);
@@ -666,14 +668,28 @@
     aTocarAudio = true;
     const url = filaAudio.shift();
     const audioEl = new Audio(url);
+    audioAtual = audioEl;
     const seguinte = () => {
       URL.revokeObjectURL(url);
+      if (audioAtual === audioEl) audioAtual = null;
       aTocarAudio = false;
       tocarProximoAudio();
     };
     audioEl.addEventListener("ended", seguinte);
     audioEl.addEventListener("error", seguinte);
     audioEl.play().catch(seguinte);
+  }
+
+  // corta a fala imediatamente (usado quando a Alma é chamada de novo a
+  // meio de uma resposta anterior — ela deve parar de falar já, não acabar
+  // a resposta antiga primeiro)
+  function pararReproducaoAudio() {
+    filaAudio.splice(0).forEach((url) => URL.revokeObjectURL(url));
+    if (audioAtual) {
+      audioAtual.pause();
+      audioAtual = null;
+    }
+    aTocarAudio = false;
   }
 
   // modo reunião — em vez de push-to-talk, a Alma ouve em excertos curtos e
@@ -688,6 +704,10 @@
   let reuniaoStreamMic = null;
   let reuniaoRecorder = null;
   const DURACAO_EXCERTO_REUNIAO_MS = 8000;
+  // enquanto está a falar, grava em excertos mais curtos — é o que permite
+  // detetar rapidamente que foi chamada de novo (para interromper), em vez
+  // de só ao fim dos 8 segundos habituais
+  const DURACAO_EXCERTO_A_RESPONDER_MS = 2500;
   // cada excerto é enviado ao servidor assim que fica pronto (em paralelo,
   // sem esperar pelos anteriores) — uma reunião longa ou muito faladora não
   // pode ficar à espera de uma resposta lenta antes de processar o que se
@@ -696,10 +716,14 @@
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
+  // conta as respostas "ao vivo" que vão começando — usado para um evento
+  // de áudio tardio de uma resposta já interrompida não voltar a tocar
+  // depois de a fala ter sido cortada
+  let geracaoRespostaCliente = 0;
 
   function atualizarEstadoReuniao() {
     reuniaoStatusEl.textContent = respondendoAtivo
-      ? "A Alma está a responder…"
+      ? "A Alma está a responder… (chama-a outra vez para a interromper)"
       : `A Alma está a ouvir a reunião (${excertosProcessados} excerto(s) processados) — só responde se for chamada pelo nome.`;
   }
 
@@ -770,7 +794,8 @@
       if (reuniaoAtiva) setTimeout(gravarProximoExcertoReuniao, 500);
       return;
     }
-    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, DURACAO_EXCERTO_REUNIAO_MS);
+    const duracao = respondendoAtivo ? DURACAO_EXCERTO_A_RESPONDER_MS : DURACAO_EXCERTO_REUNIAO_MS;
+    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, duracao);
   }
 
   async function enviarExcertoReuniao(blob, indice) {
@@ -798,8 +823,13 @@
         return;
       }
 
+      // uma nova chamada corta imediatamente a fala de uma resposta
+      // anterior ainda a decorrer (o servidor já a interrompeu por si; aqui
+      // só se cala o áudio que já tinha sido enviado antes disso)
+      pararReproducaoAudio();
       respondendoAtivo = true;
       atualizarEstadoReuniao();
+      const minhaGeracaoCliente = ++geracaoRespostaCliente;
       try {
         let msg = null;
         let textoCompleto = "";
@@ -824,7 +854,9 @@
               textoCompleto += ev.delta;
               msg.atualizar(textoCompleto);
             } else if (ev.audio) {
-              enfileirarAudio(ev.audio);
+              // se entretanto já começou outra resposta, este áudio é de
+              // uma fala já interrompida — não deve voltar a tocar
+              if (minhaGeracaoCliente === geracaoRespostaCliente) enfileirarAudio(ev.audio);
             } else if (ev.erro) {
               removeTyping();
               addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
@@ -833,7 +865,10 @@
         }
         fetchSessions();
       } finally {
-        respondendoAtivo = false;
+        // só a chamada mais recente pode voltar a marcar "a ouvir" — uma
+        // chamada antiga que acabou de ser interrompida não deve apagar o
+        // estado "a responder" de uma chamada mais nova, ainda em curso
+        if (minhaGeracaoCliente === geracaoRespostaCliente) respondendoAtivo = false;
         excertosProcessados++;
         atualizarEstadoReuniao();
       }
