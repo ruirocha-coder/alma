@@ -11,14 +11,21 @@ Objetivo: conhece-la através de uma conversa natural e curta — nunca um
 questionário. Faz UMA pergunta de cada vez, reage ao que a pessoa diz antes
 de passar à seguinte. As perguntas-chave, por esta ordem:
 
-1. Qual o teu papel na equipa?
-2. Quando me pedires ajuda, preferes que vá direta ao essencial ou que
+1. Trabalhas na Interior Guider, na Ecos Largos, ou com as duas equipas?
+   (são duas equipas geridas no mesmo Basecamp, sem relação entre si — só
+   precisas de saber qual para te adaptares bem, não expliques isto à
+   pessoa, é só contexto teu)
+2. Qual o teu papel na equipa?
+3. Quando me pedires ajuda, preferes que vá direta ao essencial ou que
    explique o raciocínio?
-3. Preferes que te dê uma recomendação fechada ou opções para escolheres?
-4. Que dificuldades consideras que eu posso complementar e ajudar a resolver?
-5. O que te rouba mais tempo na semana?
+4. Preferes que te dê uma recomendação fechada ou opções para escolheres?
+5. Que dificuldades consideras que eu posso complementar e ajudar a resolver?
+6. O que te rouba mais tempo na semana?
 
-Quando tiveres as respostas, usa a ferramenta guardar_perfil UMA vez.
+Quando tiveres as respostas, usa a ferramenta guardar_perfil UMA vez. No
+campo empresa, usa exatamente um destes valores: "interior_guider",
+"ecos_largos" ou "ambas" — nunca o texto literal que a pessoa disse.
+
 Depois de guardar, resume à pessoa o que ficaste a saber e diz-lhe que pode
 pedir-te para alterar ou esquecer qualquer parte, quando quiser. Termina
 perguntando em que podes ser útil agora.
@@ -29,17 +36,19 @@ pela memória."""
 TOOLS_ACOLHIMENTO = [
     {
         "name": "guardar_perfil",
-        "description": "Guarda o perfil do utilizador. Usar uma única vez, quando as cinco respostas estiverem recolhidas.",
+        "description": "Guarda o perfil do utilizador. Usar uma única vez, quando as seis respostas estiverem recolhidas.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "empresa": {"type": "string", "enum": ["interior_guider", "ecos_largos", "ambas"],
+                           "description": "Com que equipa/empresa a pessoa trabalha"},
                 "papel": {"type": "string", "description": "Papel na equipa"},
                 "estilo_resposta": {"type": "string", "description": "Direto ao essencial ou com raciocínio explicado"},
                 "formato": {"type": "string", "description": "Preferências de formato (listas, texto corrido, visual)"},
                 "decisao": {"type": "string", "description": "Recomendação fechada ou opções"},
                 "dificuldades": {"type": "string", "description": "Dificuldades onde a Alma pode complementar e ajudar"},
             },
-            "required": ["papel", "estilo_resposta", "formato", "decisao", "dificuldades"]
+            "required": ["empresa", "papel", "estilo_resposta", "formato", "decisao", "dificuldades"]
         }
     }
 ]

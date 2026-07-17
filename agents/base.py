@@ -53,6 +53,15 @@ TOOLS_MEMORIA = [
             "properties": {"termo": {"type": "string"}},
             "required": ["termo"]
         }
+    },
+    {
+        "name": "definir_empresa",
+        "description": "Corrige a equipa/empresa registada no perfil desta pessoa (Interior Guider, Ecos Largos, ou ambas). USA ISTO sempre que a pessoa disser explicitamente qual é a sua equipa e isso contradisser o que a conversa sugere (ex: perguntaste algo da Ecos Largos e disseste que não tinhas acesso, e ela corrigiu-te dizendo que trabalha lá) — a deteção automática pode falhar para quem não tem conta própria no Basecamp. Depois de corrigido, continua a responder já assumindo a equipa certa, sem pedir para repetir a pergunta.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"empresa": {"type": "string", "enum": ["interior_guider", "ecos_largos", "ambas"]}},
+            "required": ["empresa"]
+        }
     }
 ]
 
@@ -124,6 +133,7 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
+        "definir_empresa": lambda empresa: db.atualizar_empresa(utilizador, empresa),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
     }

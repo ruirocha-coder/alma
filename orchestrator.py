@@ -1,6 +1,7 @@
 import anthropic
 from agents import ceo, ecos_largos
 from tools import basecamp
+import db
 
 client = anthropic.Anthropic()
 
@@ -27,15 +28,56 @@ def _escolher_agente_interior_guider(pergunta: str) -> str:
     escolha = r.content[0].text.strip().lower()
     return escolha if escolha in AGENTES_INTERIOR_GUIDER else "ceo"  # fallback: CEO
 
+def _escolher_entre_empresas(pergunta: str) -> str:
+    """Para quem trabalha com as duas equipas: decide pela própria pergunta,
+    não só pela identidade, para nunca lhe negar acesso a nenhum dos dois
+    lados."""
+    r = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=10,
+        system=("Esta pessoa trabalha tanto com a Interior Guider como com a Ecos Largos "
+                "(duas equipas geridas no mesmo Basecamp, sem relação entre si). Classifica "
+                "esta mensagem como 'ecos_largos' (produção, dashboard de produção, o "
+                "projeto Ecos Largos) ou 'interior_guider' (vendas, produtos, site, "
+                "projetos da Interior Guider). Se não estiver claro, escolhe "
+                "'interior_guider'. Responde só com uma das duas palavras."),
+        messages=[{"role": "user", "content": pergunta}]
+    )
+    escolha = r.content[0].text.strip().lower()
+    if escolha == "ecos_largos":
+        return "ecos_largos"
+    return _escolher_agente_interior_guider(pergunta)
+
 def encaminhar(pergunta: str, utilizador: str) -> str:
-    """Decide primeiro a EMPRESA pela equipa do projeto no Basecamp (quem é a
-    pessoa) — é o que faz a mesma consola e o mesmo link adaptarem-se
-    sozinhos consoante quem está a falar com a Alma.
+    """Decide primeiro a EMPRESA (quem é a pessoa, não do que fala) — é o que
+    faz a mesma consola e o mesmo link adaptarem-se sozinhos.
+
+    O sinal principal é o campo 'empresa' do perfil, respondido logo no
+    acolhimento — funciona para toda a gente que fala com a Alma pela
+    consola, mesmo quem não tem conta própria no Basecamp (a maioria da
+    Ecos Largos, por exemplo). Só quando o perfil não tem essa resposta
+    (perfis antigos, de antes desta pergunta existir) é que se recorre à
+    deteção pela equipa do projeto no Basecamp, que só funciona para quem
+    lá tem acesso.
 
     Há quem trabalhe com as duas equipas ao mesmo tempo — para essas
     pessoas, pertencer à Ecos Largos não pode significar perder o acesso à
-    Interior Guider (nem o inverso): decide-se então pela própria pergunta,
-    não só pela identidade, para nunca lhe negar nenhum dos dois lados."""
+    Interior Guider (nem o inverso): decide-se então pela própria pergunta."""
+    empresa = None
+    try:
+        perfil = db.obter_perfil(utilizador)
+        empresa = (perfil or {}).get("empresa")
+    except Exception as e:
+        print(f"[orchestrator] não consegui ler o perfil para saber a empresa: {e!r}")
+
+    if empresa == "ecos_largos":
+        return "ecos_largos"
+    if empresa == "interior_guider":
+        return _escolher_agente_interior_guider(pergunta)
+    if empresa == "ambas":
+        return _escolher_entre_empresas(pergunta)
+
+    # perfil sem 'empresa' definida — recorre à deteção pela equipa do
+    # projeto no Basecamp (comportamento anterior a esta pergunta existir)
     try:
         eh_ecos_largos = basecamp.pertence_a_ecos_largos(utilizador)
     except Exception as e:
@@ -54,17 +96,4 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
     if not eh_tambem_interior_guider:
         return "ecos_largos"
 
-    r = client.messages.create(
-        model="claude-haiku-4-5-20251001", max_tokens=10,
-        system=("Esta pessoa trabalha tanto com a Interior Guider como com a Ecos Largos "
-                "(duas equipas geridas no mesmo Basecamp, sem relação entre si). Classifica "
-                "esta mensagem como 'ecos_largos' (produção, dashboard de produção, o "
-                "projeto Ecos Largos) ou 'interior_guider' (vendas, produtos, site, "
-                "projetos da Interior Guider). Se não estiver claro, escolhe "
-                "'interior_guider'. Responde só com uma das duas palavras."),
-        messages=[{"role": "user", "content": pergunta}]
-    )
-    escolha = r.content[0].text.strip().lower()
-    if escolha == "ecos_largos":
-        return "ecos_largos"
-    return _escolher_agente_interior_guider(pergunta)
+    return _escolher_entre_empresas(pergunta)

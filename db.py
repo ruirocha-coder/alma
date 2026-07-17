@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS basecamp_eventos_processados (
 );
 """
 
+# à parte do SCHEMA principal: a tabela perfis já existe em produção com
+# dados reais, e CREATE TABLE IF NOT EXISTS não acrescenta colunas novas a
+# uma tabela já existente — precisa de um ALTER TABLE explícito, idempotente.
+MIGRACOES = """
+ALTER TABLE perfis ADD COLUMN IF NOT EXISTS empresa TEXT;
+"""
+
 def get_conn():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -70,6 +77,7 @@ def inicializar_schema():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA)
+            cur.execute(MIGRACOES)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
@@ -139,17 +147,17 @@ def perfil_existe(utilizador: str) -> bool:
             return cur.fetchone() is not None
 
 def guardar_perfil(utilizador: str, papel: str, estilo_resposta: str,
-                   formato: str, decisao: str, dificuldades: str):
+                   formato: str, decisao: str, dificuldades: str, empresa: str = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO perfis (utilizador, papel, estilo_resposta, formato, decisao, dificuldades)
-                   VALUES (%s, %s, %s, %s, %s, %s)
+                """INSERT INTO perfis (utilizador, papel, estilo_resposta, formato, decisao, dificuldades, empresa)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (utilizador) DO UPDATE SET
                        papel = EXCLUDED.papel, estilo_resposta = EXCLUDED.estilo_resposta,
                        formato = EXCLUDED.formato, decisao = EXCLUDED.decisao,
-                       dificuldades = EXCLUDED.dificuldades""",
-                (utilizador, papel, estilo_resposta, formato, decisao, dificuldades)
+                       dificuldades = EXCLUDED.dificuldades, empresa = EXCLUDED.empresa""",
+                (utilizador, papel, estilo_resposta, formato, decisao, dificuldades, empresa)
             )
         conn.commit()
     return {"guardado": True}
@@ -159,6 +167,24 @@ def obter_perfil(utilizador: str):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM perfis WHERE utilizador = %s", (utilizador,))
             return cur.fetchone()
+
+def atualizar_empresa(utilizador: str, empresa: str):
+    """Corrige só a equipa/empresa registada no perfil, sem repetir todo o
+    acolhimento — usado quando alguém já tem perfil mas a Alma não a está a
+    reconhecer corretamente como sendo da Ecos Largos (ou da Interior
+    Guider), ex: porque nunca lhe foi perguntado isto explicitamente, ou
+    porque a deteção automática pela equipa do projeto no Basecamp falhou
+    (só funciona para quem tem conta no Basecamp — muita gente da Ecos
+    Largos fala só pela consola)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO perfis (utilizador, empresa) VALUES (%s, %s)
+                   ON CONFLICT (utilizador) DO UPDATE SET empresa = EXCLUDED.empresa""",
+                (utilizador, empresa)
+            )
+        conn.commit()
+    return {"guardado": True, "empresa": empresa}
 
 def memorizar_facto(utilizador: str, facto: str):
     with get_conn() as conn:
@@ -206,8 +232,10 @@ def contexto_utilizador(utilizador: str) -> str:
         return ""
     linhas = [f"Estás a falar com: {utilizador}"]
     if p:
+        if p.get("empresa"):
+            linhas.append(f"Equipa/empresa: {p['empresa']}")
         linhas += [
-            f"Papel na Interior Guider: {p['papel']}",
+            f"Papel na equipa: {p['papel']}",
             f"Estilo de resposta preferido: {p['estilo_resposta']}",
             f"Formato preferido: {p['formato']}",
             f"Decisões: {p['decisao']}",
