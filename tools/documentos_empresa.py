@@ -68,6 +68,30 @@ def procurar_documentos_empresa(pesquisa: str) -> list[dict]:
     return [{k: v for k, v in item.items() if k in ("id", "tipo", "titulo", "projeto", "pasta")}
             for item in correspondem[:40]]
 
+def _extrair_por_tipo(bruto: bytes, ctype: str) -> str:
+    """Extrai texto de bytes crus dado o content_type — partilhado entre
+    ficheiros (Uploads) e anexos embutidos dentro de Documentos nativos do
+    Basecamp (ver _ler_conteudo)."""
+    if ctype in visao.TIPOS_DE_IMAGEM:
+        return visao.descrever_imagem(bruto, ctype)
+    if ctype == "application/pdf":
+        leitor = PdfReader(io.BytesIO(bruto))
+        texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
+        if not texto:
+            # sem texto extraível — provavelmente um PDF só de design/imagem;
+            # tenta ler a primeira página como imagem antes de desistir.
+            try:
+                texto = visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
+            except Exception as e:
+                texto = f"(não consegui extrair texto nem imagem deste PDF: {e})"
+        return texto
+    if ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = DocxDocument(io.BytesIO(bruto))
+        return "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
+    if ctype in ("text/plain", "text/csv"):
+        return bruto.decode("utf-8", errors="ignore")
+    return None
+
 def _ler_conteudo(item: dict) -> str:
     """Extrai o texto de um documento/ficheiro (item de _listar_bruto()) —
     partilhado entre ler_documento_empresa (um id específico) e outros
@@ -75,8 +99,24 @@ def _ler_conteudo(item: dict) -> str:
     inteiro tratado como fonte de confiança). Devolve None quando o tipo de
     ficheiro não é legível (quem chamar decide o que fazer nesse caso)."""
     if item["tipo"] == "documento":
+        # um Documento nativo do Basecamp pode ter o texto todo escrito nele
+        # próprio, ou pode ser só um invólucro com o conteúdo real num
+        # ficheiro anexado lá dentro (PDF, Word, imagem) — lê os dois e
+        # junta, em vez de assumir que é sempre um ou outro.
         completo = basecamp.obter_recording(item["url"])
-        return _texto_simples(completo.get("content", ""))[:6000]
+        texto_wrapper = _texto_simples(completo.get("content", "")).strip()
+        partes = [texto_wrapper] if texto_wrapper else []
+        for anexo in completo.get("content_attachments") or []:
+            ctype_anexo = anexo.get("content_type") or ""
+            try:
+                bruto_anexo = basecamp._get_bytes(anexo["download_url"])
+                texto_anexo = _extrair_por_tipo(bruto_anexo, ctype_anexo)
+                if texto_anexo:
+                    partes.append(texto_anexo)
+            except Exception as e:
+                partes.append(f"(erro ao ler um anexo deste documento: {e})")
+        texto_final = "\n\n".join(partes).strip()
+        return texto_final[:6000] if texto_final else None
 
     ctype = item.get("content_type") or ""
 
@@ -88,22 +128,7 @@ def _ler_conteudo(item: dict) -> str:
         return None
 
     bruto = basecamp._get_bytes(item["download_url"])
-    if ctype == "application/pdf":
-        leitor = PdfReader(io.BytesIO(bruto))
-        texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
-        if not texto:
-            # sem texto extraível — provavelmente um PDF só de design/imagem;
-            # tenta ler a primeira página como imagem antes de desistir.
-            try:
-                texto = visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
-            except Exception as e:
-                texto = f"(não consegui extrair texto nem imagem deste PDF: {e})"
-    elif ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = DocxDocument(io.BytesIO(bruto))
-        texto = "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
-    else:  # text/plain, text/csv
-        texto = bruto.decode("utf-8", errors="ignore")
-    return texto[:6000]
+    return _extrair_por_tipo(bruto, ctype)[:6000]
 
 def ler_documento_empresa(id: int) -> dict:
     """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
@@ -115,6 +140,9 @@ def ler_documento_empresa(id: int) -> dict:
 
     conteudo = _ler_conteudo(item)
     if conteudo is None:
+        if item["tipo"] == "documento":
+            return {"erro": "este documento parece estar vazio (sem texto e sem anexos legíveis)",
+                    "titulo": item["titulo"], "app_url": item.get("app_url")}
         ctype = item.get("content_type") or ""
         return {"erro": f"não consigo ler o conteúdo deste tipo de ficheiro ({ctype or item.get('filename')})",
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
