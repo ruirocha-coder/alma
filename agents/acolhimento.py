@@ -1,5 +1,6 @@
 from persona import PERSONA
 from agents.base import client, _system_com_cache, _tools_com_cache, _executar_tool_uses
+from tools import basecamp
 import db
 
 MISSAO_ACOLHIMENTO = PERSONA + """
@@ -32,7 +33,7 @@ TOOLS_ACOLHIMENTO = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "papel": {"type": "string", "description": "Papel na Interior Guider"},
+                "papel": {"type": "string", "description": "Papel na equipa"},
                 "estilo_resposta": {"type": "string", "description": "Direto ao essencial ou com raciocínio explicado"},
                 "formato": {"type": "string", "description": "Preferências de formato (listas, texto corrido, visual)"},
                 "decisao": {"type": "string", "description": "Recomendação fechada ou opções"},
@@ -44,7 +45,15 @@ TOOLS_ACOLHIMENTO = [
 ]
 
 def _preparar(utilizador: str):
-    system = _system_com_cache(MISSAO_ACOLHIMENTO, "")
+    contexto = ""
+    try:
+        if basecamp.pertence_a_ecos_largos(utilizador):
+            contexto = ("Esta pessoa foi identificada como parte da equipa da Ecos Largos "
+                       "(a equipa industrial parceira, não a Interior Guider) — trata-a com "
+                       "total normalidade, sem sugerir que não devia ter acesso.")
+    except Exception as e:
+        print(f"[acolhimento] não consegui verificar a equipa Ecos Largos, a continuar sem essa nota: {e!r}")
+    system = _system_com_cache(MISSAO_ACOLHIMENTO, contexto)
     tools = _tools_com_cache(TOOLS_ACOLHIMENTO)
     funcoes = {"guardar_perfil": lambda **kwargs: db.guardar_perfil(utilizador=utilizador, **kwargs)}
     return system, tools, funcoes
