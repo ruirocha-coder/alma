@@ -2,17 +2,14 @@ import re, traceback
 from bs4 import BeautifulSoup
 from persona import PERSONA
 from agents.base import correr_agente, TOOLS_COMUNS
+from agents import ecos_largos as ecos_largos_agent
 from tools import basecamp
 import db
 
-MISSAO_BASECAMP = PERSONA + """
-
-Modo atual: foste mencionada diretamente num comentário ou numa tarefa/card
-do Basecamp. Alguém da equipa dirigiu-se a ti — responde ao pedido dela,
-usando o contexto da tarefa/card e da conversa fornecidos abaixo. Publicas
-UM comentário de resposta, direto e útil; usa as ferramentas disponíveis
-(catálogo, páginas do site, memória, estado_projeto_basecamp para perguntas
-sobre o estado geral de um projeto) sempre que ajudarem a responder melhor.
+# partilhado pelas duas missões abaixo — as convenções de como responder a
+# uma menção no Basecamp não mudam consoante o projeto seja da Interior
+# Guider ou da Ecos Largos, só as ferramentas/foco é que mudam.
+_REGRAS_MENCAO_BASECAMP = """
 
 Reforço das regras: a tua resposta a esta menção é sempre um comentário
 nesta tarefa/card — nunca alteres prazos, responsáveis, conteúdo de tarefas
@@ -29,19 +26,27 @@ contigo, mesmo quando é só por menções no Basecamp.
 
 Não escrevas saudações nem te apresentes — vai direto à resposta."""
 
-def responder(utilizador: str, mensagens: list) -> str:
-    # este fluxo não passa pelo orchestrator (é sempre a mesma missão,
-    # qualquer que seja o projeto onde a menção aconteceu), por isso o
-    # mural certo tem de ser decidido aqui, pela equipa da pessoa que
-    # mencionou — tal como no resto da Alma, alguém da Ecos Largos que peça
-    # para publicar deve publicar no mural deles, não no da Gestão.
-    try:
-        projeto_mural = "Ecos Largos" if basecamp.pertence_a_ecos_largos(utilizador) else "Gestão"
-    except Exception as e:
-        print(f"[responder_basecamp] não consegui verificar a equipa Ecos Largos para o mural, a assumir Gestão: {e!r}")
-        projeto_mural = "Gestão"
+MISSAO_BASECAMP = PERSONA + """
+
+Modo atual: foste mencionada diretamente num comentário ou numa tarefa/card
+do Basecamp. Alguém da equipa dirigiu-se a ti — responde ao pedido dela,
+usando o contexto da tarefa/card e da conversa fornecidos abaixo. Publicas
+UM comentário de resposta, direto e útil; usa as ferramentas disponíveis
+(catálogo, páginas do site, memória, estado_projeto_basecamp para perguntas
+sobre o estado geral de um projeto) sempre que ajudarem a responder melhor.""" + _REGRAS_MENCAO_BASECAMP
+
+# quando a menção acontece num card/tarefa/mural do projeto Ecos Largos, usa
+# a missão e as ferramentas próprias dessa equipa (dashboard de produção,
+# etc.) em vez das da Interior Guider — o projeto onde a menção aconteceu
+# já diz, sem ambiguidade, de que equipa se trata.
+MISSAO_BASECAMP_ECOS_LARGOS = ecos_largos_agent.MISSAO_ECOS_LARGOS + _REGRAS_MENCAO_BASECAMP
+
+def responder(utilizador: str, mensagens: list, projeto: str = "") -> str:
+    if "ecos largos" in (projeto or "").lower():
+        return correr_agente(MISSAO_BASECAMP_ECOS_LARGOS, ecos_largos_agent.TOOLS_ECOS_LARGOS,
+                             mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
     return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador,
-                         origem="basecamp", projeto_mural=projeto_mural)
+                         origem="basecamp", projeto_mural="Gestão")
 
 def _texto_simples(html: str) -> str:
     if not html:
@@ -137,7 +142,8 @@ Conversa/comentários existentes:
     # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
     # usa, para o perfil e a memória serem partilhados entre os dois canais
     utilizador_basecamp = criador.get("name") or "Alguém do Basecamp"
-    resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}])
+    projeto = (recording.get("bucket") or {}).get("name") or ""
+    resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}], projeto=projeto)
     basecamp.comentar(alvo_id, resposta)
     db.registar_evento_processado(evento_id, resposta)
     print(f"[responder_basecamp] respondido a {criador.get('name')} em '{titulo}'")
