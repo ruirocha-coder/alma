@@ -20,7 +20,13 @@ _MENCAO_ALMA = re.compile(r"\balma\b", re.IGNORECASE)
 # "bloquear" numa reunião longa ou muito faladora. Só o fim recente da
 # transcrição chega para responder com contexto; a transcrição completa
 # continua a ser usada no resumo final.
-_LIMITE_CONTEXTO_AO_VIVO = 6000
+#
+# 32000 carateres cobre, na prática, uma reunião de 30 minutos com conversa
+# intensa (a ~150 palavras/minuto, com várias pessoas a falar, isso são umas
+# dezenas de milhares de carateres) — o suficiente para a Alma responder
+# tendo em conta praticamente tudo o que já se disse, não só os últimos
+# minutos, sem deixar de ter um limite para reuniões muito mais longas.
+_LIMITE_CONTEXTO_AO_VIVO = 32000
 
 _transcricoes: dict[str, dict[int, str]] = {}
 _processados: dict[str, int] = {}
