@@ -1,58 +1,75 @@
 # tools/ecos_largos.py — recursos próprios da equipa Ecos Largos, uma
 # equipa industrial parceira gerida no mesmo Basecamp mas com o seu próprio
 # projeto, à parte da Interior Guider.
-import os
+import os, re
+from datetime import date, timedelta
 import httpx
-from bs4 import BeautifulSoup
 
 # servidor próprio da equipa (fora do Basecamp) — configurável por env var
 # porque corre num endereço DuckDNS, que pode mudar sem precisar de deploy.
-DASHBOARD_PRODUCAO_URL = os.environ.get(
-    "ECOS_LARGOS_DASHBOARD_URL",
-    "http://ecoslargos.duckdns.org:9000/server/dashboard.php"
+# API oficial de dados (não a página HTML do dashboard): sem parâmetros
+# devolve a entrada mais recente da base de dados; com ?data=YYYY-MM-DD
+# devolve os dados desse dia.
+DASHBOARD_API_URL = os.environ.get(
+    "ECOS_LARGOS_DASHBOARD_API_URL",
+    "http://ecoslargos.duckdns.org:9000/server/data_api.php"
 )
 
-def _tabelas_para_texto(soup: BeautifulSoup) -> str:
-    """Converte as tabelas HTML da página em texto linha a linha — extrair só
-    o texto corrido (get_text) perderia o alinhamento de colunas, que é onde
-    está a informação real de um dashboard de produção."""
-    blocos = []
-    for tabela in soup.find_all("table"):
-        linhas = []
-        for tr in tabela.find_all("tr"):
-            celulas = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
-            if any(celulas):
-                linhas.append(" | ".join(celulas))
-        if linhas:
-            blocos.append("\n".join(linhas))
-    return "\n\n".join(blocos)
+_FORMATO_DATA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-def ler_dashboard_producao() -> dict:
-    """Lê o dashboard de produção da Ecos Largos — uma página servida por um
-    servidor próprio da equipa (fora do Basecamp), por isso menos fiável do
-    que uma chamada normal à API: pode estar offline ou inacessível, o que
-    devolve um erro em vez de rebentar quem chamar isto."""
+def _resolver_data(data: str) -> str:
+    """Aceita "hoje"/"ontem" além de YYYY-MM-DD — o modelo não sabe a data
+    de hoje com fiabilidade, por isso essas palavras são resolvidas aqui
+    (que sabe sempre a data real), em vez de pedir ao modelo para as
+    calcular. Devolve None se não conseguir perceber a data."""
+    termo = data.strip().lower()
+    if termo in ("hoje", "agora"):
+        return date.today().isoformat()
+    if termo == "ontem":
+        return (date.today() - timedelta(days=1)).isoformat()
+    if _FORMATO_DATA.match(data.strip()):
+        return data.strip()
+    return None
+
+def ler_dashboard_producao(data: str = None) -> dict:
+    """Lê os dados de produção da Ecos Largos, da API oficial do dashboard —
+    um servidor próprio da equipa (fora do Basecamp), por isso menos fiável
+    do que uma chamada normal à API: pode estar offline ou inacessível, o
+    que devolve um erro em vez de rebentar quem chamar isto.
+
+    Sem `data`, devolve a entrada mais recente (agora); com `data`
+    ("hoje", "ontem", ou YYYY-MM-DD), devolve os dados desse dia."""
+    params = None
+    if data:
+        data_resolvida = _resolver_data(data)
+        if data_resolvida is None:
+            return {"erro": f"não percebi a data {data!r} — usa \"hoje\", \"ontem\" ou o formato YYYY-MM-DD"}
+        params = {"data": data_resolvida}
+
     try:
-        r = httpx.get(DASHBOARD_PRODUCAO_URL, timeout=20)
+        r = httpx.get(DASHBOARD_API_URL, params=params, timeout=20)
         r.raise_for_status()
     except Exception as e:
-        return {"erro": f"não consegui aceder ao dashboard de produção: {e}"}
+        return {"erro": f"não consegui aceder à API de dados de produção: {e}"}
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    tabelas = _tabelas_para_texto(soup)
-    if tabelas:
-        return {"conteudo": tabelas}
-
-    # sem tabelas reconhecíveis — cai para o texto simples da página toda
-    texto = soup.get_text("\n", strip=True)
-    if not texto:
-        return {"erro": "o dashboard de produção respondeu, mas não consegui extrair conteúdo legível"}
-    return {"conteudo": texto}
+    try:
+        dados = r.json()
+    except ValueError:
+        # a API não devolveu JSON (ex: página de erro do servidor) — ainda
+        # assim devolve o texto em bruto, para não perder informação
+        return {"conteudo": r.text.strip()} if r.text.strip() else {
+            "erro": "a API de dados de produção respondeu, mas sem conteúdo legível"}
+    return {"conteudo": dados}
 
 TOOLS_DASHBOARD_PRODUCAO = [
     {
         "name": "dashboard_producao_ecos_largos",
-        "description": "Lê o dashboard de produção da Ecos Largos (dados de produção, servidos por um servidor próprio da equipa, fora do Basecamp). Usa isto sempre que perguntarem pelo estado da produção, números de produção, ou pedirem uma análise/resumo do dashboard.",
-        "input_schema": {"type": "object", "properties": {}}
+        "description": "Lê os dados de produção da Ecos Largos, da API oficial do dashboard (servida por um servidor próprio da equipa, fora do Basecamp). Sem argumentos devolve os dados mais recentes (agora); passa `data` para consultar um dia específico. Usa isto sempre que perguntarem pelo estado da produção, números de produção, ou pedirem uma análise/resumo — de hoje ou de outro dia.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "string", "description": "\"hoje\", \"ontem\", ou uma data no formato YYYY-MM-DD — omite para os dados mais recentes/agora"}
+            }
+        }
     }
 ]

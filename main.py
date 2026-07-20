@@ -309,7 +309,7 @@ def health_config():
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
                  "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
                  "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET", "OPENAI_API_KEY",
-                 "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ECOS_LARGOS_DASHBOARD_URL"]
+                 "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ECOS_LARGOS_DASHBOARD_API_URL"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
