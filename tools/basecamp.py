@@ -22,11 +22,15 @@ TIPOS_MONITORIZADOS = ("Todo", "Kanban::Card")
 TTL_ITENS_ATIVOS = 900  # segundos — 15 min chega para pedidos em cadeia (ex: resumo de projeto)
 TTL_CONCLUIDOS_RECENTES = 900
 
-# colunas do Kanban que representam um estado terminal/fechado do fluxo (não
-# trabalho esquecido) — um card parado aqui é esperado, não é sinal de nada.
+# colunas do Kanban (estado de um card) ou nomes de todolist (para um Todo)
+# que não representam trabalho em aberto real — ou porque já fecharam o
+# fluxo (Perdido, Vendido, Done, Concluído, Arquivo, Cancelado, Not Now), ou
+# porque nunca foram trabalho a fazer, só lembretes automáticos do funil de
+# vendas (a lista "Avisos") — um item parado aqui é esperado, não é sinal de
+# nada, e não deve contar como tarefa/card em aberto nem atrasado.
 COLUNAS_TERMINAIS = {"perdido", "perdidos", "vendido", "vendidos", "done",
                      "concluído", "concluido", "arquivo", "arquivado", "cancelado",
-                     "not now"}
+                     "not now", "avisos"}
 
 def _base_url():
     return f"https://3.basecampapi.com/{os.environ['BASECAMP_ACCOUNT_ID']}"
