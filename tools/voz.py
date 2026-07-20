@@ -42,17 +42,41 @@ def limpar_para_fala(texto: str) -> str:
     texto = _MD_PIPE.sub(" ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
+# limiares típicos para detetar um segmento "alucinado" pelo Whisper — texto
+# inventado (ex: "subscreve o canal", créditos de legendagem tipo "Amara.org")
+# quando o áudio é só silêncio/ruído, em vez de devolver vazio. Os dois
+# sinais têm de aparecer juntos: no_speech_prob alto sozinho também acontece
+# em fala real mas muito baixa/curta, por isso exige-se também pouca
+# confiança no texto gerado (avg_logprob baixo).
+_LIMIAR_SEM_FALA = 0.6
+_LIMIAR_CONFIANCA = -1.0
+
+def _parece_alucinacao(segmento: dict) -> bool:
+    return (segmento.get("no_speech_prob", 0) > _LIMIAR_SEM_FALA
+            and segmento.get("avg_logprob", 0) < _LIMIAR_CONFIANCA)
+
 def transcrever(bruto: bytes, filename: str = "audio.webm", content_type: str = "audio/webm") -> str:
-    """Transcreve uma gravação (ex: da consola de chat) para texto, via Whisper."""
+    """Transcreve uma gravação (ex: da consola de chat, ou um excerto de
+    reunião) para texto, via Whisper. Pede o resultado em segmentos
+    (verbose_json) e descarta os que parecem alucinações sobre
+    silêncio/ruído — sem isto, um excerto sem fala real por vezes volta com
+    texto inventado (frases comuns nos vídeos com que o Whisper foi
+    treinado) em vez de vazio, poluindo a transcrição com conteúdo que
+    ninguém disse."""
     r = httpx.post(
         "https://api.openai.com/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-        data={"model": "whisper-1", "language": "pt"},
+        data={"model": "whisper-1", "language": "pt", "response_format": "verbose_json"},
         files={"file": (filename, bruto, content_type)},
         timeout=60,
     )
     r.raise_for_status()
-    return r.json().get("text", "").strip()
+    dados = r.json()
+    segmentos = dados.get("segments")
+    if segmentos is None:
+        return (dados.get("text") or "").strip()
+    partes = [s["text"].strip() for s in segmentos if s.get("text") and not _parece_alucinacao(s)]
+    return " ".join(partes).strip()
 
 def sintetizar(texto: str) -> bytes:
     """Sintetiza texto em voz (mp3), com a voz personalizada da empresa."""
