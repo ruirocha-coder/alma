@@ -24,6 +24,10 @@ scheduler = BackgroundScheduler(timezone="Europe/Lisbon")
 scheduler.add_job(monitor_basecamp.correr_monitorizacao, "cron", hour=8, minute=0)
 # resumo semanal no Mural (Gestão, Interior Guider): segundas-feiras às 9h
 scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal, "cron", day_of_week="mon", hour=9, minute=0)
+# resumo semanal no Mural da Ecos Largos: separado do da Interior Guider,
+# mesmo dia mas a horas diferentes para não publicarem os dois em simultâneo
+scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal_ecos_largos, "cron",
+                  day_of_week="mon", hour=9, minute=15)
 # análise diária do dashboard de produção, no Mural da Ecos Largos: às 19h, de segunda a sábado (não há produção aos domingos)
 scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron",
                   day_of_week="mon-sat", hour=19, minute=0)
@@ -111,8 +115,11 @@ def _evento_audio(frase: str) -> str:
     """Sintetiza uma frase já fechada em voz e devolve-a como evento SSE — se
     falhar, não interrompe a resposta, só fica sem áudio para essa frase (o
     texto já chegou por 'delta' de qualquer forma)."""
+    frase_limpa = voz.limpar_para_fala(frase)
+    if not frase_limpa:
+        return ""
     try:
-        audio_b64 = base64.b64encode(voz.sintetizar(frase)).decode()
+        audio_b64 = base64.b64encode(voz.sintetizar(frase_limpa)).decode()
         return f"data: {json.dumps({'audio': audio_b64}, ensure_ascii=False)}\n\n"
     except Exception as e:
         print(f"[voz] falha ao sintetizar frase: {e!r}")

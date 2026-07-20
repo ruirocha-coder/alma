@@ -1,11 +1,20 @@
 # agents/resumo_semanal_basecamp.py — resumo semanal de atividade, publicado
 # no Mural (visível a toda a equipa), com sugestões de melhoria.
+#
+# A Ecos Largos é uma equipa parceira à parte (projetos e mural próprios) —
+# os atrasos dela não devem aparecer misturados no resumo da Boa Safra/
+# Interior Guider, nem vice-versa. Por isso há duas corridas independentes,
+# cada uma filtrada aos projetos da sua equipa e publicada no mural certo.
 import threading
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp
 
-_a_correr = threading.Lock()
+_a_correr_interior_guider = threading.Lock()
+_a_correr_ecos_largos = threading.Lock()
+
+def _e_projeto_ecos_largos(nome_projeto: str) -> bool:
+    return "ecos largos" in (nome_projeto or "").lower()
 
 MISSAO_RESUMO_SEMANAL = PERSONA + """
 
@@ -46,25 +55,40 @@ Por projeto:
     )
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
-def correr_resumo_semanal():
-    """Gera e publica no Mural o resumo semanal de atividade. Pensado para
-    correr uma vez por semana (agendado), mas pode ser disparado manualmente."""
-    if not _a_correr.acquire(blocking=False):
-        print("[resumo_semanal] já há uma corrida em curso — ignorado")
+def _correr(lock: threading.Lock, etiqueta: str, filtro, projeto_mural: str):
+    """Núcleo partilhado pelas duas corridas: só muda o filtro dos atrasados,
+    o lock (para não sobrepor duas corridas da mesma equipa) e o mural onde
+    fica publicado o resumo."""
+    if not lock.acquire(blocking=False):
+        print(f"[resumo_semanal:{etiqueta}] já há uma corrida em curso — ignorado")
         return
 
     try:
         try:
-            atrasados = basecamp.tarefas_e_cards_atrasados()
+            atrasados = [i for i in basecamp.tarefas_e_cards_atrasados() if filtro(i["projeto"])]
         except Exception as e:
-            print(f"[resumo_semanal] não foi possível obter tarefas do Basecamp: {e!r}")
+            print(f"[resumo_semanal:{etiqueta}] não foi possível obter tarefas do Basecamp: {e!r}")
             return
 
         texto = _gerar_resumo(atrasados)
-        basecamp.publicar_mural("Resumo semanal de atividade", texto)
-        print("[resumo_semanal] publicado no mural")
+        basecamp.publicar_mural("Resumo semanal de atividade", texto, projeto=projeto_mural)
+        print(f"[resumo_semanal:{etiqueta}] publicado no mural")
     except Exception:
         import traceback
-        print(f"[resumo_semanal] ERRO inesperado: {traceback.format_exc()}")
+        print(f"[resumo_semanal:{etiqueta}] ERRO inesperado: {traceback.format_exc()}")
     finally:
-        _a_correr.release()
+        lock.release()
+
+def correr_resumo_semanal():
+    """Gera e publica no Mural da Gestão (Interior Guider) o resumo semanal de
+    atividade — só dos projetos da Interior Guider, nunca da Ecos Largos, que
+    tem a sua própria corrida e o seu próprio mural (ver
+    correr_resumo_semanal_ecos_largos). Pensado para correr uma vez por
+    semana (agendado), mas pode ser disparado manualmente."""
+    _correr(_a_correr_interior_guider, "interior_guider",
+            lambda projeto: not _e_projeto_ecos_largos(projeto), "Gestão")
+
+def correr_resumo_semanal_ecos_largos():
+    """Gera e publica no Mural da Ecos Largos o resumo semanal de atividade —
+    só dos projetos da Ecos Largos, separado do resumo da Interior Guider."""
+    _correr(_a_correr_ecos_largos, "ecos_largos", _e_projeto_ecos_largos, "Ecos Largos")
