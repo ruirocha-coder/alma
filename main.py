@@ -111,8 +111,11 @@ def _evento_audio(frase: str) -> str:
     """Sintetiza uma frase já fechada em voz e devolve-a como evento SSE — se
     falhar, não interrompe a resposta, só fica sem áudio para essa frase (o
     texto já chegou por 'delta' de qualquer forma)."""
+    frase_limpa = voz.limpar_para_fala(frase)
+    if not frase_limpa:
+        return ""
     try:
-        audio_b64 = base64.b64encode(voz.sintetizar(frase)).decode()
+        audio_b64 = base64.b64encode(voz.sintetizar(frase_limpa)).decode()
         return f"data: {json.dumps({'audio': audio_b64}, ensure_ascii=False)}\n\n"
     except Exception as e:
         print(f"[voz] falha ao sintetizar frase: {e!r}")

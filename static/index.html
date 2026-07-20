@@ -351,10 +351,19 @@
   }
   .bubble th { background: var(--bubble-user); font-weight: 600; }
 
+  .typing-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .typing-label {
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
   .typing {
     display: inline-flex;
     gap: 4px;
-    padding: 4px 0;
   }
   .typing span {
     width: 6px;
@@ -651,8 +660,29 @@
   // tenha chegado antes de a anterior acabar de tocar
   const filaAudio = [];
   let aTocarAudio = false;
+  let urlAudioAtual = null;
 
-  let audioAtual = null;
+  // um único elemento <audio>, reutilizado para toda a reprodução — no iOS
+  // Safari, criar um "new Audio(url)" a cada frase nunca chega a tocar: o
+  // desbloqueio de autoplay dado por um gesto do utilizador só vale para o
+  // MESMO elemento em que o play() aconteceu dentro desse gesto, não para
+  // elementos criados depois (quando o áudio da resposta chega, já fora do
+  // gesto, por streaming). Por isso o mesmo elemento é desbloqueado uma vez
+  // (ver desbloquearAudio) e depois só se lhe troca o "src".
+  const audioPlayerEl = new Audio();
+  audioPlayerEl.playsInline = true;
+  let audioDesbloqueado = false;
+  // wav silencioso mínimo, só para o desbloqueio — tem de ser uma reprodução
+  // real (não um elemento sem "src"), senão o iOS não conta como interação
+  // válida para desbloquear reproduções futuras deste elemento
+  const SILENCIO_WAV = "data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+  function desbloquearAudio() {
+    if (audioDesbloqueado) return;
+    audioDesbloqueado = true;
+    audioPlayerEl.src = SILENCIO_WAV;
+    audioPlayerEl.play().catch(() => {});
+  }
 
   function enfileirarAudio(base64) {
     const binario = atob(base64);
@@ -667,17 +697,17 @@
     if (aTocarAudio || filaAudio.length === 0) return;
     aTocarAudio = true;
     const url = filaAudio.shift();
-    const audioEl = new Audio(url);
-    audioAtual = audioEl;
+    urlAudioAtual = url;
     const seguinte = () => {
       URL.revokeObjectURL(url);
-      if (audioAtual === audioEl) audioAtual = null;
+      if (urlAudioAtual === url) urlAudioAtual = null;
       aTocarAudio = false;
       tocarProximoAudio();
     };
-    audioEl.addEventListener("ended", seguinte);
-    audioEl.addEventListener("error", seguinte);
-    audioEl.play().catch(seguinte);
+    audioPlayerEl.onended = seguinte;
+    audioPlayerEl.onerror = seguinte;
+    audioPlayerEl.src = url;
+    audioPlayerEl.play().catch(seguinte);
   }
 
   // corta a fala imediatamente (usado quando a Alma é chamada de novo a
@@ -685,9 +715,10 @@
   // a resposta antiga primeiro)
   function pararReproducaoAudio() {
     filaAudio.splice(0).forEach((url) => URL.revokeObjectURL(url));
-    if (audioAtual) {
-      audioAtual.pause();
-      audioAtual = null;
+    if (urlAudioAtual) {
+      audioPlayerEl.pause();
+      URL.revokeObjectURL(urlAudioAtual);
+      urlAudioAtual = null;
     }
     aTocarAudio = false;
   }
@@ -729,6 +760,10 @@
 
   async function iniciarModoReuniao() {
     if (reuniaoAtiva) return;
+    // tem de ser a primeira coisa a acontecer, ainda antes de qualquer
+    // await — é o que mantém isto dentro do mesmo gesto do utilizador (o
+    // clique no botão) que o iOS Safari exige para desbloquear autoplay
+    desbloquearAudio();
     try {
       reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (_) {
@@ -861,9 +896,7 @@
               removeTyping();
               addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
             } else if (ev.a_processar) {
-              // sinal de vida (ex: a meio de uma consulta ao Basecamp) —
-              // sem texto novo ainda, mas o indicador "a escrever" já está
-              // visível desde o início, por isso não há nada a fazer aqui
+              marcarAProcessar();
             }
           }
         }
@@ -1169,7 +1202,8 @@
     wrap.id = "typing-indicator";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+    bubble.innerHTML = '<span class="typing-wrap"><span class="typing-label"></span>'
+      + '<span class="typing"><span></span><span></span><span></span></span></span>';
     wrap.appendChild(makeAvatar("assistant"));
     wrap.appendChild(bubble);
     messagesInner.appendChild(wrap);
@@ -1179,6 +1213,17 @@
   function removeTyping() {
     const el = document.getElementById("typing-indicator");
     if (el) el.remove();
+  }
+
+  // chamado quando chega um sinal de vida (a_processar) a meio de uma
+  // resposta ainda a demorar — sem isto, os três pontinhos ficam iguais do
+  // início ao fim e parece que a Alma não está a fazer nada, mesmo quando
+  // está a consultar o Basecamp ou outra ferramenta.
+  function marcarAProcessar() {
+    const el = document.getElementById("typing-indicator");
+    if (!el) return;
+    const label = el.querySelector(".typing-label");
+    if (label) label.textContent = "A analisar…";
   }
 
   menuToggle.addEventListener("click", () => {
@@ -1392,8 +1437,7 @@
               } else if (dados.erro) {
                 erro = dados.erro;
               } else if (dados.a_processar) {
-                // sinal de vida (ex: a meio de uma consulta ao Basecamp) —
-                // o indicador "a escrever" já está visível desde o envio
+                marcarAProcessar();
               }
             }
           }
