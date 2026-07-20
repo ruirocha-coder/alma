@@ -24,6 +24,13 @@ Quando surgir naturalmente um facto duradouro sobre esta pessoa ou o seu
 trabalho, usa memorizar_facto — assim vais conhecendo melhor quem fala
 contigo, mesmo quando é só por menções no Basecamp.
 
+Se precisares de chamar a atenção de outra pessoa da equipa (com acesso a
+este projeto) para o teu comentário — não só quem te mencionou — escreve o
+nome dela como "@Nome Completo" (ex: "@Rui Rocha"); se corresponder a
+alguém real, vira uma menção a sério que a notifica, não só o nome escrito.
+Usa isto com critério, só quando fizer sentido notificar alguém em
+concreto, não em todas as respostas.
+
 Não escrevas saudações nem te apresentes — vai direto à resposta."""
 
 MISSAO_BASECAMP = PERSONA + """
@@ -144,6 +151,6 @@ Conversa/comentários existentes:
     utilizador_basecamp = criador.get("name") or "Alguém do Basecamp"
     projeto = (recording.get("bucket") or {}).get("name") or ""
     resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}], projeto=projeto)
-    basecamp.comentar(alvo_id, resposta)
+    basecamp.comentar(alvo_id, resposta, projeto=projeto)
     db.registar_evento_processado(evento_id, resposta)
     print(f"[responder_basecamp] respondido a {criador.get('name')} em '{titulo}'")

@@ -417,10 +417,58 @@ def _markdown_para_basecamp(bruto: str) -> str:
     fechar_listas()
     return "".join(partes)
 
-def comentar(recording_id: int, texto: str):
-    """Publica um comentário numa tarefa/card."""
+# "@Nome da Pessoa" no texto que a Alma escreve vira uma menção real do
+# Basecamp (que notifica a pessoa), não só o nome em texto simples — desde
+# que corresponda a alguém com acesso ao projeto em questão. O Basecamp
+# representa uma menção como uma tag <bc-attachment sgid="..."> no HTML do
+# conteúdo, onde o sgid vem do próprio registo da pessoa (attachable_sgid).
+_PADRAO_MENCAO = re.compile(r"@([A-ZÀ-ÖØ-Þ][^\s@,.!?;:()]*(?:\s+[A-ZÀ-ÖØ-Þ][^\s@,.!?;:()]*){0,3})")
+
+def _resolver_mencoes(texto: str, projeto: str) -> tuple:
+    """Substitui cada "@Nome" por um marcador de posição, para cada pessoa
+    encontrada que tenha acesso ao projeto indicado — devolve o texto com
+    os marcadores e a lista de attachable_sgid pela mesma ordem, para
+    trocar pela tag real da menção depois da conversão para HTML (tal como
+    os blocos de código, para o "<" e ">" da tag não serem escapados).
+    Um "@Nome" que não corresponda a ninguém fica só o nome, sem o "@", em
+    vez de um símbolo pendurado sem menção nenhuma."""
+    try:
+        pessoas = pessoas_projeto(projeto) if projeto else []
+    except Exception as e:
+        print(f"[basecamp] não consegui obter pessoas do projeto para resolver menções: {e!r}")
+        pessoas = []
+
+    sgids = []
+
+    def _substituir(m):
+        nome = m.group(1)
+        termo = _normalizar(nome)
+        for p in pessoas:
+            if _normalizar(p["name"]) == termo and p.get("attachable_sgid"):
+                sgids.append(p["attachable_sgid"])
+                return f"@@MENCAO{len(sgids) - 1}@@"
+        return nome
+
+    return _PADRAO_MENCAO.sub(_substituir, texto), sgids
+
+def _markdown_para_basecamp_com_mencoes(texto: str, projeto: str = None) -> str:
+    """Como _markdown_para_basecamp, mas primeiro resolve "@Nome" para
+    menções reais do Basecamp quando `projeto` for indicado."""
+    if not projeto:
+        return _markdown_para_basecamp(texto)
+    texto_com_marcadores, sgids = _resolver_mencoes(texto, projeto)
+    html = _markdown_para_basecamp(texto_com_marcadores)
+    for i, sgid in enumerate(sgids):
+        html = html.replace(f"@@MENCAO{i}@@", f'<bc-attachment sgid="{sgid}"></bc-attachment>')
+    return html
+
+def comentar(recording_id: int, texto: str, projeto: str = None):
+    """Publica um comentário numa tarefa/card. Se `projeto` for indicado,
+    resolve "@Nome" no texto para uma menção real do Basecamp (notifica a
+    pessoa) sempre que corresponder a alguém com acesso a esse projeto."""
     r = httpx.post(f"{_base_url()}/recordings/{recording_id}/comments.json",
-                   headers=_headers(), json={"content": _markdown_para_basecamp(texto)}, timeout=30)
+                   headers=_headers(), json={"content": _markdown_para_basecamp_com_mencoes(texto, projeto)},
+                   timeout=30)
     r.raise_for_status()
     return r.json()
 
@@ -450,14 +498,16 @@ def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
     """Publica uma mensagem no Mural de um projeto (visível a quem tem
     acesso a esse projeto). Por omissão, o mural da Gestão (toda a equipa da
     Interior Guider); passa `projeto` para publicar no mural de outro
-    projeto (ex: "Ecos Largos")."""
+    projeto (ex: "Ecos Largos"). "@Nome" na mensagem vira uma menção real
+    (notifica a pessoa) se corresponder a alguém com acesso a este projeto."""
     if projeto.strip().lower() == "gestão":
         bucket_id, board_id = MURAL_BUCKET_ID, MURAL_BOARD_ID
     else:
         bucket_id, board_id = _resolver_mural(projeto)
     r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/message_boards/{board_id}/messages.json",
                    headers=_headers(),
-                   json={"subject": assunto, "content": _markdown_para_basecamp(mensagem), "status": "active"},
+                   json={"subject": assunto, "content": _markdown_para_basecamp_com_mencoes(mensagem, projeto),
+                        "status": "active"},
                    timeout=30)
     r.raise_for_status()
     return r.json()

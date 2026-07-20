@@ -27,6 +27,10 @@ Regras deste comentário:
   (ex: se já está numa coluna de aprovação/revisão, isso muda o que faz
   sentido dizer). Não inventes o nome de quem é responsável se não vier
   na lista de responsáveis.
+- Quando houver responsável(is) na lista, escreve o nome como "@Nome
+  Completo" (ex: "@Rui Rocha") em vez de texto simples — se corresponder a
+  alguém real, vira uma menção a sério que a notifica, o que é o objetivo
+  de um alerta de atraso.
 - Lê sempre as notas da tarefa/card — costumam ter contexto essencial
   (o que falta, condições combinadas) que muda o que faz sentido dizer.
 - Se os comentários já existentes explicarem o atraso (ex: à espera de
@@ -103,7 +107,7 @@ def correr_monitorizacao() -> list[dict]:
             try:
                 comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
                 texto = _gerar_comentario(item, comentarios, procedimentos_texto)
-                basecamp.comentar(item["id"], texto)
+                basecamp.comentar(item["id"], texto, projeto=item["projeto"])
                 db.registar_alerta(item["id"], item["prazo"], texto)
                 resultado.append({"item": item, "comentario": texto, "ok": True})
                 print(f"[monitor_basecamp] comentado: {item['titulo']} ({item['dias_atraso']}d atraso)")
