@@ -2,6 +2,7 @@
 import os
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Json
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -60,6 +61,14 @@ CREATE TABLE IF NOT EXISTS basecamp_eventos_processados (
     comment_id BIGINT PRIMARY KEY,   -- id do comentário/tarefa/card que mencionou a Alma
     resposta TEXT,
     criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reunioes_em_curso (
+    sessao TEXT PRIMARY KEY,
+    excertos JSONB NOT NULL DEFAULT '{}'::jsonb,  -- {"indice": "texto transcrito"}
+    processados INTEGER NOT NULL DEFAULT 0,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    atualizado_em TIMESTAMPTZ DEFAULT now()
 );
 """
 
@@ -296,3 +305,58 @@ def alertas_recentes(limite: int = 30) -> list[dict]:
                 (limite,)
             )
             return cur.fetchall()
+
+def guardar_estado_reuniao(sessao: str, excertos: dict, processados: int):
+    """Persiste o estado de uma reunião em curso (excertos transcritos por
+    índice + contagem de processados) — sem isto, a transcrição acumulada só
+    existia em memória do processo do servidor e perdia-se por completo se
+    o servidor reiniciasse a meio de uma reunião longa (ex: um deploy novo)."""
+    excertos_json = {str(indice): texto for indice, texto in excertos.items()}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO reunioes_em_curso (sessao, excertos, processados)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (sessao) DO UPDATE SET
+                       excertos = EXCLUDED.excertos, processados = EXCLUDED.processados,
+                       atualizado_em = now()""",
+                (sessao, Json(excertos_json), processados)
+            )
+        conn.commit()
+
+def carregar_estado_reuniao(sessao: str):
+    """Estado persistido de uma reunião (excertos + processados), ou None se
+    não houver nenhum guardado para esta sessão — usado para recuperar uma
+    reunião em curso depois de o servidor reiniciar a meio dela."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT excertos, processados FROM reunioes_em_curso WHERE sessao = %s",
+                (sessao,)
+            )
+            linha = cur.fetchone()
+    if not linha:
+        return None
+    excertos = {int(indice): texto for indice, texto in linha["excertos"].items()}
+    return {"excertos": excertos, "processados": linha["processados"]}
+
+def eliminar_estado_reuniao(sessao: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM reunioes_em_curso WHERE sessao = %s", (sessao,))
+        conn.commit()
+
+def limpar_reunioes_antigas(dias: int = 3) -> int:
+    """Apaga estado de reuniões persistido há mais de `dias` dias (por
+    omissão, 3) — isto só existe para sobreviver a um reinício do servidor a
+    meio de uma reunião, não é suposto acumular para sempre. Devolve quantas
+    foram apagadas."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM reunioes_em_curso WHERE atualizado_em < now() - %s * interval '1 day'",
+                (dias,)
+            )
+            apagadas = cur.rowcount
+        conn.commit()
+    return apagadas

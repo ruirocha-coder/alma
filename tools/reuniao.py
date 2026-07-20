@@ -2,15 +2,24 @@
 # push-to-talk) e só entra na conversa quando é chamada pelo nome.
 #
 # O áudio de cada excerto é transcrito e imediatamente descartado — só o
-# texto fica em memória, e apenas enquanto a reunião está a decorrer (nunca
-# em disco/BD). No fim, o resumo/ata gerado a partir dessa transcrição é o
-# único registo que persiste (guardado no histórico da conversa, como
-# qualquer outra resposta da Alma); a transcrição bruta é descartada nesse
-# momento.
+# texto fica em memória. No fim, o resumo/ata gerado a partir dessa
+# transcrição é o registo que persiste de facto (guardado no histórico da
+# conversa, como qualquer outra resposta da Alma).
 #
-# Estado em memória de processo, não na BD: um único servidor (Railway,
-# uma instância) chega para o caso de uso — uma reunião em curso por sessão.
+# A transcrição em si vive principalmente em memória de processo (rápido,
+# sem ida à BD a cada excerto de poucos segundos), mas é também persistida na
+# BD a cada excerto — só para sobreviver a um reinício do servidor a meio de
+# uma reunião longa (ex: um deploy novo), não como registo permanente: ver
+# RETENCAO_DIAS. Se o estado em memória desaparecer (reinício), é recuperado
+# da BD de forma transparente da próxima vez que a sessão for usada.
 import re
+import db
+
+# quanto tempo o estado de uma reunião persistido na BD sobrevive antes de
+# ser considerado obsoleto e apagado (ver db.limpar_reunioes_antigas) — isto
+# não é um arquivo de reuniões passadas, é só uma rede de segurança contra
+# um reinício do servidor a meio de uma reunião ainda em curso.
+RETENCAO_DIAS = 3
 
 _MENCAO_ALMA = re.compile(r"\balma\b", re.IGNORECASE)
 
@@ -45,23 +54,40 @@ _chamada_pendente: dict[str, str] = {}
 _FIM_DE_FRASE = re.compile(r"[.!?…]\s*$")
 
 def iniciar(sessao: str) -> None:
-    """Começa (ou reinicia) a escuta de uma reunião para esta sessão."""
+    """Começa (ou reinicia) a escuta de uma reunião para esta sessão — limpa
+    qualquer estado persistido antigo com o mesmo nome de sessão, para não
+    herdar a transcrição de uma reunião anterior."""
     _transcricoes[sessao] = {}
     _processados[sessao] = 0
     _geracao[sessao] = 0
     _chamada_pendente.pop(sessao, None)
+    db.eliminar_estado_reuniao(sessao)
 
 def em_curso(sessao: str) -> bool:
-    return sessao in _transcricoes
+    if sessao in _transcricoes:
+        return True
+    # o estado em memória pode ter desaparecido (ex: reinício do servidor a
+    # meio da reunião) — recupera-o da BD antes de assumir que a reunião
+    # acabou, para a pessoa nem chegar a notar que o servidor reiniciou
+    estado = db.carregar_estado_reuniao(sessao)
+    if estado is None:
+        return False
+    _transcricoes[sessao] = estado["excertos"]
+    _processados[sessao] = estado["processados"]
+    _geracao.setdefault(sessao, 0)
+    return True
 
 def registar(sessao: str, indice: int, texto: str) -> None:
     """Acrescenta mais um excerto transcrito, na posição indicada pelo
     índice (atribuído no cliente pela ordem de gravação) — assim a
     transcrição fica na ordem certa mesmo que os pedidos de rede cheguem
-    trocados (ex: um excerto demorou mais a transcrever que o seguinte)."""
+    trocados (ex: um excerto demorou mais a transcrever que o seguinte).
+    Persiste o novo estado na BD, para sobreviver a um reinício do
+    servidor a meio da reunião."""
     if texto.strip():
         _transcricoes.setdefault(sessao, {})[indice] = texto.strip()
     _processados[sessao] = _processados.get(sessao, 0) + 1
+    db.guardar_estado_reuniao(sessao, _transcricoes.get(sessao, {}), _processados[sessao])
 
 def excertos_processados(sessao: str) -> int:
     """Contagem de excertos já respondidos pelo servidor — serve de sinal de
@@ -129,4 +155,17 @@ def terminar(sessao: str) -> str:
     _processados.pop(sessao, None)
     _geracao.pop(sessao, None)
     _chamada_pendente.pop(sessao, None)
+    db.eliminar_estado_reuniao(sessao)
     return texto
+
+def limpar_reunioes_antigas() -> None:
+    """Apaga estado de reuniões persistido há mais de RETENCAO_DIAS dias —
+    pensado para correr periodicamente (agendado), não para arquivo; uma
+    reunião com este estado tão antigo já terminou há muito ou nunca foi
+    encerrada corretamente."""
+    try:
+        apagadas = db.limpar_reunioes_antigas(RETENCAO_DIAS)
+        if apagadas:
+            print(f"[reuniao] limpeza: {apagadas} reunião(ões) com mais de {RETENCAO_DIAS} dias apagada(s)")
+    except Exception as e:
+        print(f"[reuniao] falha na limpeza de reuniões antigas: {e!r}")

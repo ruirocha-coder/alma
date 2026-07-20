@@ -31,6 +31,9 @@ scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal_ecos_largos, "cr
 # análise diária do dashboard de produção, no Mural da Ecos Largos: às 19h, de segunda a sábado (não há produção aos domingos)
 scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron",
                   day_of_week="mon-sat", hour=19, minute=0)
+# limpeza do estado de reuniões persistido (rede de segurança contra um
+# reinício do servidor a meio de uma reunião) — todos os dias às 4h
+scheduler.add_job(reuniao.limpar_reunioes_antigas, "cron", hour=4, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
