@@ -1,7 +1,7 @@
 # agents/resumo_diario_ecos_largos.py — análise diária do dashboard de
 # produção da Ecos Largos, publicada no Mural do projeto deles (não no da
 # Gestão — a Ecos Largos é uma equipa à parte).
-import threading
+import json, threading
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp, ecos_largos
@@ -46,7 +46,12 @@ def correr_resumo_diario_ecos_largos():
             print(f"[resumo_diario_ecos_largos] dashboard indisponível: {dados['erro']}")
             return
 
-        texto = _gerar_resumo(dados["conteudo"])
+        conteudo = dados["conteudo"]
+        # a API do dashboard devolve JSON estruturado (não texto), por isso
+        # tem de ser serializado antes de seguir como conteúdo de mensagem
+        if not isinstance(conteudo, str):
+            conteudo = json.dumps(conteudo, ensure_ascii=False, indent=2)
+        texto = _gerar_resumo(conteudo)
         basecamp.publicar_mural("Análise diária do dashboard de produção", texto, projeto="Ecos Largos")
         print("[resumo_diario_ecos_largos] publicado no mural da Ecos Largos")
     except Exception:
