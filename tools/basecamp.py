@@ -25,7 +25,8 @@ TTL_CONCLUIDOS_RECENTES = 900
 # colunas do Kanban que representam um estado terminal/fechado do fluxo (não
 # trabalho esquecido) — um card parado aqui é esperado, não é sinal de nada.
 COLUNAS_TERMINAIS = {"perdido", "perdidos", "vendido", "vendidos", "done",
-                     "concluído", "concluido", "arquivo", "arquivado", "cancelado"}
+                     "concluído", "concluido", "arquivo", "arquivado", "cancelado",
+                     "not now"}
 
 def _base_url():
     return f"https://3.basecampapi.com/{os.environ['BASECAMP_ACCOUNT_ID']}"
