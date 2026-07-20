@@ -7,7 +7,7 @@
 # fornecedor: uma chamada por gravação/frase chega, porque quem faz o
 # "streaming" percebido é o troceamento em frases feito aqui, não a API
 # externa).
-import os, re
+import os, re, time
 import httpx
 
 _FIM_DE_FRASE = re.compile(r"(?<=[.!?…])\s+")
@@ -62,15 +62,28 @@ def transcrever(bruto: bytes, filename: str = "audio.webm", content_type: str = 
     silêncio/ruído — sem isto, um excerto sem fala real por vezes volta com
     texto inventado (frases comuns nos vídeos com que o Whisper foi
     treinado) em vez de vazio, poluindo a transcrição com conteúdo que
-    ninguém disse."""
-    r = httpx.post(
-        "https://api.openai.com/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-        data={"model": "whisper-1", "language": "pt", "response_format": "verbose_json"},
-        files={"file": (filename, bruto, content_type)},
-        timeout=60,
-    )
-    r.raise_for_status()
+    ninguém disse.
+
+    Tem retry ligeiro (como os pedidos ao Basecamp) — sem isto, uma falha
+    pontual de rede/API neste pedido perdia o excerto por completo e, se
+    calhar de ser o excerto em que alguém a chamou pelo nome numa reunião,
+    a Alma nunca chegava sequer a saber que fora chamada."""
+    for tentativa in range(3):
+        try:
+            r = httpx.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+                data={"model": "whisper-1", "language": "pt", "response_format": "verbose_json"},
+                files={"file": (filename, bruto, content_type)},
+                timeout=60,
+            )
+            r.raise_for_status()
+            break
+        except httpx.HTTPError as e:
+            if tentativa == 2:
+                raise
+            print(f"[voz] transcrição falhou ({e!r}), tentativa {tentativa + 1}/3")
+            time.sleep(2 * (tentativa + 1))
     dados = r.json()
     segmentos = dados.get("segments")
     if segmentos is None:
