@@ -20,7 +20,6 @@ _cache = {}  # {chave: (timestamp, valor)}
 TOKEN_URL = "https://launchpad.37signals.com/authorization/token"
 TIPOS_MONITORIZADOS = ("Todo", "Kanban::Card")
 TTL_ITENS_ATIVOS = 900  # segundos — 15 min chega para pedidos em cadeia (ex: resumo de projeto)
-TTL_CONCLUIDOS_RECENTES = 900
 
 # colunas do Kanban (estado de um card) ou nomes de todolist (para um Todo)
 # que não representam trabalho em aberto real — ou porque já fecharam o
@@ -220,73 +219,28 @@ def estado_projeto_basecamp(projeto: str) -> dict:
         "cards_parados_sem_prazo": sorted(parados, key=lambda i: -i["dias_parado"])[:30],
     }
 
-def _concluidos_recentemente(dias: int = 7) -> list[dict]:
-    """Tarefas (to-dos) concluídas nos últimos `dias` dias, de todos os
-    projetos — usado para saber "o que fez" alguém numa reunião 1:1. Só
-    Todos (cards do Kanban não têm um estado "concluído" fiável neste fluxo
-    — representam posição numa coluna, não conclusão de trabalho).
-
-    A conta tem milhares de tarefas já concluídas ao longo dos anos, e a API
-    do Basecamp não filtra por data no servidor — por isso pede-se ordenado
-    por atualização mais recente e para de percorrer páginas assim que
-    aparece uma tarefa mais antiga que o corte (tudo o resto, a seguir,
-    também seria). O limite de páginas é só uma rede de segurança caso essa
-    ordenação não se verifique."""
-    chave = f"concluidos_{dias}"
-    if chave in _cache:
-        ts, itens = _cache[chave]
-        if time.time() - ts < TTL_CONCLUIDOS_RECENTES:
-            return itens
-
-    corte = datetime.now(timezone.utc) - timedelta(days=dias)
-    itens = []
-    url = f"{_base_url()}/projects/recordings.json"
-    params = {"type": "Todo", "status": "active", "completed": "true",
-              "sort": "updated_at", "direction": "desc"}
-    for _ in range(50):
-        if not url:
-            break
-        r = httpx.get(url, headers=_headers(), params=params, timeout=30)
-        r.raise_for_status()
-        parar = False
-        for item in r.json():
-            atualizado_em = item.get("updated_at")
-            if not atualizado_em:
-                continue
-            if datetime.fromisoformat(atualizado_em.replace("Z", "+00:00")) < corte:
-                parar = True
-                break
-            itens.append(item)
-        if parar:
-            break
-        url = r.links.get("next", {}).get("url")
-        params = None  # já incluído no url de "next"
-
-    _cache[chave] = (time.time(), itens)
-    return itens
-
-def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
+def resumo_pessoa_basecamp(nome: str) -> dict:
     """Panorama de uma pessoa da equipa, pensado para preparar uma reunião
-    1:1: o que concluiu nos últimos `dias` dias, o que tem em aberto agora
-    (e o que está atrasado), e como a quantidade de trabalho ativo que tem
-    compara com a média de quem mais tem itens atribuídos — para ajudar a
-    perceber se a carga está ajustada. Ignora tudo o que já está numa
-    coluna/lista de estado terminal (Perdido, Vendido, Done, ...) — não
-    conta como trabalho em aberto nem entra na carga de trabalho, mesmo que
-    a Basecamp não o marque como "completed". `nome` é um termo de pesquisa
-    (não precisa de ser o nome completo)."""
+    1:1: o que tem em aberto agora (e o que está atrasado), e como a
+    quantidade de trabalho ativo que tem compara com a média de quem mais
+    tem itens atribuídos — para ajudar a perceber se a carga está ajustada.
+    Ignora completamente os to-dos (Todo) — só considera cards do Kanban,
+    que são o que representa trabalho atribuível de forma fiável neste
+    panorama. Ignora também tudo o que já está numa coluna de estado
+    terminal (Perdido, Vendido, Done, ...) — não conta como trabalho em
+    aberto nem entra na carga de trabalho, mesmo que a Basecamp não o
+    marque como "completed". `nome` é um termo de pesquisa (não precisa de
+    ser o nome completo)."""
     termo = _normalizar(nome)
 
     def _e_da_pessoa(item: dict) -> bool:
         return any(termo in _normalizar(p["name"]) for p in item.get("assignees", []))
 
-    ativos = [i for i in _itens_ativos() if not _em_coluna_terminal(i)]
+    ativos = [i for i in _itens_ativos() if i.get("type") == "Kanban::Card" and not _em_coluna_terminal(i)]
     itens_pessoa = [i for i in ativos if _e_da_pessoa(i)]
-    concluidos_pessoa = [_formatar_item(i) for i in _concluidos_recentemente(dias) if _e_da_pessoa(i)]
 
-    if not itens_pessoa and not concluidos_pessoa:
-        return {"erro": f"não encontrei nenhum item (em aberto ou concluído recentemente) "
-                        f"atribuído a alguém que corresponda a {nome!r}"}
+    if not itens_pessoa:
+        return {"erro": f"não encontrei nenhum card em aberto atribuído a alguém que corresponda a {nome!r}"}
 
     hoje = date.today()
     atrasados = []
@@ -307,11 +261,6 @@ def resumo_pessoa_basecamp(nome: str, dias: int = 7) -> dict:
 
     return {
         "pessoa": nome,
-        "concluido_ultimos_dias": {
-            "dias": dias,
-            "total": len(concluidos_pessoa),
-            "itens": concluidos_pessoa[:40],
-        },
         "em_aberto_agora": {
             "total": len(itens_pessoa),
             "atrasados": sorted(atrasados, key=lambda i: -i["dias_atraso"])[:30],
@@ -590,12 +539,11 @@ TOOLS_ESTADO_PROJETO = [
     },
     {
         "name": "resumo_pessoa_basecamp",
-        "description": "Dá um panorama de uma pessoa da equipa no Basecamp, pensado para preparar uma reunião individual (1:1): o que concluiu nos últimos dias (por omissão, 7 — a última semana), o que tem em aberto agora e o que está atrasado, e como a quantidade de trabalho ativo que tem compara com a média de quem tem itens atribuídos (para ajudar a avaliar se a carga está ajustada). Usa isto quando pedirem um resumo de uma pessoa específica antes de uma reunião com ela. `nome` é um termo de pesquisa (não precisa de ser o nome completo).",
+        "description": "Dá um panorama de uma pessoa da equipa no Basecamp, pensado para preparar uma reunião individual (1:1): os cards do Kanban que tem em aberto agora e o que está atrasado (ignora completamente to-dos — só cards contam como trabalho real neste panorama), e como a quantidade de trabalho ativo que tem compara com a média de quem tem itens atribuídos (para ajudar a avaliar se a carga está ajustada). Usa isto quando pedirem um resumo de uma pessoa específica antes de uma reunião com ela. `nome` é um termo de pesquisa (não precisa de ser o nome completo).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "nome": {"type": "string"},
-                "dias": {"type": "integer", "description": "Quantos dias para trás considerar como \"semana anterior\" — por omissão 7"}
+                "nome": {"type": "string"}
             },
             "required": ["nome"]
         }

@@ -77,15 +77,23 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         return _escolher_entre_empresas(pergunta)
 
     # perfil sem 'empresa' definida — recorre à deteção pela equipa do
-    # projeto no Basecamp (comportamento anterior a esta pergunta existir)
+    # projeto no Basecamp (comportamento anterior a esta pergunta existir).
+    # Isto só funciona para quem tem conta própria no Basecamp — a maioria
+    # da Ecos Largos não tem, por isso "não encontrado" aqui não é prova de
+    # que a pessoa é da Interior Guider, só que não a conseguimos confirmar
+    # pela conta. Em vez de assumir logo Interior Guider, decide-se também
+    # pelo conteúdo da própria pergunta (a mesma lógica de quem trabalha com
+    # as duas equipas) — assim uma pergunta claramente sobre produção/
+    # dashboard da Ecos Largos não fica presa no agente errado, sem
+    # ferramentas para lhe responder.
     try:
         eh_ecos_largos = basecamp.pertence_a_ecos_largos(utilizador)
     except Exception as e:
-        print(f"[orchestrator] não consegui verificar a equipa Ecos Largos, a assumir Interior Guider: {e!r}")
+        print(f"[orchestrator] não consegui verificar a equipa Ecos Largos, a decidir pela pergunta: {e!r}")
         eh_ecos_largos = False
 
     if not eh_ecos_largos:
-        return _escolher_agente_interior_guider(pergunta)
+        return _escolher_entre_empresas(pergunta)
 
     try:
         eh_tambem_interior_guider = basecamp.pertence_a_projeto(utilizador, "Gestão")
