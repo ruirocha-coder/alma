@@ -242,7 +242,26 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
 
     reuniao.registar(sessao, indice, texto)
     processados = reuniao.excertos_processados(sessao)
-    if not reuniao.foi_chamada(texto):
+
+    pendente = reuniao.chamada_pendente(sessao)
+    if pendente is not None:
+        # já estávamos à espera da continuação de uma chamada anterior (o
+        # nome apareceu perto do fim de um excerto, a meio de frase) — este
+        # excerto é essa continuação; responde já com os dois juntos, sem
+        # voltar a esperar mais um (nunca mais do que um excerto de atraso)
+        reuniao.limpar_chamada_pendente(sessao)
+        texto_chamada = f"{pendente} {texto}".strip()
+    elif reuniao.foi_chamada(texto) and not reuniao.parece_completa(texto):
+        # foi chamada, mas o excerto acaba a meio de frase — o bloco de
+        # gravação de duração fixa cortou-a, não foi uma pausa real da
+        # pessoa. Espera pelo excerto seguinte antes de responder, em vez
+        # de reagir já só ao bocado da pergunta que apanhou (era isto que
+        # fazia a Alma dizer que não tinha ouvido).
+        reuniao.registar_chamada_pendente(sessao, texto)
+        return {"transcricao": texto, "acionado": False, "processados": processados}
+    elif reuniao.foi_chamada(texto):
+        texto_chamada = texto
+    else:
         return {"transcricao": texto, "acionado": False, "processados": processados}
 
     # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
@@ -253,13 +272,13 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
         "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
         "direta como de costume). Isto é o mais recente que se disse, transcrito "
         f"automaticamente (pode ter erros ou sobreposição de vozes):\n\n{contexto}\n\n"
-        f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto}"\n\n'
+        f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto_chamada}"\n\n'
         "Responde diretamente a essa pessoa, como se estivesses presente na sala."
     )
     return StreamingResponse(
         _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
-                                mensagem_visivel=f"🎙️ (reunião) {texto}",
-                                texto_transcricao=texto, minha_geracao=minha_geracao),
+                                mensagem_visivel=f"🎙️ (reunião) {texto_chamada}",
+                                texto_transcricao=texto_chamada, minha_geracao=minha_geracao),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )

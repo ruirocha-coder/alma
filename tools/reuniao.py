@@ -30,12 +30,20 @@ _processados: dict[str, int] = {}
 # Alma para de falar assim que é chamada de novo, em vez de acabar a frase
 # toda primeiro.
 _geracao: dict[str, int] = {}
+# texto de uma chamada que parece ter ficado cortada a meio de frase pelo
+# limite de tempo fixo de um excerto (não por uma pausa real da pessoa) —
+# à espera do excerto seguinte para responder com a pergunta toda, em vez
+# de reagir já só ao bocado que apanhou (ver _parece_completa/main.py).
+_chamada_pendente: dict[str, str] = {}
+
+_FIM_DE_FRASE = re.compile(r"[.!?…]\s*$")
 
 def iniciar(sessao: str) -> None:
     """Começa (ou reinicia) a escuta de uma reunião para esta sessão."""
     _transcricoes[sessao] = {}
     _processados[sessao] = 0
     _geracao[sessao] = 0
+    _chamada_pendente.pop(sessao, None)
 
 def em_curso(sessao: str) -> bool:
     return sessao in _transcricoes
@@ -71,6 +79,29 @@ def foi_chamada(texto: str) -> bool:
     """Verifica se este excerto menciona a Alma diretamente (ex: "Alma, o que achas...")."""
     return bool(_MENCAO_ALMA.search(texto))
 
+def parece_completa(texto: str) -> bool:
+    """Um excerto de reunião é gravado com duração fixa — pode acabar a meio
+    de uma frase só porque o tempo do bloco terminou, não porque a pessoa
+    fez uma pausa real. Quando isso acontece, o Whisper normalmente não
+    fecha a frase com pontuação (não houve silêncio a assinalar o fim).
+    Serve para decidir se já há pergunta suficiente para responder, ou se
+    vale a pena esperar pelo excerto seguinte antes de reagir a uma
+    chamada."""
+    return bool(_FIM_DE_FRASE.search(texto.strip()))
+
+def registar_chamada_pendente(sessao: str, texto: str) -> None:
+    """Guarda o texto de uma chamada que parece cortada a meio, à espera do
+    excerto seguinte para responder com a pergunta toda."""
+    _chamada_pendente[sessao] = texto
+
+def chamada_pendente(sessao: str) -> str:
+    """Texto de uma chamada em espera de continuação nesta sessão, ou None
+    se não houver nenhuma."""
+    return _chamada_pendente.get(sessao)
+
+def limpar_chamada_pendente(sessao: str) -> None:
+    _chamada_pendente.pop(sessao, None)
+
 def _ordenada(sessao: str) -> list[str]:
     mapa = _transcricoes.get(sessao, {})
     return [mapa[i] for i in sorted(mapa)]
@@ -91,4 +122,5 @@ def terminar(sessao: str) -> str:
     _transcricoes.pop(sessao, None)
     _processados.pop(sessao, None)
     _geracao.pop(sessao, None)
+    _chamada_pendente.pop(sessao, None)
     return texto
