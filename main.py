@@ -24,8 +24,9 @@ scheduler = BackgroundScheduler(timezone="Europe/Lisbon")
 scheduler.add_job(monitor_basecamp.correr_monitorizacao, "cron", hour=8, minute=0)
 # resumo semanal no Mural (Gestão, Interior Guider): segundas-feiras às 9h
 scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal, "cron", day_of_week="mon", hour=9, minute=0)
-# análise diária do dashboard de produção, no Mural da Ecos Largos: todos os dias às 19h
-scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron", hour=19, minute=0)
+# análise diária do dashboard de produção, no Mural da Ecos Largos: às 19h, de segunda a sábado (não há produção aos domingos)
+scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron",
+                  day_of_week="mon-sat", hour=19, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
