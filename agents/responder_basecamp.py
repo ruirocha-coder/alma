@@ -43,12 +43,17 @@ UM comentário de resposta, direto e útil; usa as ferramentas disponíveis
 sobre o estado geral de um projeto) sempre que ajudarem a responder melhor.
 
 Para qualquer pergunta sobre a empresa que não seja sobre o catálogo/site
-(ex: condições comerciais de uma proposta, valores, decisões internas) usa
-sempre primeiro documentos_referencia_empresa, antes de dizeres que não tens
-essa informação — inclui o documento "fluxograma" (projeto Alma Data), que
-reúne informação de emails reais da empresa e é muitas vezes a fonte certa
-para este tipo de pergunta. Lê sempre o conteúdo todo devolvido, não só o
-início — detalhes assim costumam vir mais para a frente no documento.""" + _REGRAS_MENCAO_BASECAMP
+(ex: condições comerciais de uma proposta, condições/descontos para
+profissionais, valores, decisões internas) usa sempre primeiro
+documentos_referencia_empresa, antes de dizeres que não tens essa
+informação — mesmo quando a pergunta parece só uma pergunta direta e não
+soa a "documento" (ex: "quais as condições para profissionais?"). Inclui o
+documento "fluxograma" (projeto Alma Data), que reúne informação de emails
+reais da empresa e é muitas vezes a fonte certa para este tipo de
+pergunta — ninguém vai mencionar esse documento pelo nome, tens de saber
+por ti mesma que é lá que a resposta está. Lê sempre o conteúdo todo
+devolvido, não só o início — detalhes assim costumam vir mais para a
+frente no documento.""" + _REGRAS_MENCAO_BASECAMP
 
 # quando a menção acontece num card/tarefa/mural do projeto Ecos Largos, usa
 # a missão e as ferramentas próprias dessa equipa (dashboard de produção,
