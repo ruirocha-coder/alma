@@ -16,6 +16,13 @@ from tools import basecamp, visao
 _cache = {}  # {"lista": (timestamp, lista)}
 TTL = 900  # segundos — documentos de empresa não mudam a cada minuto
 
+# um documento de negócio real (proposta, cadeia de emails) facilmente
+# ultrapassa umas páginas — informação importante (ex: condições comerciais)
+# muitas vezes só aparece mais à frente, não logo no início. 6000 carateres
+# (~1000 palavras) cortava isso silenciosamente; isto dá muito mais margem
+# sem deixar de ter um limite para documentos verdadeiramente enormes.
+LIMITE_CARATERES_DOCUMENTO = 20000
+
 TIPOS_DE_FICHEIRO_LEGIVEIS = {
     "application/pdf",
     "text/plain",
@@ -118,10 +125,11 @@ def _extrair_por_tipo(bruto: bytes, ctype: str) -> str:
         leitor = PdfReader(io.BytesIO(bruto))
         texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
         if not texto:
-            # sem texto extraível — provavelmente um PDF só de design/imagem;
-            # tenta ler a primeira página como imagem antes de desistir.
+            # sem texto extraível — provavelmente um PDF só de design/imagem/
+            # scan; descreve página a página em vez de só a primeira, para
+            # não perder conteúdo (ex: um contrato/proposta escaneado).
             try:
-                texto = visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
+                texto = visao.descrever_pdf_escaneado(bruto)
             except Exception as e:
                 texto = f"(não consegui extrair texto nem imagem deste PDF: {e})"
         return texto
@@ -158,7 +166,7 @@ def _ler_conteudo(item: dict) -> str:
             except Exception as e:
                 partes.append(f"(erro ao ler um anexo deste documento: {e})")
         texto_final = "\n\n".join(partes).strip()
-        return texto_final[:6000] if texto_final else None
+        return texto_final[:LIMITE_CARATERES_DOCUMENTO] if texto_final else None
 
     ctype = _tipo_efetivo(item.get("content_type"), item.get("filename"))
 
@@ -170,7 +178,7 @@ def _ler_conteudo(item: dict) -> str:
         return None
 
     bruto = basecamp._get_bytes(item["download_url"])
-    return _extrair_por_tipo(bruto, ctype)[:6000]
+    return _extrair_por_tipo(bruto, ctype)[:LIMITE_CARATERES_DOCUMENTO]
 
 def ler_documento_empresa(id: int) -> dict:
     """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
@@ -217,7 +225,7 @@ def ler_anexos_registo_basecamp(url: str) -> dict:
         try:
             bruto = basecamp._get_bytes(anexo["download_url"])
             texto = _extrair_por_tipo(bruto, ctype)
-            resultados.append({"ficheiro": nome, "conteudo": (texto or "(sem texto legível)")[:6000]})
+            resultados.append({"ficheiro": nome, "conteudo": (texto or "(sem texto legível)")[:LIMITE_CARATERES_DOCUMENTO]})
         except Exception as e:
             resultados.append({"ficheiro": nome, "erro": str(e)})
     return {"anexos": resultados}

@@ -45,9 +45,26 @@ def descrever_imagem(bruto: bytes, content_type: str) -> str:
     )
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
-def renderizar_primeira_pagina_pdf(bruto: bytes) -> bytes:
-    """Converte a primeira página de um PDF em imagem PNG — usado quando o PDF
-    não tem texto extraível (provavelmente é só design/imagem)."""
+# um documento sem texto extraível (design/scan) pode ter várias páginas
+# relevantes — descrever só a primeira perdia tudo o resto (ex: um contrato
+# ou proposta escaneada de várias páginas). Limitado para não disparar
+# dezenas de chamadas de visão num PDF enorme.
+LIMITE_PAGINAS_PDF_ESCANEADO = 5
+
+def renderizar_paginas_pdf(bruto: bytes, limite: int = LIMITE_PAGINAS_PDF_ESCANEADO) -> list[bytes]:
+    """Converte até `limite` páginas de um PDF em imagens PNG."""
     doc = fitz.open(stream=bruto, filetype="pdf")
-    pixmap = doc[0].get_pixmap(dpi=150)
-    return pixmap.tobytes("png")
+    return [doc[i].get_pixmap(dpi=150).tobytes("png") for i in range(min(limite, len(doc)))]
+
+def descrever_pdf_escaneado(bruto: bytes) -> str:
+    """Descreve/transcreve um PDF sem texto extraível, página a página (até
+    LIMITE_PAGINAS_PDF_ESCANEADO) — usado quando o PDF não tem texto
+    extraível (provavelmente é só design/imagem/scan), para não perder
+    conteúdo que esteja para além da primeira página."""
+    partes = []
+    for i, pagina_png in enumerate(renderizar_paginas_pdf(bruto), start=1):
+        try:
+            partes.append(f"[Página {i}]\n{descrever_imagem(pagina_png, 'image/png')}")
+        except Exception as e:
+            partes.append(f"[Página {i}] (erro ao descrever esta página: {e})")
+    return "\n\n".join(partes)
