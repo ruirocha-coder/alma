@@ -137,6 +137,7 @@ def _processar(payload: dict):
     responsaveis = ", ".join(p["name"] for p in alvo_completo.get("assignees", [])) or "(sem responsável atribuído)"
     historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
+Id da tarefa/card: {alvo_id}
 Estado/coluna: {estado}
 Responsáveis: {responsaveis}
 
@@ -144,7 +145,13 @@ Notas da tarefa/card:
 {notas or "(sem notas)"}
 
 Conversa/comentários existentes:
-{historico}"""
+{historico}
+
+Se a pergunta precisar de informação que só está num ficheiro anexado
+diretamente na descrição desta tarefa/card (ex: um PDF de desenho técnico
+ou especificações de um produto, como medidas), usa
+ler_anexos_tarefa_basecamp com id={alvo_id} para os leres — só quando a
+pergunta for mesmo sobre isso, não por rotina."""
 
     # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
     # usa, para o perfil e a memória serem partilhados entre os dois canais
