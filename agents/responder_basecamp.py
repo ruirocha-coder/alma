@@ -2,7 +2,8 @@ import re, traceback
 from bs4 import BeautifulSoup
 from persona import PERSONA
 from agents.base import correr_agente, TOOLS_COMUNS
-from agents import ecos_largos as ecos_largos_agent
+from agents import ecos_largos as ecos_largos_agent, qualidade_toros_ecos_largos
+from orchestrator import escolher_agente_ecos_largos
 from tools import basecamp
 import db
 
@@ -61,8 +62,18 @@ frente no documento.""" + _REGRAS_MENCAO_BASECAMP
 # já diz, sem ambiguidade, de que equipa se trata.
 MISSAO_BASECAMP_ECOS_LARGOS = ecos_largos_agent.MISSAO_ECOS_LARGOS + _REGRAS_MENCAO_BASECAMP
 
+# dentro da Ecos Largos, uma menção sobre regras/critérios de qualidade de
+# cargas de toros vai para o subagente dedicado ao Manual Qualidade de
+# Cargas - Toros, não para a missão geral (produção/tarefas) — a mesma
+# decisão usada na consola, ver orchestrator.escolher_agente_ecos_largos.
+MISSAO_BASECAMP_QUALIDADE_TOROS = qualidade_toros_ecos_largos.MISSAO_QUALIDADE_TOROS + _REGRAS_MENCAO_BASECAMP
+
 def responder(utilizador: str, mensagens: list, projeto: str = "") -> str:
     if "ecos largos" in (projeto or "").lower():
+        pergunta = mensagens[-1]["content"] if mensagens else ""
+        if escolher_agente_ecos_largos(pergunta) == "qualidade_toros_ecos_largos":
+            return correr_agente(MISSAO_BASECAMP_QUALIDADE_TOROS, qualidade_toros_ecos_largos.TOOLS_QUALIDADE_TOROS,
+                                 mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
         return correr_agente(MISSAO_BASECAMP_ECOS_LARGOS, ecos_largos_agent.TOOLS_ECOS_LARGOS,
                              mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
     return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador,
