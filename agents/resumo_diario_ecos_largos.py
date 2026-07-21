@@ -22,7 +22,8 @@ Regras desta mensagem:
   dentro do normal, diz isso brevemente, sem inventar problemas.
 - Usa markdown (títulos, negrito, listas) — vai ser convertido em
   formatação real no Basecamp.
-- Assina sempre como "— Alma"."""
+- Assina sempre como "— Alma".
+""" + ecos_largos.REGRAS_APRESENTACAO_PRODUCAO
 
 def _gerar_resumo(conteudo_dashboard: str) -> str:
     resposta = client.messages.create(
