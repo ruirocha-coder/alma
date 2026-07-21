@@ -1,7 +1,7 @@
 # tools/ecos_largos.py — recursos próprios da equipa Ecos Largos, uma
 # equipa industrial parceira gerida no mesmo Basecamp mas com o seu próprio
 # projeto, à parte da Interior Guider.
-import os, re
+import os, re, time
 from datetime import date, timedelta
 import httpx
 from tools import documentos_empresa
@@ -202,6 +202,15 @@ TOOLS_DASHBOARD_PRODUCAO = [
     }
 ]
 
+# reler este documento do zero em toda avaliação de carga é caro — se for
+# um PDF escaneado (sem texto extraível), _ler_conteudo tem de descrever
+# cada página por visão, o que sozinho já demora bastante com várias
+# páginas. Cache curta (mesmo período da lista de documentos, ver
+# documentos_empresa._listar_bruto) para não repetir isto em cada pergunta
+# seguida, sem deixar de refletir uma atualização feita há pouco.
+_CACHE_MANUAL_QUALIDADE_TOROS = {}  # {"conteudo": (timestamp, dict)}
+TTL_MANUAL_QUALIDADE_TOROS = 900  # segundos
+
 def ler_manual_qualidade_cargas_toros() -> dict:
     """Lê o documento "Manual Qualidade de Cargas - Toros" (projeto Ecos
     Largos, no Basecamp) — as regras oficiais de qualidade para avaliar
@@ -209,6 +218,11 @@ def ler_manual_qualidade_cargas_toros() -> dict:
     Largos" (evita confundir com um documento homónimo noutro projeto, se
     algum dia existir), mas não bloqueia se o campo de projeto não bater
     certo — o título já é bastante específico por si só."""
+    if "conteudo" in _CACHE_MANUAL_QUALIDADE_TOROS:
+        ts, resultado_em_cache = _CACHE_MANUAL_QUALIDADE_TOROS["conteudo"]
+        if time.time() - ts < TTL_MANUAL_QUALIDADE_TOROS:
+            return resultado_em_cache
+
     candidatos = [
         item for item in documentos_empresa._listar_bruto()
         if "qualidade" in item["titulo"].lower() and "toros" in item["titulo"].lower()
@@ -223,7 +237,10 @@ def ler_manual_qualidade_cargas_toros() -> dict:
     if not conteudo:
         return {"erro": "este documento existe mas não consegui extrair texto legível dele",
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
-    return {"titulo": item["titulo"], "conteudo": conteudo}
+
+    resultado = {"titulo": item["titulo"], "conteudo": conteudo}
+    _CACHE_MANUAL_QUALIDADE_TOROS["conteudo"] = (time.time(), resultado)
+    return resultado
 
 TOOLS_MANUAL_QUALIDADE_TOROS = [
     {
