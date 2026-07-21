@@ -40,7 +40,15 @@ do Basecamp. Alguém da equipa dirigiu-se a ti — responde ao pedido dela,
 usando o contexto da tarefa/card e da conversa fornecidos abaixo. Publicas
 UM comentário de resposta, direto e útil; usa as ferramentas disponíveis
 (catálogo, páginas do site, memória, estado_projeto_basecamp para perguntas
-sobre o estado geral de um projeto) sempre que ajudarem a responder melhor.""" + _REGRAS_MENCAO_BASECAMP
+sobre o estado geral de um projeto) sempre que ajudarem a responder melhor.
+
+Para qualquer pergunta sobre a empresa que não seja sobre o catálogo/site
+(ex: condições comerciais de uma proposta, valores, decisões internas) usa
+sempre primeiro documentos_referencia_empresa, antes de dizeres que não tens
+essa informação — inclui o documento "fluxograma" (projeto Alma Data), que
+reúne informação de emails reais da empresa e é muitas vezes a fonte certa
+para este tipo de pergunta. Lê sempre o conteúdo todo devolvido, não só o
+início — detalhes assim costumam vir mais para a frente no documento.""" + _REGRAS_MENCAO_BASECAMP
 
 # quando a menção acontece num card/tarefa/mural do projeto Ecos Largos, usa
 # a missão e as ferramentas próprias dessa equipa (dashboard de produção,
