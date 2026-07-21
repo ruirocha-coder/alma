@@ -329,7 +329,13 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Inclui o commit em produção (Railway define isto automaticamente) —
+    para confirmar de imediato se um deploy já terminou, sem adivinhar
+    pelo tempo passado desde o merge nem ir ao painel do Railway."""
+    return {
+        "status": "ok",
+        "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
+    }
 
 @app.get("/health/config")
 def health_config():

@@ -274,10 +274,13 @@ def resumo_pessoa_basecamp(nome: str) -> dict:
 
 def ler_comentarios(comments_url: str) -> list[dict]:
     """Lê os comentários já existentes numa tarefa/card (comments_url vem de tarefas_e_cards_atrasados).
-    Inclui o id de cada comentário e os nomes dos ficheiros que tenha
-    anexados diretamente (ex: um PDF partilhado num comentário, não na
-    descrição da tarefa/card) — para se poder ler esses anexos depois com
-    ler_anexos_registo_basecamp(id do comentário), não só os da tarefa/card."""
+    Inclui o url (da própria API, nunca reconstruído à mão — o Basecamp
+    aninha os recordings sob o bucket do projeto, um /recordings/{id}.json
+    solto na raiz dá sempre 404) e os nomes dos ficheiros que o comentário
+    tenha anexados diretamente (ex: um PDF partilhado num comentário, não
+    na descrição da tarefa/card) — para se poder ler esses anexos depois
+    com ler_anexos_registo_basecamp(url do comentário), não só os da
+    tarefa/card."""
     comentarios = _get_paginado(comments_url)
     resultado = []
     for c in comentarios:
@@ -285,6 +288,7 @@ def ler_comentarios(comments_url: str) -> list[dict]:
                  for a in (c.get("content_attachments") or [])]
         resultado.append({
             "id": c.get("id"),
+            "url": c.get("url"),
             "autor": (c.get("creator") or {}).get("name"),
             "conteudo": c.get("content"),
             "criado_em": c.get("created_at"),
