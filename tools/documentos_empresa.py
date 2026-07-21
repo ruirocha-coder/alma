@@ -148,21 +148,23 @@ def ler_documento_empresa(id: int) -> dict:
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
     return {"titulo": item["titulo"], "conteudo": conteudo}
 
-def ler_anexos_tarefa_basecamp(id: int) -> dict:
-    """Lê o conteúdo dos ficheiros anexados diretamente na descrição de uma
-    tarefa/card do Basecamp (ex: um PDF de desenho técnico ou
-    especificações de um produto) — para responder a perguntas sobre uma
-    tarefa/card que só têm resposta nesses anexos, não no texto da própria
-    tarefa. `id` é o id da tarefa/card (não de um documento/ficheiro
-    avulso — para isso usa procurar_documentos_empresa/ler_documento_empresa)."""
+def ler_anexos_registo_basecamp(id: int) -> dict:
+    """Lê o conteúdo dos ficheiros anexados diretamente a um registo do
+    Basecamp — a descrição de uma tarefa/card, OU um comentário (ex: um PDF
+    de desenho técnico ou especificações de um produto partilhado num
+    comentário, não só na tarefa em si). `id` é o id desse registo (da
+    tarefa/card, ou de um comentário específico — ler_comentarios devolve o
+    id e os nomes dos ficheiros anexados de cada comentário). Não é para
+    documentos/ficheiros avulsos — para isso usa
+    procurar_documentos_empresa/ler_documento_empresa."""
     try:
         recording = basecamp.obter_recording(f"{basecamp._base_url()}/recordings/{id}.json")
     except Exception as e:
-        return {"erro": f"não consegui aceder a esta tarefa/card: {e}"}
+        return {"erro": f"não consegui aceder a este registo do Basecamp: {e}"}
 
     anexos = recording.get("content_attachments") or []
     if not anexos:
-        return {"anexos": [], "aviso": "esta tarefa/card não tem ficheiros anexados diretamente na descrição"}
+        return {"anexos": [], "aviso": "este registo não tem ficheiros anexados diretamente"}
 
     resultados = []
     for anexo in anexos:
@@ -196,11 +198,11 @@ TOOLS_DOCUMENTOS_EMPRESA = [
         }
     },
     {
-        "name": "ler_anexos_tarefa_basecamp",
-        "description": "Lê o conteúdo dos ficheiros anexados diretamente na descrição de uma tarefa/card do Basecamp (ex: um PDF de desenho técnico ou especificações de um produto, suporta os mesmos formatos que ler_documento_empresa). Usa isto quando a pergunta precisar de informação que só está nesses anexos (ex: \"qual o tamanho da prateleira?\", medidas, especificações) — não leias por rotina em toda tarefa/card, só quando a pergunta for mesmo sobre isso. `id` é o id da tarefa/card em questão (não de um documento avulso).",
+        "name": "ler_anexos_registo_basecamp",
+        "description": "Lê o conteúdo dos ficheiros anexados diretamente a um registo do Basecamp — a descrição de uma tarefa/card, OU um comentário específico (ex: um PDF de desenho técnico ou especificações de um produto, suporta os mesmos formatos que ler_documento_empresa). Usa isto quando a pergunta precisar de informação que só está nesses anexos (ex: \"qual o tamanho da prateleira?\", medidas, especificações) — não leias por rotina em toda tarefa/card, só quando a pergunta for mesmo sobre isso. `id` pode ser o id da tarefa/card (para anexos na sua descrição), ou o id de um comentário específico (ler_comentarios devolve o id e os nomes de ficheiros anexados de cada comentário — usa esse id se o anexo estiver ali, não na tarefa/card).",
         "input_schema": {
             "type": "object",
-            "properties": {"id": {"type": "integer", "description": "id da tarefa/card"}},
+            "properties": {"id": {"type": "integer", "description": "id da tarefa/card, ou de um comentário específico"}},
             "required": ["id"]
         }
     }

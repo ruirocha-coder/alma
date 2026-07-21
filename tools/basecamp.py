@@ -273,10 +273,24 @@ def resumo_pessoa_basecamp(nome: str) -> dict:
     }
 
 def ler_comentarios(comments_url: str) -> list[dict]:
-    """Lê os comentários já existentes numa tarefa/card (comments_url vem de tarefas_e_cards_atrasados)."""
+    """Lê os comentários já existentes numa tarefa/card (comments_url vem de tarefas_e_cards_atrasados).
+    Inclui o id de cada comentário e os nomes dos ficheiros que tenha
+    anexados diretamente (ex: um PDF partilhado num comentário, não na
+    descrição da tarefa/card) — para se poder ler esses anexos depois com
+    ler_anexos_registo_basecamp(id do comentário), não só os da tarefa/card."""
     comentarios = _get_paginado(comments_url)
-    return [{"autor": (c.get("creator") or {}).get("name"), "conteudo": c.get("content"),
-             "criado_em": c.get("created_at")} for c in comentarios]
+    resultado = []
+    for c in comentarios:
+        anexos = [a.get("filename") or a.get("name") or "(sem nome)"
+                 for a in (c.get("content_attachments") or [])]
+        resultado.append({
+            "id": c.get("id"),
+            "autor": (c.get("creator") or {}).get("name"),
+            "conteudo": c.get("content"),
+            "criado_em": c.get("created_at"),
+            "anexos": anexos,
+        })
+    return resultado
 
 def _escapar_html(texto: str) -> str:
     return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
