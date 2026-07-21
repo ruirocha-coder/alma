@@ -512,6 +512,44 @@ def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
     r.raise_for_status()
     return r.json()
 
+def listar_mural(projeto: str = "Gestão", limite: int = 20) -> list[dict]:
+    """Lista as mensagens mais recentes do Mural de um projeto (assunto,
+    autor, data, quantos comentários tem, e o url para ler o conteúdo
+    completo com ler_mensagem_mural) — usa isto para encontrar um post
+    anterior (ex: um resumo semanal/diário antigo, para comparar com o
+    atual) antes de o leres na íntegra. Por omissão, o mural da Gestão."""
+    if projeto.strip().lower() == "gestão":
+        bucket_id, board_id = MURAL_BUCKET_ID, MURAL_BOARD_ID
+    else:
+        bucket_id, board_id = _resolver_mural(projeto)
+    mensagens = _get_paginado(f"{_base_url()}/buckets/{bucket_id}/message_boards/{board_id}/messages.json")
+    mensagens.sort(key=lambda m: m.get("created_at") or "", reverse=True)
+    return [{
+        "id": m["id"],
+        "assunto": m.get("subject") or m.get("title") or "(sem assunto)",
+        "autor": (m.get("creator") or {}).get("name"),
+        "criado_em": m.get("created_at"),
+        "comments_count": m.get("comments_count", 0),
+        "url": m.get("url"),
+        "app_url": m.get("app_url"),
+    } for m in mensagens[:limite]]
+
+def ler_mensagem_mural(url: str) -> dict:
+    """Lê o conteúdo completo e os comentários de uma mensagem do Mural —
+    usa o campo `url` devolvido por listar_mural."""
+    try:
+        mensagem = obter_recording(url)
+    except Exception as e:
+        return {"erro": f"não consegui ler esta mensagem do mural: {e}"}
+    comentarios = ler_comentarios(mensagem["comments_url"]) if mensagem.get("comments_url") else []
+    return {
+        "assunto": mensagem.get("subject") or mensagem.get("title") or "(sem assunto)",
+        "autor": (mensagem.get("creator") or {}).get("name"),
+        "criado_em": mensagem.get("created_at"),
+        "conteudo": _texto_simples(mensagem.get("content", "")),
+        "comentarios": comentarios,
+    }
+
 def _get_bytes(url: str) -> bytes:
     """Descarrega um ficheiro anexado (Upload) — usa a mesma autenticação da API."""
     r = httpx.get(url, headers=_headers(), timeout=30, follow_redirects=True)
