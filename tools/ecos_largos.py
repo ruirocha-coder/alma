@@ -17,6 +17,68 @@ DASHBOARD_API_URL = os.environ.get(
 
 _FORMATO_DATA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# regras permanentes pedidas explicitamente pelo Rui, nos comentários do
+# mural, depois de o takt ter sido lido ao contrário — ver
+# _com_takt_formatado. Ambas as missões que leem este dashboard (o resumo
+# diário automático e o agente da consola) partilham este texto.
+REGRAS_APRESENTACAO_PRODUCAO = """
+Regras permanentes para apresentar dados deste dashboard (pedidas
+explicitamente pelo Rui, depois de o takt ter sido lido ao contrário):
+- Takt: usa sempre os campos já convertidos "takt_real_min_seg_por_m3" e
+  "takt_objetivo_min_seg_por_m3" (formato min:seg por m³, ex: "06:47") —
+  nunca apresentes os campos brutos taktrealm3h/taktneededm3h (estão em
+  horas por m³), e nunca tentes converter tu mesma horas para min:seg, usa
+  sempre o campo já convertido. Real maior que o objetivo = mais lento =
+  motivo de alerta.
+- Rácio de entrada/saída: apresenta sempre com exatamente duas casas
+  decimais (ex: 2,70 — nunca 2,6961 nem 2,7)."""
+
+def _horas_para_min_seg(horas) -> str:
+    """Converte um valor em horas por m³ para minutos:segundos por m³ (ex:
+    0.1131 -> "06:47") — a forma como a equipa da Ecos Largos lê o takt.
+    Isto corre sempre aqui, nunca no modelo: converter horas decimais para
+    minutos:segundos é aritmética de base 60, fácil de errar (foi assim que
+    o takt ficou lido ao contrário da primeira vez). Devolve None se o
+    valor não for numérico."""
+    try:
+        horas = float(horas)
+    except (TypeError, ValueError):
+        return None
+    total_minutos = horas * 60
+    minutos = int(total_minutos)
+    segundos = round((total_minutos - minutos) * 60)
+    if segundos == 60:
+        minutos += 1
+        segundos = 0
+    return f"{minutos:02d}:{segundos:02d}"
+
+_CAMPOS_TAKT = {
+    "taktrealm3h": "takt_real_min_seg_por_m3",
+    "taktneededm3h": "takt_objetivo_min_seg_por_m3",
+}
+
+def _com_takt_formatado(conteudo):
+    """Acrescenta, ao lado dos campos brutos do takt (em h/m³) quando
+    presentes, a mesma leitura já convertida para min:seg por m³, e uma
+    nota de alerta se o real for mais lento que o objetivo. Deixa o resto
+    do conteúdo intocado; se não for um dict (ex: resposta em texto bruto),
+    devolve tal e qual."""
+    if not isinstance(conteudo, dict):
+        return conteudo
+    conteudo = dict(conteudo)
+    for campo_bruto, campo_formatado in _CAMPOS_TAKT.items():
+        if campo_bruto in conteudo:
+            formatado = _horas_para_min_seg(conteudo[campo_bruto])
+            if formatado:
+                conteudo[campo_formatado] = formatado
+    if "taktrealm3h" in conteudo and "taktneededm3h" in conteudo:
+        try:
+            conteudo["takt_alerta_mais_lento_que_objetivo"] = (
+                float(conteudo["taktrealm3h"]) > float(conteudo["taktneededm3h"]))
+        except (TypeError, ValueError):
+            pass
+    return conteudo
+
 def _resolver_data(data: str) -> str:
     """Aceita "hoje"/"ontem" além de YYYY-MM-DD — o modelo não sabe a data
     de hoje com fiabilidade, por isso essas palavras são resolvidas aqui
@@ -59,7 +121,7 @@ def ler_dashboard_producao(data: str = None) -> dict:
         # assim devolve o texto em bruto, para não perder informação
         return {"conteudo": r.text.strip()} if r.text.strip() else {
             "erro": "a API de dados de produção respondeu, mas sem conteúdo legível"}
-    return {"conteudo": dados}
+    return {"conteudo": _com_takt_formatado(dados)}
 
 def _semana_de(referencia: date) -> tuple:
     """Segunda a sexta da semana que contém `referencia`."""
