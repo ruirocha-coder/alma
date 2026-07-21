@@ -135,7 +135,14 @@ def _processar(payload: dict):
     notas = _texto_simples(alvo_completo.get("description", ""))
     estado = (alvo_completo.get("parent") or {}).get("title") or "(sem estado)"
     responsaveis = ", ".join(p["name"] for p in alvo_completo.get("assignees", [])) or "(sem responsável atribuído)"
-    historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
+
+    def _linha_comentario(c):
+        linha = f"- [id: {c['id']}] {c['autor']}: {c['conteudo']}"
+        if c.get("anexos"):
+            linha += f" (ficheiros anexados aqui: {', '.join(c['anexos'])})"
+        return linha
+
+    historico = "\n".join(_linha_comentario(c) for c in comentarios) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
 Id da tarefa/card: {alvo_id}
 Estado/coluna: {estado}
@@ -144,14 +151,17 @@ Responsáveis: {responsaveis}
 Notas da tarefa/card:
 {notas or "(sem notas)"}
 
-Conversa/comentários existentes:
+Conversa/comentários existentes (cada um com o seu id, e os ficheiros que
+tenha anexados diretamente, se houver):
 {historico}
 
-Se a pergunta precisar de informação que só está num ficheiro anexado
-diretamente na descrição desta tarefa/card (ex: um PDF de desenho técnico
-ou especificações de um produto, como medidas), usa
-ler_anexos_tarefa_basecamp com id={alvo_id} para os leres — só quando a
-pergunta for mesmo sobre isso, não por rotina."""
+Se a pergunta precisar de informação que só está num ficheiro anexado —
+seja na descrição desta tarefa/card, seja num dos comentários acima — usa
+ler_anexos_registo_basecamp (ex: um PDF de desenho técnico ou
+especificações de um produto, como medidas). Passa id={alvo_id} para
+anexos na tarefa/card, ou o id do comentário certo (visto acima) se o
+ficheiro estiver anexado ali. Só uses isto quando a pergunta for mesmo
+sobre esse conteúdo, não por rotina."""
 
     # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
     # usa, para o perfil e a memória serem partilhados entre os dois canais
