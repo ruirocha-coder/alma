@@ -13,7 +13,7 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos)
-from tools import basecamp, ficheiros, voz, reuniao
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao
 from db import inicializar_schema
 inicializar_schema()
 
@@ -310,21 +310,34 @@ def reuniao_terminar(utilizador: str = Form(...), sessao: str = Form(...)):
 
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
-                            mensagem: str = Form(""), ficheiro: UploadFile = File(...)):
-    """Recebe um ficheiro anexado na consola de chat (PDF, Word, imagem, texto)
-    e responde com o seu conteúdo já disponível ao agente."""
-    bruto = await ficheiro.read()
-    if len(bruto) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Ficheiro demasiado grande (máx. 15 MB)")
+                            mensagem: str = Form(""), ficheiros: list[UploadFile] = File(...)):
+    """Recebe um ou mais ficheiros anexados na consola de chat (PDF, Word,
+    imagem, texto) e responde com o seu conteúdo já disponível ao agente.
+    Cada ficheiro é lido de forma independente — um demasiado grande ou de
+    um tipo não suportado não impede os outros de serem lidos, só fica
+    assinalado para o agente saber que não conseguiu ler esse em concreto."""
+    partes, nomes = [], []
+    for ficheiro in ficheiros:
+        nomes.append(ficheiro.filename)
+        bruto = await ficheiro.read()
+        if len(bruto) > 15 * 1024 * 1024:
+            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): demasiado grande (máx. 15 MB), não foi lido.')
+            continue
+        try:
+            texto = ficheiros_tool.extrair_texto(bruto, ficheiro.content_type, ficheiro.filename)
+        except Exception as e:
+            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): erro ao ler ({e}).')
+            continue
+        if texto is None:
+            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): não consigo ler ficheiros do tipo '
+                          f'{ficheiro.content_type or "(desconhecido)"}.')
+        else:
+            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}')
 
-    texto = ficheiros.extrair_texto(bruto, ficheiro.content_type, ficheiro.filename)
-    if texto is None:
-        raise HTTPException(status_code=415,
-                            detail=f"Não consigo ler ficheiros do tipo {ficheiro.content_type or '(desconhecido)'}")
-
-    mensagem_visivel = f"📎 {ficheiro.filename}" + (f"\n{mensagem}" if mensagem else "")
-    mensagem_agente = (f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}\n\n'
-                       f'{mensagem or "O que achas deste ficheiro?"}')
+    mensagem_visivel = "\n".join(f"📎 {nome}" for nome in nomes) + (f"\n{mensagem}" if mensagem else "")
+    mensagem_agente = ("\n\n---\n\n".join(partes) + "\n\n"
+                       + (mensagem or ("O que achas deste ficheiro?" if len(nomes) == 1
+                                       else "O que achas destes ficheiros?")))
     return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel)
 
 @app.get("/health")
