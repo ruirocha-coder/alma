@@ -503,6 +503,20 @@
     padding: 0;
   }
   .anexo-chip button:hover { color: var(--text); }
+  .anexos-imagem {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .anexo-imagem-preview {
+    max-width: 180px;
+    max-height: 180px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    object-fit: cover;
+  }
 
   #sidebar-scrim {
     display: none;
@@ -1158,8 +1172,11 @@
   }
 
   // devolve { bubble, atualizar(novoTexto) } — usado tal e qual para mensagens
-  // normais (texto fixo) e para respostas em streaming (texto vai crescendo)
-  function addMessage(role, text) {
+  // normais (texto fixo) e para respostas em streaming (texto vai crescendo).
+  // `imagens` (opcional): lista de { url, nome } — mostra as imagens
+  // anexadas como miniaturas reais, em vez de só o nome do ficheiro em
+  // texto (só usado ao enviar um anexo, nunca em respostas da Alma).
+  function addMessage(role, text, imagens) {
     const emptyState = messagesInner.querySelector(".empty-state");
     if (emptyState) emptyState.remove();
     const wrap = document.createElement("div");
@@ -1177,9 +1194,27 @@
     renderizar();
     const content = document.createElement("div");
     content.className = "msg-content";
-    content.appendChild(bubble);
+    if (imagens && imagens.length) {
+      const galeria = document.createElement("div");
+      galeria.className = "anexos-imagem";
+      imagens.forEach(img => {
+        const el = document.createElement("img");
+        el.src = img.url;
+        el.alt = img.nome;
+        el.className = "anexo-imagem-preview";
+        el.title = img.nome + " (clica para ver em tamanho real)";
+        el.addEventListener("click", () => window.open(img.url, "_blank"));
+        galeria.appendChild(el);
+      });
+      content.appendChild(galeria);
+    }
+    if (textoAtual) {
+      content.appendChild(bubble);
+    }
+    let barra = null;
     if (role === "user" || role === "assistant") {
-      content.appendChild(criarBarraAcoes(() => textoAtual));
+      barra = criarBarraAcoes(() => textoAtual);
+      content.appendChild(barra);
     }
     wrap.appendChild(makeAvatar(role));
     wrap.appendChild(content);
@@ -1190,6 +1225,10 @@
       atualizar(novoTexto) {
         textoAtual = novoTexto;
         renderizar();
+        if (!bubble.isConnected && textoAtual) {
+          if (barra) content.insertBefore(bubble, barra);
+          else content.appendChild(bubble);
+        }
         scrollToBottom();
       }
     };
@@ -1380,13 +1419,25 @@
     renderAnexos();
   }
 
+  const EXTENSOES_IMAGEM = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+  function ehImagem(ficheiro) {
+    if (ficheiro.type && ficheiro.type.startsWith("image/")) return true;
+    const nome = ficheiro.name.toLowerCase();
+    return EXTENSOES_IMAGEM.some(ext => nome.endsWith(ext));
+  }
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const mensagem = input.value.trim();
     const ficheiros = ficheirosAnexados;
     if (!mensagem && ficheiros.length === 0) return;
 
-    addMessage("user", ficheiros.map(f => `📎 ${f.name}\n`).join("") + mensagem);
+    // imagens aparecem como miniaturas reais na conversa; outros ficheiros
+    // continuam a aparecer só pelo nome (não há como pré-visualizar um PDF
+    // ou Word do mesmo modo)
+    const imagensAnexadas = ficheiros.filter(ehImagem).map(f => ({ url: URL.createObjectURL(f), nome: f.name }));
+    const nomesOutros = ficheiros.filter(f => !ehImagem(f)).map(f => `📎 ${f.name}\n`).join("");
+    addMessage("user", nomesOutros + mensagem, imagensAnexadas);
     input.value = "";
     input.style.height = "auto";
     limparAnexo();
