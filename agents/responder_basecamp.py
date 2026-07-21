@@ -175,9 +175,17 @@ ler_anexos_registo_basecamp (ex: um PDF de desenho técnico ou
 especificações de um produto, como medidas). Passa sempre um dos urls
 acima (o da tarefa/card, ou o do comentário certo) — nunca inventes um
 url a partir só de um número, dá sempre 404. Só uses isto quando a
-pergunta for mesmo sobre esse conteúdo, não por rotina. Se já tentaste
-isto antes nesta conversa e falhou, tenta OUTRA VEZ para uma pergunta
-nova — um erro anterior não significa que vai falhar sempre."""
+pergunta for mesmo sobre esse conteúdo, não por rotina — mas se te
+pedirem para resumir contas, valores ou faturas ("resume as contas",
+"quanto foi", "confirma o valor") e este card tiver comprovativos, faturas
+ou recibos anexados (na descrição ou nos comentários), lê sempre esses
+anexos antes de responderes, nunca te bases só no texto escrito à volta
+deles. Se o que está escrito no card/comentários for ambíguo, incompleto
+ou parecer não bater certo com o que encontraste no anexo, diz
+explicitamente que precisas de verificar o documento antes de confirmares
+o valor — nunca apresentes um valor como certo sem teres lido a fonte. Se
+já tentaste isto antes nesta conversa e falhou, tenta OUTRA VEZ para uma
+pergunta nova — um erro anterior não significa que vai falhar sempre."""
 
     # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
     # usa, para o perfil e a memória serem partilhados entre os dois canais
