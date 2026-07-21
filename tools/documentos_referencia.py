@@ -24,9 +24,10 @@ def _extrair_pdf(bruto: bytes) -> str:
     texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
     if texto:
         return texto
-    # sem texto extraível — provavelmente um PDF só de design/imagem; tenta
-    # ler a primeira página como imagem antes de desistir.
-    return visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
+    # sem texto extraível — provavelmente um PDF só de design/imagem/scan;
+    # descreve página a página em vez de só a primeira, para não perder
+    # conteúdo (ex: um contrato/proposta escaneado de várias páginas).
+    return visao.descrever_pdf_escaneado(bruto)
 
 def _texto_simples(html: str) -> str:
     if not html:
@@ -115,7 +116,7 @@ def documentos_referencia_empresa() -> dict:
     for doc in _DOCUMENTOS:
         try:
             texto = doc["ler"]().strip()
-            dados[doc["nome"]] = texto[:6000] if texto else (
+            dados[doc["nome"]] = texto[:documentos_empresa.LIMITE_CARATERES_DOCUMENTO] if texto else (
                 "(este documento não tem texto que se consiga extrair automaticamente — "
                 "provavelmente é um ficheiro gráfico/design; não inventes o conteúdo, "
                 "diz que não consegues ler este documento e sugere abri-lo diretamente)")

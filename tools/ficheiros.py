@@ -22,9 +22,10 @@ def extrair_texto(bruto: bytes, content_type: str, filename: str = "") -> str | 
         texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
         if texto:
             return texto
-        # sem texto extraível — provavelmente um PDF só de design/imagem
+        # sem texto extraível — provavelmente um PDF só de design/imagem/
+        # scan; descreve página a página em vez de só a primeira
         try:
-            return visao.descrever_imagem(visao.renderizar_primeira_pagina_pdf(bruto), "image/png")
+            return visao.descrever_pdf_escaneado(bruto)
         except Exception as e:
             return f"(não consegui extrair texto nem imagem deste PDF: {e})"
 
