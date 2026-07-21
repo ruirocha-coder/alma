@@ -148,17 +148,19 @@ def ler_documento_empresa(id: int) -> dict:
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
     return {"titulo": item["titulo"], "conteudo": conteudo}
 
-def ler_anexos_registo_basecamp(id: int) -> dict:
+def ler_anexos_registo_basecamp(url: str) -> dict:
     """Lê o conteúdo dos ficheiros anexados diretamente a um registo do
     Basecamp — a descrição de uma tarefa/card, OU um comentário (ex: um PDF
     de desenho técnico ou especificações de um produto partilhado num
-    comentário, não só na tarefa em si). `id` é o id desse registo (da
-    tarefa/card, ou de um comentário específico — ler_comentarios devolve o
-    id e os nomes dos ficheiros anexados de cada comentário). Não é para
-    documentos/ficheiros avulsos — para isso usa
+    comentário, não só na tarefa em si). `url` é o url da própria API desse
+    registo (o campo "url" que já vem no contexto ou em ler_comentarios —
+    nunca inventes ou reconstruas este url a partir só do id: o Basecamp
+    aninha os recordings sob o bucket do projeto, um formato tipo
+    ".../recordings/{id}.json" na raiz não existe e dá sempre 404). Não é
+    para documentos/ficheiros avulsos — para isso usa
     procurar_documentos_empresa/ler_documento_empresa."""
     try:
-        recording = basecamp.obter_recording(f"{basecamp._base_url()}/recordings/{id}.json")
+        recording = basecamp.obter_recording(url)
     except Exception as e:
         return {"erro": f"não consegui aceder a este registo do Basecamp: {e}"}
 
@@ -199,11 +201,11 @@ TOOLS_DOCUMENTOS_EMPRESA = [
     },
     {
         "name": "ler_anexos_registo_basecamp",
-        "description": "Lê o conteúdo dos ficheiros anexados diretamente a um registo do Basecamp — a descrição de uma tarefa/card, OU um comentário específico (ex: um PDF de desenho técnico ou especificações de um produto, suporta os mesmos formatos que ler_documento_empresa). Usa isto quando a pergunta precisar de informação que só está nesses anexos (ex: \"qual o tamanho da prateleira?\", medidas, especificações) — não leias por rotina em toda tarefa/card, só quando a pergunta for mesmo sobre isso. `id` pode ser o id da tarefa/card (para anexos na sua descrição), ou o id de um comentário específico (ler_comentarios devolve o id e os nomes de ficheiros anexados de cada comentário — usa esse id se o anexo estiver ali, não na tarefa/card).",
+        "description": "Lê o conteúdo dos ficheiros anexados diretamente a um registo do Basecamp — a descrição de uma tarefa/card, OU um comentário específico (ex: um PDF de desenho técnico ou especificações de um produto, suporta os mesmos formatos que ler_documento_empresa). Usa isto quando a pergunta precisar de informação que só está nesses anexos (ex: \"qual o tamanho da prateleira?\", medidas, especificações) — não leias por rotina em toda tarefa/card, só quando a pergunta for mesmo sobre isso. `url` é sempre o url da própria API desse registo (o campo \"url\" que já vem no contexto, ou o de um comentário específico devolvido por ler_comentarios) — nunca inventes este url a partir só de um número/id, o Basecamp aninha os recordings sob o bucket do projeto e um url reconstruído à mão dá sempre 404.",
         "input_schema": {
             "type": "object",
-            "properties": {"id": {"type": "integer", "description": "id da tarefa/card, ou de um comentário específico"}},
-            "required": ["id"]
+            "properties": {"url": {"type": "string", "description": "o url da própria API da tarefa/card ou do comentário — nunca inventado"}},
+            "required": ["url"]
         }
     }
 ]
