@@ -475,19 +475,25 @@
     flex-shrink: 0;
   }
   .reuniao-banner button:hover { background: rgba(255, 255, 255, 0.32) !important; }
+  .anexo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .anexo-chips:empty { display: none; margin-bottom: 0; }
   .anexo-chip {
+    display: flex;
     align-items: center;
     gap: 8px;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 6px 10px;
-    margin-bottom: 8px;
     font-size: 13px;
     color: var(--text);
     max-width: fit-content;
   }
-  .anexo-chip:not([hidden]) { display: flex; }
   .anexo-chip button {
     border: none;
     background: transparent;
@@ -581,13 +587,10 @@
       </div>
       <div id="composer">
         <div class="composer-inner">
-          <div id="anexo-chip" class="anexo-chip" hidden>
-            <span id="anexo-nome"></span>
-            <button id="anexo-remover" type="button" aria-label="Remover anexo">✕</button>
-          </div>
+          <div id="anexo-chips" class="anexo-chips"></div>
           <form id="form">
             <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
-            <input id="ficheiro-input" type="file" hidden accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
+            <input id="ficheiro-input" type="file" hidden multiple accept=".pdf,.docx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
             <button id="reuniao-btn" type="button" class="icon-btn-composer" aria-label="Modo reunião" title="Começar/terminar modo reunião">🎙️</button>
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
@@ -650,10 +653,8 @@
   sidebarScrim.addEventListener("click", fecharSidebar);
   const anexarBtn = document.getElementById("anexar");
   const ficheiroInput = document.getElementById("ficheiro-input");
-  const anexoChip = document.getElementById("anexo-chip");
-  const anexoNome = document.getElementById("anexo-nome");
-  const anexoRemover = document.getElementById("anexo-remover");
-  let ficheiroAnexado = null;
+  const anexoChips = document.getElementById("anexo-chips");
+  let ficheirosAnexados = [];
 
   // fila de reprodução — as frases de voz vão chegando uma a uma (por SSE) e
   // têm de tocar em sequência, mesmo que a síntese da frase seguinte já
@@ -1339,33 +1340,53 @@
 
   anexarBtn.addEventListener("click", () => ficheiroInput.click());
 
+  function renderAnexos() {
+    anexoChips.innerHTML = "";
+    ficheirosAnexados.forEach((ficheiro, i) => {
+      const chip = document.createElement("div");
+      chip.className = "anexo-chip";
+      const nome = document.createElement("span");
+      nome.textContent = "📎 " + ficheiro.name;
+      const remover = document.createElement("button");
+      remover.type = "button";
+      remover.setAttribute("aria-label", "Remover anexo");
+      remover.textContent = "✕";
+      remover.addEventListener("click", () => {
+        ficheirosAnexados.splice(i, 1);
+        renderAnexos();
+      });
+      chip.append(nome, remover);
+      anexoChips.appendChild(chip);
+    });
+  }
+
   ficheiroInput.addEventListener("change", () => {
-    const ficheiro = ficheiroInput.files[0];
-    if (!ficheiro) return;
-    if (ficheiro.size > 15 * 1024 * 1024) {
-      addMessage("error", "Ficheiro demasiado grande (máx. 15 MB).");
-      ficheiroInput.value = "";
-      return;
+    // acumula com o que já estava anexado — permite ir adicionando
+    // ficheiros em vários cliques no clip, não só um de cada vez
+    for (const ficheiro of ficheiroInput.files) {
+      if (ficheiro.size > 15 * 1024 * 1024) {
+        addMessage("error", `Ficheiro demasiado grande (máx. 15 MB): ${ficheiro.name}`);
+        continue;
+      }
+      ficheirosAnexados.push(ficheiro);
     }
-    ficheiroAnexado = ficheiro;
-    anexoNome.textContent = "📎 " + ficheiro.name;
-    anexoChip.hidden = false;
+    ficheiroInput.value = "";  // permite voltar a escolher o mesmo ficheiro depois de o remover
+    renderAnexos();
   });
 
   function limparAnexo() {
-    ficheiroAnexado = null;
+    ficheirosAnexados = [];
     ficheiroInput.value = "";
-    anexoChip.hidden = true;
+    renderAnexos();
   }
-  anexoRemover.addEventListener("click", limparAnexo);
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const mensagem = input.value.trim();
-    const ficheiro = ficheiroAnexado;
-    if (!mensagem && !ficheiro) return;
+    const ficheiros = ficheirosAnexados;
+    if (!mensagem && ficheiros.length === 0) return;
 
-    addMessage("user", (ficheiro ? `📎 ${ficheiro.name}\n` : "") + mensagem);
+    addMessage("user", ficheiros.map(f => `📎 ${f.name}\n`).join("") + mensagem);
     input.value = "";
     input.style.height = "auto";
     limparAnexo();
@@ -1375,12 +1396,12 @@
     addTyping();
 
     try {
-      if (ficheiro) {
+      if (ficheiros.length > 0) {
         const dados = new FormData();
         dados.append("utilizador", UTILIZADOR);
         dados.append("sessao", sessao);
         dados.append("mensagem", mensagem);
-        dados.append("ficheiro", ficheiro);
+        ficheiros.forEach(f => dados.append("ficheiros", f));
         const resp = await fetch("/alma/ficheiro", { method: "POST", body: dados });
         removeTyping();
         if (!resp.ok) {
