@@ -47,9 +47,11 @@ def descrever_imagem(bruto: bytes, content_type: str) -> str:
 
 # um documento sem texto extraível (design/scan) pode ter várias páginas
 # relevantes — descrever só a primeira perdia tudo o resto (ex: um contrato
-# ou proposta escaneada de várias páginas). Limitado para não disparar
-# dezenas de chamadas de visão num PDF enorme.
-LIMITE_PAGINAS_PDF_ESCANEADO = 5
+# ou proposta escaneada de várias páginas, ou o "fluxograma" com vários
+# emails consolidados). Limitado para não disparar chamadas de visão sem
+# fim num PDF verdadeiramente enorme, mas alto o suficiente para cobrir um
+# documento de referência inteiro, não só o início dele.
+LIMITE_PAGINAS_PDF_ESCANEADO = 20
 
 def renderizar_paginas_pdf(bruto: bytes, limite: int = LIMITE_PAGINAS_PDF_ESCANEADO) -> list[bytes]:
     """Converte até `limite` páginas de um PDF em imagens PNG."""

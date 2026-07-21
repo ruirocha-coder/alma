@@ -18,10 +18,12 @@ TTL = 900  # segundos — documentos de empresa não mudam a cada minuto
 
 # um documento de negócio real (proposta, cadeia de emails) facilmente
 # ultrapassa umas páginas — informação importante (ex: condições comerciais)
-# muitas vezes só aparece mais à frente, não logo no início. 6000 carateres
-# (~1000 palavras) cortava isso silenciosamente; isto dá muito mais margem
-# sem deixar de ter um limite para documentos verdadeiramente enormes.
-LIMITE_CARATERES_DOCUMENTO = 20000
+# muitas vezes só aparece mais à frente, não logo no início, e alguns
+# documentos de referência (ex: o "fluxograma" com emails consolidados da
+# empresa) têm mesmo de ser lidos por inteiro, não parcialmente. 50000
+# carateres cobre isso com muita folga, mantendo ainda um limite para
+# documentos verdadeiramente enormes.
+LIMITE_CARATERES_DOCUMENTO = 50000
 
 TIPOS_DE_FICHEIRO_LEGIVEIS = {
     "application/pdf",
