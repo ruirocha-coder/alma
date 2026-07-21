@@ -82,6 +82,26 @@ TOOLS_MURAL = [
             "properties": {"assunto": {"type": "string"}, "mensagem": {"type": "string"}},
             "required": ["assunto", "mensagem"]
         }
+    },
+    {
+        "name": "listar_mural_basecamp",
+        "description": "Lista as mensagens mais recentes do Mural do Basecamp de um projeto (assunto, autor, data, quantos comentários tem) — usa isto sempre que precisares de encontrar um post anterior (ex: um resumo semanal/diário antigo, para comparar com o de agora, ou para ver se alguém já comentou algo lá). Por omissão lista o mural da Gestão; passa `projeto` para o mural de outra equipa (ex: \"Ecos Largos\"). Depois de encontrares o post certo, usa ler_mensagem_mural_basecamp com o `url` devolvido para leres o conteúdo e os comentários na íntegra.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "projeto": {"type": "string", "description": "Por omissão \"Gestão\" — passa o nome de outro projeto para o mural dele"},
+                "limite": {"type": "integer", "description": "Quantas mensagens recentes listar — por omissão 20"}
+            }
+        }
+    },
+    {
+        "name": "ler_mensagem_mural_basecamp",
+        "description": "Lê o conteúdo completo e os comentários de uma mensagem do Mural, pelo `url` devolvido por listar_mural_basecamp. Usa isto para ver o que foi dito nos comentários de um post anterior — ex: pedidos de alteração que alguém tenha deixado num resumo automático.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"]
+        }
     }
 ]
 
@@ -136,6 +156,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "definir_empresa": lambda empresa: db.atualizar_empresa(utilizador, empresa),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
+        "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
+        "ler_mensagem_mural_basecamp": lambda url: basecamp.ler_mensagem_mural(url),
     }
     return system, tools_completas, funcoes_utilizador
 
