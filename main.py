@@ -374,6 +374,23 @@ def alertas_basecamp_recentes(limite: int = 30):
     """Últimos alertas publicados no Basecamp — para confirmar corridas sem ir aos logs do Railway."""
     return alertas_recentes(limite)
 
+@app.get("/basecamp/pessoas")
+def diagnostico_pessoas_basecamp(projeto: str = "Gestão"):
+    """Diagnóstico: mostra os campos brutos que o Basecamp devolve para uma
+    pessoa de um projeto — usado para confirmar que o campo attachable_sgid
+    (necessário para as menções reais em comentários) existe mesmo e tem
+    este nome, sem precisar de ir aos logs do Railway."""
+    pessoas = basecamp.pessoas_projeto(projeto)
+    if not pessoas:
+        return {"projeto": projeto, "total": 0, "aviso": "nenhuma pessoa encontrada para este projeto"}
+    return {
+        "projeto": projeto,
+        "total": len(pessoas),
+        "campos_disponiveis": sorted(pessoas[0].keys()),
+        "tem_attachable_sgid": "attachable_sgid" in pessoas[0],
+        "exemplo": pessoas[0],
+    }
+
 @app.post("/basecamp/resumo-semanal")
 def resumo_semanal_basecamp_agora():
     """Dispara já o resumo semanal de atividade no Mural, em segundo plano."""

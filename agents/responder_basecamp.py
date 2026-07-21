@@ -151,6 +151,13 @@ Conversa/comentários existentes:
     utilizador_basecamp = criador.get("name") or "Alguém do Basecamp"
     projeto = (recording.get("bucket") or {}).get("name") or ""
     resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}], projeto=projeto)
+    # garante que quem mencionou a Alma é sempre marcado a sério na resposta
+    # — não depende de o modelo se lembrar de escrever "@Nome" (a instrução
+    # de mencionar é só para OUTRAS pessoas, não para quem já a chamou), por
+    # isso a própria pessoa que a mencionou é sempre acrescentada aqui, a
+    # menos que o texto já a mencione explicitamente.
+    if not re.search(r"@" + re.escape(utilizador_basecamp), resposta, re.IGNORECASE):
+        resposta = f"@{utilizador_basecamp} {resposta}"
     basecamp.comentar(alvo_id, resposta, projeto=projeto)
     db.registar_evento_processado(evento_id, resposta)
     print(f"[responder_basecamp] respondido a {criador.get('name')} em '{titulo}'")
