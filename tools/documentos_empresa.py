@@ -5,7 +5,9 @@
 # usa para Todos e Cards) filtrado por type=Document e type=Upload — dá acesso a
 # tudo o que a conta da Alma já vê em qualquer projeto, sem ter de percorrer as
 # pastas (Vaults) de cada projeto uma a uma.
-import io, time
+import io, os, time
+from email import policy
+from email.parser import BytesParser
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from docx import Document as DocxDocument
@@ -19,12 +21,50 @@ TIPOS_DE_FICHEIRO_LEGIVEIS = {
     "text/plain",
     "text/csv",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "message/rfc822",
 }
+
+# quando alguém arrasta um email (.eml) para o Basecamp, o browser nem
+# sempre reporta um content_type útil (fica "application/octet-stream" ou
+# vazio) — a extensão do ficheiro é o sinal mais fiável nesses casos. Só
+# serve de reserva quando o content_type não identifica nada por si só.
+_EXTENSAO_PARA_TIPO = {".eml": "message/rfc822"}
+_TIPOS_INCONCLUSIVOS = {"", "application/octet-stream", "binary/octet-stream"}
+
+def _tipo_efetivo(ctype: str, filename: str) -> str:
+    """O content_type a usar de facto para decidir como extrair o texto —
+    normalmente o que o Basecamp devolve, mas com reserva pela extensão do
+    nome do ficheiro quando esse content_type não diz nada (ex: um .eml
+    identificado só como "application/octet-stream")."""
+    ctype = ctype or ""
+    if ctype not in _TIPOS_INCONCLUSIVOS:
+        return ctype
+    ext = os.path.splitext(filename or "")[1].lower()
+    return _EXTENSAO_PARA_TIPO.get(ext, ctype)
 
 def _texto_simples(html: str) -> str:
     if not html:
         return ""
     return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+
+def _extrair_email(bruto: bytes) -> str:
+    """Extrai de um ficheiro de email (.eml) os campos úteis (de/para/
+    assunto/data) e o corpo em texto — prefere a versão texto simples do
+    email, e limpa o HTML da versão em html quando não há texto simples."""
+    msg = BytesParser(policy=policy.default).parsebytes(bruto)
+    cabecalho = [
+        f"De: {msg.get('from', '(desconhecido)')}",
+        f"Para: {msg.get('to', '(desconhecido)')}",
+        f"Assunto: {msg.get('subject', '(sem assunto)')}",
+        f"Data: {msg.get('date', '(sem data)')}",
+    ]
+    corpo = msg.get_body(preferencelist=("plain", "html"))
+    texto_corpo = ""
+    if corpo is not None:
+        texto_corpo = corpo.get_content()
+        if corpo.get_content_type() == "text/html":
+            texto_corpo = _texto_simples(texto_corpo)
+    return ("\n".join(cabecalho) + "\n\n" + texto_corpo.strip()).strip()
 
 def _listar_bruto() -> list[dict]:
     if "lista" in _cache:
@@ -90,6 +130,8 @@ def _extrair_por_tipo(bruto: bytes, ctype: str) -> str:
         return "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
     if ctype in ("text/plain", "text/csv"):
         return bruto.decode("utf-8", errors="ignore")
+    if ctype == "message/rfc822":
+        return _extrair_email(bruto)
     return None
 
 def _ler_conteudo(item: dict) -> str:
@@ -107,7 +149,7 @@ def _ler_conteudo(item: dict) -> str:
         texto_wrapper = _texto_simples(completo.get("content", "")).strip()
         partes = [texto_wrapper] if texto_wrapper else []
         for anexo in completo.get("content_attachments") or []:
-            ctype_anexo = anexo.get("content_type") or ""
+            ctype_anexo = _tipo_efetivo(anexo.get("content_type"), anexo.get("filename"))
             try:
                 bruto_anexo = basecamp._get_bytes(anexo["download_url"])
                 texto_anexo = _extrair_por_tipo(bruto_anexo, ctype_anexo)
@@ -118,7 +160,7 @@ def _ler_conteudo(item: dict) -> str:
         texto_final = "\n\n".join(partes).strip()
         return texto_final[:6000] if texto_final else None
 
-    ctype = item.get("content_type") or ""
+    ctype = _tipo_efetivo(item.get("content_type"), item.get("filename"))
 
     if ctype in visao.TIPOS_DE_IMAGEM:
         bruto = basecamp._get_bytes(item["download_url"])
@@ -133,7 +175,7 @@ def _ler_conteudo(item: dict) -> str:
 def ler_documento_empresa(id: int) -> dict:
     """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
     (de listar_documentos_empresa). Suporta documentos nativos do Basecamp,
-    PDF, Word (.docx), texto simples e CSV."""
+    PDF, Word (.docx), email (.eml), texto simples e CSV."""
     item = next((i for i in _listar_bruto() if i["id"] == id), None)
     if not item:
         return {"erro": "documento não encontrado — confirma o id com procurar_documentos_empresa"}
@@ -171,7 +213,7 @@ def ler_anexos_registo_basecamp(url: str) -> dict:
     resultados = []
     for anexo in anexos:
         nome = anexo.get("filename") or anexo.get("name") or "(sem nome)"
-        ctype = anexo.get("content_type") or ""
+        ctype = _tipo_efetivo(anexo.get("content_type"), nome)
         try:
             bruto = basecamp._get_bytes(anexo["download_url"])
             texto = _extrair_por_tipo(bruto, ctype)
@@ -192,7 +234,7 @@ TOOLS_DOCUMENTOS_EMPRESA = [
     },
     {
         "name": "ler_documento_empresa",
-        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF (mesmo quando o PDF é só design/imagem sem texto), Word (.docx), imagens (JPG, PNG, GIF, WebP — descritas/transcritas por visão), texto simples e CSV — outros formatos (folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
+        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF (mesmo quando o PDF é só design/imagem sem texto), Word (.docx), email (.eml — lê de/para/assunto/data e o corpo do email), imagens (JPG, PNG, GIF, WebP — descritas/transcritas por visão), texto simples e CSV — outros formatos (folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "integer"}},
