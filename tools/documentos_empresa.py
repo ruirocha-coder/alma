@@ -148,6 +148,34 @@ def ler_documento_empresa(id: int) -> dict:
                 "titulo": item["titulo"], "app_url": item.get("app_url")}
     return {"titulo": item["titulo"], "conteudo": conteudo}
 
+def ler_anexos_tarefa_basecamp(id: int) -> dict:
+    """Lê o conteúdo dos ficheiros anexados diretamente na descrição de uma
+    tarefa/card do Basecamp (ex: um PDF de desenho técnico ou
+    especificações de um produto) — para responder a perguntas sobre uma
+    tarefa/card que só têm resposta nesses anexos, não no texto da própria
+    tarefa. `id` é o id da tarefa/card (não de um documento/ficheiro
+    avulso — para isso usa procurar_documentos_empresa/ler_documento_empresa)."""
+    try:
+        recording = basecamp.obter_recording(f"{basecamp._base_url()}/recordings/{id}.json")
+    except Exception as e:
+        return {"erro": f"não consegui aceder a esta tarefa/card: {e}"}
+
+    anexos = recording.get("content_attachments") or []
+    if not anexos:
+        return {"anexos": [], "aviso": "esta tarefa/card não tem ficheiros anexados diretamente na descrição"}
+
+    resultados = []
+    for anexo in anexos:
+        nome = anexo.get("filename") or anexo.get("name") or "(sem nome)"
+        ctype = anexo.get("content_type") or ""
+        try:
+            bruto = basecamp._get_bytes(anexo["download_url"])
+            texto = _extrair_por_tipo(bruto, ctype)
+            resultados.append({"ficheiro": nome, "conteudo": (texto or "(sem texto legível)")[:6000]})
+        except Exception as e:
+            resultados.append({"ficheiro": nome, "erro": str(e)})
+    return {"anexos": resultados}
+
 TOOLS_DOCUMENTOS_EMPRESA = [
     {
         "name": "procurar_documentos_empresa",
@@ -164,6 +192,15 @@ TOOLS_DOCUMENTOS_EMPRESA = [
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "integer"}},
+            "required": ["id"]
+        }
+    },
+    {
+        "name": "ler_anexos_tarefa_basecamp",
+        "description": "Lê o conteúdo dos ficheiros anexados diretamente na descrição de uma tarefa/card do Basecamp (ex: um PDF de desenho técnico ou especificações de um produto, suporta os mesmos formatos que ler_documento_empresa). Usa isto quando a pergunta precisar de informação que só está nesses anexos (ex: \"qual o tamanho da prateleira?\", medidas, especificações) — não leias por rotina em toda tarefa/card, só quando a pergunta for mesmo sobre isso. `id` é o id da tarefa/card em questão (não de um documento avulso).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer", "description": "id da tarefa/card"}},
             "required": ["id"]
         }
     }
