@@ -1,5 +1,5 @@
 import anthropic
-from agents import ceo, ecos_largos
+from agents import ceo, ecos_largos, qualidade_toros_ecos_largos
 from tools import basecamp
 import db
 
@@ -13,8 +13,30 @@ AGENTES_INTERIOR_GUIDER = {"ceo": ceo.responder}
 AGENTES_INTERIOR_GUIDER_STREAM = {"ceo": ceo.responder_stream}
 # semana 5+: "orcamentos": orcamentos.responder, "design": design.responder, ...
 
-AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder}
-AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream}
+AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder,
+           "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder}
+AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream,
+                  "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder_stream}
+
+def escolher_agente_ecos_largos(pergunta: str) -> str:
+    """Dentro da Ecos Largos, decide entre o apoio geral (produção, tarefas/
+    cards do projeto) e o subagente dedicado às regras de qualidade de
+    cargas de toros (Manual Qualidade de Cargas - Toros) — pedido
+    explicitamente pelo Rui para não se misturar com o resto. Exposta (sem
+    "_" no nome) porque agents/responder_basecamp.py também precisa desta
+    mesma decisão para menções no Basecamp do projeto Ecos Largos."""
+    r = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=10,
+        system="Esta pergunta é da equipa Ecos Largos. Classifica-a como "
+               "'qualidade_toros' se for sobre regras, critérios ou avaliação "
+               "de qualidade de cargas de toros (o Manual Qualidade de Cargas "
+               "- Toros), ou 'geral' para qualquer outra coisa (produção, "
+               "dashboard, tarefas/cards do Basecamp). Responde só com uma "
+               "das duas palavras.",
+        messages=[{"role": "user", "content": pergunta}]
+    )
+    escolha = r.content[0].text.strip().lower()
+    return "qualidade_toros_ecos_largos" if escolha == "qualidade_toros" else "ecos_largos"
 
 def _escolher_agente_interior_guider(pergunta: str) -> str:
     if len(AGENTES_INTERIOR_GUIDER) == 1:
@@ -44,7 +66,7 @@ def _escolher_entre_empresas(pergunta: str) -> str:
     )
     escolha = r.content[0].text.strip().lower()
     if escolha == "ecos_largos":
-        return "ecos_largos"
+        return escolher_agente_ecos_largos(pergunta)
     return _escolher_agente_interior_guider(pergunta)
 
 def encaminhar(pergunta: str, utilizador: str) -> str:
@@ -70,7 +92,7 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         print(f"[orchestrator] não consegui ler o perfil para saber a empresa: {e!r}")
 
     if empresa == "ecos_largos":
-        return "ecos_largos"
+        return escolher_agente_ecos_largos(pergunta)
     if empresa == "interior_guider":
         return _escolher_agente_interior_guider(pergunta)
     if empresa == "ambas":
@@ -102,6 +124,6 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         eh_tambem_interior_guider = False
 
     if not eh_tambem_interior_guider:
-        return "ecos_largos"
+        return escolher_agente_ecos_largos(pergunta)
 
     return _escolher_entre_empresas(pergunta)

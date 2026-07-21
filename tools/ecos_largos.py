@@ -4,6 +4,7 @@
 import os, re
 from datetime import date, timedelta
 import httpx
+from tools import documentos_empresa
 
 # servidor próprio da equipa (fora do Basecamp) — configurável por env var
 # porque corre num endereço DuckDNS, que pode mudar sem precisar de deploy.
@@ -198,5 +199,36 @@ TOOLS_DASHBOARD_PRODUCAO = [
                 "data_fim": {"type": "string", "description": "YYYY-MM-DD — só se não usares periodo"}
             }
         }
+    }
+]
+
+def ler_manual_qualidade_cargas_toros() -> dict:
+    """Lê o documento "Manual Qualidade de Cargas - Toros" (projeto Ecos
+    Largos, no Basecamp) — as regras oficiais de qualidade para avaliar
+    cargas de toros. Prefere o resultado cujo projeto seja mesmo "Ecos
+    Largos" (evita confundir com um documento homónimo noutro projeto, se
+    algum dia existir), mas não bloqueia se o campo de projeto não bater
+    certo — o título já é bastante específico por si só."""
+    candidatos = [
+        item for item in documentos_empresa._listar_bruto()
+        if "qualidade" in item["titulo"].lower() and "toros" in item["titulo"].lower()
+    ]
+    da_ecos_largos = [c for c in candidatos if "ecos largos" in (c.get("projeto") or "").lower()]
+    candidatos = da_ecos_largos or candidatos
+    if not candidatos:
+        return {"erro": "não encontrei o documento \"Manual Qualidade de Cargas - Toros\" — "
+                         "confirma se o título ainda é esse no projeto Ecos Largos"}
+    item = candidatos[0]
+    conteudo = documentos_empresa._ler_conteudo(item)
+    if not conteudo:
+        return {"erro": "este documento existe mas não consegui extrair texto legível dele",
+                "titulo": item["titulo"], "app_url": item.get("app_url")}
+    return {"titulo": item["titulo"], "conteudo": conteudo}
+
+TOOLS_MANUAL_QUALIDADE_TOROS = [
+    {
+        "name": "ler_manual_qualidade_cargas_toros",
+        "description": "Lê o documento \"Manual Qualidade de Cargas - Toros\" (projeto Ecos Largos, Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
     }
 ]

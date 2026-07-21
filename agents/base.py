@@ -31,6 +31,8 @@ FUNCOES = {
     "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
     "resumo_pessoa_basecamp": basecamp.resumo_pessoa_basecamp,
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
+    "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,
+    "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
