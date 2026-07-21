@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import base64, json, os
+import asyncio, base64, json, os
 import threading
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -308,31 +308,39 @@ def reuniao_terminar(utilizador: str = Form(...), sessao: str = Form(...)):
     )
     return {"resumo": resultado["resposta"]}
 
+async def _processar_ficheiro_anexado(ficheiro: UploadFile) -> str:
+    """Lê um ficheiro anexado e devolve o texto/descrição já formatado para o
+    agente, ou uma nota de erro — nunca levanta exceção, para uma falha num
+    ficheiro não impedir os outros de serem processados (ver
+    alma_com_ficheiro, que corre vários destes em paralelo)."""
+    bruto = await ficheiro.read()
+    if len(bruto) > 15 * 1024 * 1024:
+        return f'Ficheiro anexado ("{ficheiro.filename}"): demasiado grande (máx. 15 MB), não foi lido.'
+    try:
+        # extrair_texto é síncrona (chama a API da Anthropic para imagens/
+        # PDFs escaneados) — corre em thread para vários ficheiros
+        # avançarem ao mesmo tempo, em vez de um de cada vez à vez (é o que
+        # tornava lenta uma avaliação de carga com várias fotos anexadas).
+        texto = await asyncio.to_thread(
+            ficheiros_tool.extrair_texto, bruto, ficheiro.content_type, ficheiro.filename)
+    except Exception as e:
+        return f'Ficheiro anexado ("{ficheiro.filename}"): erro ao ler ({e}).'
+    if texto is None:
+        return (f'Ficheiro anexado ("{ficheiro.filename}"): não consigo ler ficheiros do tipo '
+                f'{ficheiro.content_type or "(desconhecido)"}.')
+    return f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}'
+
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
                             mensagem: str = Form(""), ficheiros: list[UploadFile] = File(...)):
     """Recebe um ou mais ficheiros anexados na consola de chat (PDF, Word,
     imagem, texto) e responde com o seu conteúdo já disponível ao agente.
-    Cada ficheiro é lido de forma independente — um demasiado grande ou de
-    um tipo não suportado não impede os outros de serem lidos, só fica
-    assinalado para o agente saber que não conseguiu ler esse em concreto."""
-    partes, nomes = [], []
-    for ficheiro in ficheiros:
-        nomes.append(ficheiro.filename)
-        bruto = await ficheiro.read()
-        if len(bruto) > 15 * 1024 * 1024:
-            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): demasiado grande (máx. 15 MB), não foi lido.')
-            continue
-        try:
-            texto = ficheiros_tool.extrair_texto(bruto, ficheiro.content_type, ficheiro.filename)
-        except Exception as e:
-            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): erro ao ler ({e}).')
-            continue
-        if texto is None:
-            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"): não consigo ler ficheiros do tipo '
-                          f'{ficheiro.content_type or "(desconhecido)"}.')
-        else:
-            partes.append(f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}')
+    Cada ficheiro é lido em paralelo com os outros (nunca um de cada vez) —
+    um demasiado grande ou de um tipo não suportado não impede os outros de
+    serem lidos, só fica assinalado para o agente saber que não conseguiu
+    ler esse em concreto."""
+    nomes = [ficheiro.filename for ficheiro in ficheiros]
+    partes = await asyncio.gather(*(_processar_ficheiro_anexado(f) for f in ficheiros))
 
     mensagem_visivel = "\n".join(f"📎 {nome}" for nome in nomes) + (f"\n{mensagem}" if mensagem else "")
     mensagem_agente = ("\n\n---\n\n".join(partes) + "\n\n"
