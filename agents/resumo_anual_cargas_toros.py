@@ -19,19 +19,30 @@ qualidade de cargas de toros guardadas ao longo do ano, para o projeto
 Ecos Largos no Basecamp.
 
 Regras deste documento:
-- Organiza por cliente — para cada cliente, um resumo dos pontos mais
-  importantes de todas as avaliações feitas às cargas dele durante o ano
-  (problemas recorrentes, se cumpriu ou não as regras do manual, e
+- Organiza por fornecedor — para cada fornecedor, um resumo dos pontos
+  mais importantes de todas as avaliações feitas às cargas dele durante o
+  ano (problemas recorrentes, se cumpriu ou não as regras do manual, e
   quaisquer padrões que valha a pena assinalar).
+- Cada avaliação individual tem, quando disponíveis, a data da carga, a
+  quantidade/peso e o número do talão — inclui-os quando ajudarem a
+  identificar a carga em concreto, não precisas de repetir todos em cada
+  frase.
 - Não te limites a listar as avaliações uma a uma tal como vieram — destaca
   o que é mais relevante para quem for ler isto o ano todo depois.
 - Usa markdown (títulos, negrito, listas) — vai ser convertido em
   formatação real no Basecamp.
-- Termina com um resumo geral do ano (total de cargas avaliadas, clientes
-  envolvidos, e qualquer tendência notável)."""
+- Termina com um resumo geral do ano (total de cargas avaliadas,
+  fornecedores envolvidos, e qualquer tendência notável)."""
 
 def _gerar_documento(ano: int, avaliacoes: list) -> str:
-    linhas = [f"- Cliente: {a['cliente']} | Data: {a['data']} | Resumo: {a['resumo']}" for a in avaliacoes]
+    def _linha(a):
+        detalhes = ", ".join(f"{campo}: {a[chave]}" for campo, chave in
+                             (("quantidade", "quantidade"), ("data", "data_carga"), ("talão", "talao"))
+                             if a.get(chave))
+        detalhes_txt = f" ({detalhes})" if detalhes else ""
+        return f"- Fornecedor: {a['fornecedor']}{detalhes_txt} | Avaliação: {a['avaliacao']}"
+
+    linhas = [_linha(a) for a in avaliacoes]
     conteudo = (f"Avaliações de cargas de toros guardadas em {ano} ({len(avaliacoes)} no total):\n\n"
                 + "\n".join(linhas))
     resposta = client.messages.create(
