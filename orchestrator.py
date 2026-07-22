@@ -122,7 +122,20 @@ def encaminhar(pergunta: str, utilizador: str, tem_anexos: bool = False) -> str:
 
     Há quem trabalhe com as duas equipas ao mesmo tempo — para essas
     pessoas, pertencer à Ecos Largos não pode significar perder o acesso à
-    Interior Guider (nem o inverso): decide-se então pela própria pergunta."""
+    Interior Guider (nem o inverso): decide-se então pela própria pergunta.
+
+    Bug real (Beatriz, 2026-07-22): o perfil dela tem 'empresa' =
+    "interior_guider", por isso uma pergunta sobre o histórico de
+    avaliações de cargas de toros ia direta a _escolher_agente_interior_
+    guider, que nem sabe que a Ecos Largos existe — nunca chegava a
+    _pergunta_sobre_avaliacoes_cargas (essa verificação vivia só dentro de
+    escolher_agente_ecos_largos, tarde demais). Pedido explícito do Rui:
+    qualquer utilizador, a qualquer momento, tem de conseguir consultar
+    isto — por isso esta deteção acontece aqui, antes de qualquer decisão
+    por empresa."""
+    if _pergunta_sobre_avaliacoes_cargas(pergunta):
+        return escolher_agente_ecos_largos(pergunta, tem_anexos=tem_anexos)
+
     empresa = None
     try:
         perfil = db.obter_perfil(utilizador)
