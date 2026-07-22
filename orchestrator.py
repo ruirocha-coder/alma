@@ -18,18 +18,23 @@ AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder,
 AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream,
                   "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder_stream}
 
-_PALAVRAS_AVALIACAO = ("avalia",)  # cobre avalia/avaliação/avaliações/avaliar/avaliada(s)/avaliado(s)
+# cobre não só "avalia..." mas qualquer forma natural de pedir o histórico
+# já guardado — "regista o registo", "histórico", "resumo" — a Beatriz
+# pediu "dá-me o registo das cargas de toros hoje", sem a palavra
+# "avalia" nenhuma, e isso tem de chegar ao mesmo sítio.
+_PALAVRAS_AVALIACAO = ("avalia", "registo", "registos", "histórico", "historico", "resumo")
 _PALAVRAS_CARGA_TOROS = ("carga", "toros", "fornecedor", "talão", "talao", "talões", "taloes")
 
 def _pergunta_sobre_avaliacoes_cargas(pergunta: str) -> bool:
     """Deteta perguntas sobre o histórico de avaliações de cargas de toros
     já feitas (ex: "quantas cargas foram avaliadas este ano", "resume as
-    avaliações do fornecedor X") — pedido explícito do Rui para que
-    qualquer pessoa da equipa consiga consultar isto a qualquer momento,
-    mesmo sem foto anexada (nesse caso a decisão já é sempre determinística
-    por tem_anexos). Sem uma foto, quem pergunta pode facilmente não usar a
-    palavra "qualidade" (o que o classificador por Haiku procura), e
-    confiar só nessa classificação já falhou antes com frases curtas."""
+    avaliações do fornecedor X", "dá-me o registo das cargas de toros
+    hoje") — pedido explícito do Rui para que qualquer pessoa da equipa
+    consiga consultar isto a qualquer momento, mesmo sem foto anexada
+    (nesse caso a decisão já é sempre determinística por tem_anexos). Sem
+    uma foto, quem pergunta pode facilmente não usar a palavra "qualidade"
+    nem "avalia" (o que o classificador por Haiku procura), e confiar só
+    nessa classificação já falhou antes com frases curtas."""
     termo = pergunta.lower()
     return (any(p in termo for p in _PALAVRAS_AVALIACAO)
             and any(p in termo for p in _PALAVRAS_CARGA_TOROS))
