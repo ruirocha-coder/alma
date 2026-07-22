@@ -235,18 +235,31 @@ def ler_manual_qualidade_cargas_toros() -> dict:
         if time.time() - ts < TTL_MANUAL_QUALIDADE_TOROS:
             return resultado_em_cache
 
-    candidatos = [
-        item for item in documentos_empresa._listar_bruto()
-        if "ecos q" in _normalizar_titulo(item["titulo"])
-        or ("regras" in _normalizar_titulo(item["titulo"])
-            and "analise" in _normalizar_titulo(item["titulo"])
-            and "carga" in _normalizar_titulo(item["titulo"]))
-    ]
-    da_ecos_largos = [c for c in candidatos if "ecos largos" in (c.get("projeto") or "").lower()]
-    candidatos = da_ecos_largos or candidatos
+    def _candidatos(itens):
+        encontrados = [
+            item for item in itens
+            if "ecos q" in _normalizar_titulo(item["titulo"])
+            or ("regras" in _normalizar_titulo(item["titulo"])
+                and "analise" in _normalizar_titulo(item["titulo"])
+                and "carga" in _normalizar_titulo(item["titulo"]))
+        ]
+        da_ecos_largos = [c for c in encontrados if "ecos largos" in (c.get("projeto") or "").lower()]
+        return da_ecos_largos or encontrados
+
+    candidatos = _candidatos(documentos_empresa._listar_bruto())
     if not candidatos:
-        return {"erro": "não encontrei o documento \"Ecos-Q - Regras de Análise de Cargas\" — "
-                         "confirma se o título ainda é esse no projeto Ecos Largos"}
+        # a lista de documentos fica em cache até 15 min (ver TTL em
+        # documentos_empresa) — antes de desistir, tenta uma vez com a
+        # lista mesmo atual, para não falhar só por causa de uma cache
+        # desatualizada (documento criado/renomeado/partilhado há pouco).
+        itens_frescos = documentos_empresa._listar_bruto(forcar=True)
+        candidatos = _candidatos(itens_frescos)
+        if not candidatos:
+            print(f"[ecos_largos] manual não encontrado entre {len(itens_frescos)} "
+                  "documentos/ficheiros visíveis à conta da Alma")
+            return {"erro": "não encontrei o documento \"Ecos-Q - Regras de Análise de Cargas\" — "
+                             "confirma se o título ainda é esse no projeto Ecos Largos, e se está "
+                             "partilhado com a conta da Alma no Basecamp"}
     item = candidatos[0]
     conteudo = documentos_empresa._ler_conteudo(item)
     if not conteudo:

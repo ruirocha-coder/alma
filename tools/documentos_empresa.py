@@ -75,8 +75,13 @@ def _extrair_email(bruto: bytes) -> str:
             texto_corpo = _texto_simples(texto_corpo)
     return ("\n".join(cabecalho) + "\n\n" + texto_corpo.strip()).strip()
 
-def _listar_bruto() -> list[dict]:
-    if "lista" in _cache:
+def _listar_bruto(forcar: bool = False) -> list[dict]:
+    """`forcar=True` ignora a cache e vai sempre buscar a lista atual ao
+    Basecamp — usado quando quem procura um documento específico não o
+    encontra na lista em cache, para não desistir com base numa lista que
+    pode estar até 15 minutos desatualizada (ex: documento criado/
+    renomeado/partilhado há pouco)."""
+    if not forcar and "lista" in _cache:
         ts, lista = _cache["lista"]
         if time.time() - ts < TTL:
             return lista
