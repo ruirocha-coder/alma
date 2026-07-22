@@ -3,14 +3,16 @@ load_dotenv()
 
 import asyncio, base64, json, os
 import threading
+from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
-                sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
+                sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
+                obter_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros)
@@ -360,6 +362,27 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
                                      else "O que achas destes ficheiros?"))
                        + "\n\n" + "\n\n---\n\n".join(partes))
     return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel)
+
+@app.get("/documentos-gerados/{id}")
+def documento_gerado(id: int):
+    """Serve um PDF gerado pela Alma (ver tools/documentos_gerados.gerar_pdf)
+    — o link que ela partilha na conversa aponta para aqui. Guardado em
+    Postgres, não em disco (o Railway não persiste ficheiros locais entre
+    deploys), por isso o link continua válido mesmo depois de um deploy."""
+    documento = obter_documento_gerado(id)
+    if not documento:
+        raise HTTPException(status_code=404, detail="documento não encontrado")
+    # um título com acentos (normal em português) não é um valor de header
+    # HTTP válido tal e qual — precisa do formato filename*= (RFC 6266),
+    # com uma reserva em ASCII simples para browsers/clientes antigos
+    titulo = documento["titulo"]
+    nome_ascii = titulo.encode("ascii", errors="ignore").decode().strip() or "documento"
+    nome_utf8 = quote(f"{titulo}.pdf")
+    return Response(
+        content=documento["pdf"], media_type="application/pdf",
+        headers={"Content-Disposition":
+                f'inline; filename="{nome_ascii}.pdf"; filename*=UTF-8\'\'{nome_utf8}'}
+    )
 
 @app.get("/health")
 def health():

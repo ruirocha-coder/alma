@@ -11,3 +11,5 @@ python-docx
 pymupdf
 Pillow
 python-multipart
+markdown
+xhtml2pdf

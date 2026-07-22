@@ -1,5 +1,5 @@
 import anthropic, json, threading
-from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos
+from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos, documentos_gerados
 import db
 
 # entre rondas de tool-use (ex: a consultar o Basecamp, que pode demorar
@@ -7,6 +7,14 @@ import db
 # transmitir — sem isto, a consola ficava sem sinal de que a Alma continua a
 # tratar do pedido durante esse tempo.
 _INTERVALO_SINAL_DE_VIDA = 8
+
+# 2000 tokens (~1500 palavras) cortava respostas longas a meio — insuficiente
+# para um documento formal ou uma resposta corrida bem desenvolvida. 8192 é o
+# limite de saída sem precisar de flags beta especiais; para um documento de
+# várias dezenas de páginas (dezenas de milhares de palavras) isto ainda não
+# chega numa única resposta — usa gerar_pdf com o conteúdo que couber, e se
+# for pedido para continuar/expandir, gera mais conteúdo a seguir.
+MAX_TOKENS_RESPOSTA = 8192
 
 client = anthropic.Anthropic()
 
@@ -35,6 +43,7 @@ FUNCOES = {
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
     "guardar_avaliacao_carga_toros": ecos_largos.guardar_avaliacao_carga_toros,
     "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
+    "gerar_pdf": documentos_gerados.gerar_pdf,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
@@ -154,7 +163,7 @@ def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> list:
 def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, projeto_mural: str):
     contexto = db.contexto_utilizador(utilizador)
     system = _system_com_cache(system_prompt, contexto)
-    tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL)
+    tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
@@ -183,7 +192,7 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
 
     while True:
         resposta = client.messages.create(
-            model=modelo, max_tokens=2000,
+            model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
             system=system, tools=tools_completas, messages=mensagens
         )
         if resposta.stop_reason != "tool_use":
@@ -209,7 +218,7 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utili
 
     while True:
         with client.messages.stream(
-            model=modelo, max_tokens=2000,
+            model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
             system=system, tools=tools_completas, messages=mensagens
         ) as stream:
             for texto in stream.text_stream:

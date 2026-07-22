@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
     ano INTEGER NOT NULL,           -- calculado em Python (ver tools/ecos_largos), nunca pelo modelo
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS documentos_gerados (
+    id SERIAL PRIMARY KEY,
+    titulo TEXT NOT NULL,
+    pdf BYTEA NOT NULL,             -- guardado em Postgres, não em disco (Railway não persiste disco entre deploys)
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
@@ -277,6 +284,24 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
                 "avaliacao": l["avaliacao"],
                 "registado_em": l["criado_em"].date().isoformat(),
             } for l in cur.fetchall()]
+
+def guardar_documento_gerado(titulo: str, pdf: bytes) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO documentos_gerados (titulo, pdf) VALUES (%s, %s) RETURNING id",
+                (titulo, pdf)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def obter_documento_gerado(id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT titulo, pdf FROM documentos_gerados WHERE id = %s", (id,))
+            linha = cur.fetchone()
+            return {"titulo": linha["titulo"], "pdf": bytes(linha["pdf"])} if linha else None
 
 def contexto_utilizador(utilizador: str) -> str:
     """Bloco de texto com perfil + memórias, para injetar no system prompt.
