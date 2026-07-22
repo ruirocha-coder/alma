@@ -68,10 +68,10 @@ MISSAO_BASECAMP_ECOS_LARGOS = ecos_largos_agent.MISSAO_ECOS_LARGOS + _REGRAS_MEN
 # decisão usada na consola, ver orchestrator.escolher_agente_ecos_largos.
 MISSAO_BASECAMP_QUALIDADE_TOROS = qualidade_toros_ecos_largos.MISSAO_QUALIDADE_TOROS + _REGRAS_MENCAO_BASECAMP
 
-def responder(utilizador: str, mensagens: list, projeto: str = "") -> str:
+def responder(utilizador: str, mensagens: list, projeto: str = "", tem_anexos: bool = False) -> str:
     if "ecos largos" in (projeto or "").lower():
         pergunta = mensagens[-1]["content"] if mensagens else ""
-        if escolher_agente_ecos_largos(pergunta) == "qualidade_toros_ecos_largos":
+        if escolher_agente_ecos_largos(pergunta, tem_anexos=tem_anexos) == "qualidade_toros_ecos_largos":
             return correr_agente(MISSAO_BASECAMP_QUALIDADE_TOROS, qualidade_toros_ecos_largos.TOOLS_QUALIDADE_TOROS,
                                  mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
         return correr_agente(MISSAO_BASECAMP_ECOS_LARGOS, ecos_largos_agent.TOOLS_ECOS_LARGOS,
@@ -86,6 +86,19 @@ def _texto_simples(html: str) -> str:
 
 def _menciona_alma(texto: str) -> bool:
     return re.search(r"\balma\b", texto, re.IGNORECASE) is not None
+
+_EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+def _tem_imagem_anexada(alvo_completo: dict, comentarios: list) -> bool:
+    """Se a tarefa/card ou algum dos comentários tem uma foto anexada — usa-
+    se para o encaminhamento (ver orchestrator.escolher_agente_ecos_largos)
+    nunca depender só da classificação por texto: uma menção com uma foto
+    anexada no projeto Ecos Largos é sempre um pedido de avaliação de
+    qualidade de uma carga de toros, mesmo com uma legenda curta/genérica."""
+    nomes = [a.get("filename") or "" for a in (alvo_completo.get("content_attachments") or [])]
+    for c in comentarios:
+        nomes.extend(c.get("anexos") or [])
+    return any(nome.lower().endswith(_EXTENSOES_IMAGEM) for nome in nomes)
 
 def processar_evento_webhook(payload: dict):
     """Reage a um evento de webhook do Basecamp (comentário criado, ou tarefa/card
@@ -202,7 +215,9 @@ pergunta nova — um erro anterior não significa que vai falhar sempre."""
     # usa, para o perfil e a memória serem partilhados entre os dois canais
     utilizador_basecamp = criador.get("name") or "Alguém do Basecamp"
     projeto = (recording.get("bucket") or {}).get("name") or ""
-    resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}], projeto=projeto)
+    tem_anexos = _tem_imagem_anexada(alvo_completo, comentarios)
+    resposta = responder(utilizador_basecamp, [{"role": "user", "content": contexto}],
+                        projeto=projeto, tem_anexos=tem_anexos)
     # garante que quem mencionou a Alma é sempre marcado a sério na resposta
     # — não depende de o modelo se lembrar de escrever "@Nome" (a instrução
     # de mencionar é só para OUTRAS pessoas, não para quem já a chamou), por
