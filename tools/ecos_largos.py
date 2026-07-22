@@ -333,12 +333,12 @@ def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> d
 TOOLS_AVALIACOES_CARGAS_TOROS = [
     {
         "name": "guardar_avaliacao_carga_toros",
-        "description": "Guarda o registo de uma avaliação de qualidade de uma carga de toros, associado ao ano corrente — usa isto sempre que terminares uma avaliação de qualidade de uma carga de toros, para ficar disponível em perguntas futuras e no resumo anual automático.",
+        "description": "Guarda o registo de uma avaliação de qualidade de uma carga de toros, associado ao ano corrente — usa isto SÓ DEPOIS de já teres escrito a avaliação detalhada completa (critério a critério, tabela do IGQC, classificação, recomendação) na tua resposta normal. Nunca chames isto antes de escreveres essa avaliação, e nunca uses o campo `avaliacao` abaixo como o único sítio onde a avaliação existe — é apenas um resumo para arquivo, a pessoa já viu a avaliação completa no teu texto.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "fornecedor": {"type": "string", "description": "nome do fornecedor a quem pertence esta carga — usa \"(fornecedor não identificado)\" se não for mencionado, nunca inventes um nome"},
-                "avaliacao": {"type": "string", "description": "os pontos mais importantes desta avaliação (o que foi avaliado, se cumpre as regras do manual e porquê)"},
+                "avaliacao": {"type": "string", "description": "resumo dos pontos mais importantes desta avaliação (o que foi avaliado, se cumpre as regras do manual e porquê) — um resumo para arquivo; a avaliação completa já deve ter sido escrita na tua resposta antes de chamares esta tool"},
                 "quantidade": {"type": "string", "description": "peso/quantidade da carga, se for mencionado"},
                 "data_carga": {"type": "string", "description": "data da carga, se for mencionada"},
                 "talao": {"type": "string", "description": "número do talão, se for mencionado"}
