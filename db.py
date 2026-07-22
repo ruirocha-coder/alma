@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS reunioes_em_curso (
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
+    id SERIAL PRIMARY KEY,
+    cliente TEXT NOT NULL,
+    resumo TEXT NOT NULL,
+    ano INTEGER NOT NULL,          -- calculado em Python (ver tools/ecos_largos), nunca pelo modelo
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
@@ -227,6 +235,26 @@ def factos_utilizador(utilizador: str, limite: int = 50) -> list[str]:
                 (utilizador, limite)
             )
             return [l["facto"] for l in cur.fetchall()]
+
+def guardar_avaliacao_carga_toros(cliente: str, resumo: str, ano: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO avaliacoes_cargas_toros (cliente, resumo, ano) VALUES (%s, %s, %s)",
+                (cliente, resumo, ano)
+            )
+        conn.commit()
+
+def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT cliente, resumo, criado_em FROM avaliacoes_cargas_toros
+                   WHERE ano = %s ORDER BY criado_em ASC""",
+                (ano,)
+            )
+            return [{"cliente": l["cliente"], "resumo": l["resumo"],
+                     "data": l["criado_em"].date().isoformat()} for l in cur.fetchall()]
 
 def contexto_utilizador(utilizador: str) -> str:
     """Bloco de texto com perfil + memórias, para injetar no system prompt.

@@ -5,6 +5,7 @@ import os, re, time
 from datetime import date, timedelta
 import httpx
 from tools import documentos_empresa
+import db
 
 # servidor próprio da equipa (fora do Basecamp) — configurável por env var
 # porque corre num endereço DuckDNS, que pode mudar sem precisar de deploy.
@@ -247,5 +248,72 @@ TOOLS_MANUAL_QUALIDADE_TOROS = [
         "name": "ler_manual_qualidade_cargas_toros",
         "description": "Lê o documento \"Manual Qualidade de Cargas - Toros\" (projeto Ecos Largos, Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
+    }
+]
+
+# pedido do Rui: guardar TODAS as avaliações de cargas de toros, resumidas
+# por cliente, ao longo do ano — para poderem ser consultadas a qualquer
+# momento (nesta ou em qualquer outra conversa, a memória não é por
+# sessão) e para servirem de base ao ficheiro/resumo gerado no fim do ano
+# (ver agents/resumo_anual_cargas_toros.py). O ano é sempre calculado aqui,
+# nunca pelo modelo — a mesma razão de sempre: datas não se confiam ao
+# modelo, ver tools/ecos_largos._resolver_data.
+def guardar_avaliacao_carga_toros(cliente: str, resumo: str) -> dict:
+    """Guarda um resumo da avaliação de qualidade de uma carga de toros,
+    associado a um cliente e ao ano corrente — fica disponível para
+    perguntas futuras (em qualquer conversa) sobre o histórico de
+    avaliações, e entra no resumo/ficheiro gerado automaticamente no fim
+    do ano. Usa isto sempre que terminares uma avaliação de qualidade de
+    uma carga de toros: `cliente` é o nome do cliente a quem pertence essa
+    carga (usa "(cliente não identificado)" se não for mencionado nem
+    ficar claro pelo contexto — não inventes um nome), `resumo` são os
+    pontos mais importantes da avaliação (o que foi avaliado, se cumpre ou
+    não as regras do manual, e porquê — direto, sem rodeios)."""
+    ano = date.today().year
+    db.guardar_avaliacao_carga_toros(cliente or "(cliente não identificado)", resumo, ano)
+    return {"guardado": True, "ano": ano}
+
+def resumo_avaliacoes_cargas_toros(ano: str = None, cliente: str = None) -> dict:
+    """Lê as avaliações de cargas de toros guardadas (ver
+    guardar_avaliacao_carga_toros) — usa isto sempre que perguntarem por um
+    resumo ou histórico das avaliações feitas (ex: "quantas cargas foram
+    avaliadas este ano", "resume as avaliações do cliente X", "o que
+    encontrámos nas cargas da empresa Y"). Por omissão devolve o ano
+    corrente; passa `ano` (ex: "2026") para outro ano. Passa `cliente`
+    para filtrar só as avaliações desse cliente (corresponde por termo
+    parcial, não é preciso o nome exato)."""
+    try:
+        ano_resolvido = int(ano) if ano else date.today().year
+    except (TypeError, ValueError):
+        return {"erro": f"não percebi o ano {ano!r} — usa um formato como \"2026\""}
+    avaliacoes = db.avaliacoes_cargas_toros_ano(ano_resolvido)
+    if cliente:
+        termo = cliente.strip().lower()
+        avaliacoes = [a for a in avaliacoes if termo in a["cliente"].lower()]
+    return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
+
+TOOLS_AVALIACOES_CARGAS_TOROS = [
+    {
+        "name": "guardar_avaliacao_carga_toros",
+        "description": "Guarda um resumo da avaliação de qualidade de uma carga de toros, associado a um cliente e ao ano corrente — usa isto sempre que terminares uma avaliação de qualidade de uma carga de toros, para ficar disponível em perguntas futuras e no resumo anual automático.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cliente": {"type": "string", "description": "nome do cliente a quem pertence esta carga — usa \"(cliente não identificado)\" se não for mencionado, nunca inventes um nome"},
+                "resumo": {"type": "string", "description": "os pontos mais importantes desta avaliação (o que foi avaliado, se cumpre as regras do manual e porquê)"}
+            },
+            "required": ["cliente", "resumo"]
+        }
+    },
+    {
+        "name": "resumo_avaliacoes_cargas_toros",
+        "description": "Lê as avaliações de cargas de toros guardadas — usa isto sempre que perguntarem por um resumo/histórico das avaliações feitas ao longo do ano, no geral ou de um cliente em concreto.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ano": {"type": "string", "description": "ex: \"2026\" — omite para o ano corrente"},
+                "cliente": {"type": "string", "description": "filtra só as avaliações deste cliente — omite para todas"}
+            }
+        }
     }
 ]

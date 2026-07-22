@@ -568,6 +568,35 @@ def ler_mensagem_mural(url: str) -> dict:
         "comentarios": comentarios,
     }
 
+def _resolver_vault(projeto: str) -> tuple:
+    """Descobre o bucket_id e o id do Vault (Docs & Files) de um projeto
+    pelo nome — tal como _resolver_mural, mas para o Vault em vez do
+    Mural. Usado para criar um documento novo e permanente num projeto
+    (ex: o resumo anual de avaliações de cargas de toros da Ecos Largos)."""
+    termo = projeto.lower().strip()
+    for p in listar_projetos():
+        if termo not in p["name"].lower():
+            continue
+        for ferramenta in p.get("dock", []):
+            if ferramenta.get("name") == "vault" and ferramenta.get("enabled"):
+                return p["id"], ferramenta["id"]
+        raise ValueError(f"o projeto {p['name']!r} não tem Docs & Files (vault) ativado")
+    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+
+def criar_documento(titulo: str, conteudo: str, projeto: str) -> dict:
+    """Cria um novo Documento no Vault (Docs & Files) de um projeto do
+    Basecamp — para um registo permanente e organizado (ex: o resumo
+    anual de avaliações de cargas de toros), não para comentar numa
+    tarefa/card existente (usa comentar) nem para publicar no Mural (usa
+    publicar_mural)."""
+    bucket_id, vault_id = _resolver_vault(projeto)
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/vaults/{vault_id}/documents.json",
+                   headers=_headers(),
+                   json={"title": titulo, "content": _markdown_para_basecamp(conteudo), "status": "active"},
+                   timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 def _get_bytes(url: str) -> bytes:
     """Descarrega um ficheiro anexado (Upload) — usa a mesma autenticação da API."""
     r = httpx.get(url, headers=_headers(), timeout=30, follow_redirects=True)

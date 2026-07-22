@@ -33,6 +33,8 @@ FUNCOES = {
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
     "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
+    "guardar_avaliacao_carga_toros": ecos_largos.guardar_avaliacao_carga_toros,
+    "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
