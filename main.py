@@ -83,11 +83,18 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
 def alma(p: Pedido):
     return _responder_e_guardar(p.utilizador, p.sessao, p.mensagem)
 
-def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None):
+def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None,
+                           tem_anexos: bool = False):
     """Generator SSE: transmite a resposta do agente à medida que o modelo a
     gera (rondas de tool-use são resolvidas em silêncio antes disso — só o
     texto final visível é transmitido), e no fim guarda a troca completa no
-    histórico, tal como _responder_e_guardar faz na versão não-streaming."""
+    histórico, tal como _responder_e_guardar faz na versão não-streaming.
+
+    `tem_anexos`: ver orchestrator.escolher_agente_ecos_largos — usado
+    também aqui (não só na versão não-streaming) porque uma avaliação de
+    carga com fotos passou a vir sempre por este caminho (ver
+    alma_com_ficheiro), para beneficiar do sinal de vida durante chamadas
+    a ferramentas demoradas (ex: ler o manual, consultar o Basecamp)."""
     mensagens = historico_sessao(sessao, utilizador)
     mensagens.append({"role": "user", "content": mensagem_agente})
 
@@ -96,7 +103,7 @@ def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, m
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500], utilizador)
+            agente = encaminhar(mensagem_agente[:500], utilizador, tem_anexos=tem_anexos)
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
@@ -356,11 +363,16 @@ def _e_imagem(ficheiro: UploadFile) -> bool:
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
                             mensagem: str = Form(""), ficheiros: list[UploadFile] = File(...)):
     """Recebe um ou mais ficheiros anexados na consola de chat (PDF, Word,
-    imagem, texto) e responde com o seu conteúdo já disponível ao agente.
-    Cada ficheiro é lido em paralelo com os outros (nunca um de cada vez) —
-    um demasiado grande ou de um tipo não suportado não impede os outros de
-    serem lidos, só fica assinalado para o agente saber que não conseguiu
-    ler esse em concreto."""
+    imagem, texto) e responde com o seu conteúdo já disponível ao agente,
+    por SSE (tal como /alma/stream) — não em bloco. Uma avaliação de carga
+    (fotos + leitura do manual + Basecamp) pode demorar bastante mais do
+    que um pedido de texto simples; sem o sinal de vida periódico da versão
+    em stream, um pedido destes já ultrapassou o limite de um proxy
+    intermediário e voltou "Erro ao contactar a Alma: 502" antes de a Alma
+    sequer ter acabado de responder. Cada ficheiro é lido em paralelo com
+    os outros (nunca um de cada vez) — um demasiado grande ou de um tipo
+    não suportado não impede os outros de serem lidos, só fica assinalado
+    para o agente saber que não conseguiu ler esse em concreto."""
     nomes = [ficheiro.filename for ficheiro in ficheiros]
     tem_imagem = any(_e_imagem(f) for f in ficheiros)
     partes = await asyncio.gather(*(_processar_ficheiro_anexado(f) for f in ficheiros))
@@ -383,7 +395,11 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
     # e determinístico de pedido de avaliação, não vale a pena arriscar a
     # classificação por texto quando este sinal já existe (ver
     # orchestrator.escolher_agente_ecos_largos).
-    return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel, tem_anexos=tem_imagem)
+    return StreamingResponse(
+        _fluxo_resposta_agente(utilizador, sessao, mensagem_agente, mensagem_visivel, tem_anexos=tem_imagem),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 @app.get("/documentos-gerados/{id}")
 def documento_gerado(id: int):
