@@ -220,13 +220,15 @@ def _normalizar_titulo(titulo: str) -> str:
     return re.sub(r"\s+", " ", sem_acentos.lower().replace("-", " ")).strip()
 
 def ler_manual_qualidade_cargas_toros() -> dict:
-    """Lê o documento "Ecos-Q - Regras de Análise de Cargas" (projeto Ecos
-    Largos, no Basecamp) — as regras oficiais de qualidade para avaliar
-    cargas de toros. Nome real confirmado pela Isa (2026-07-22) — a busca
-    andou anos à procura de um título diferente ("Manual Qualidade de
-    Cargas - Toros", que nunca existiu com esse nome exato), por isso
-    nunca encontrava mesmo o documento, e a Alma acabava sempre a avaliar
-    sem seguir nenhuma regra real. Prefere o resultado cujo projeto seja
+    """Lê o documento "Manual Qualidade de Cargas - Toros" (projeto Ecos
+    Largos, em Documentos, no Basecamp — título exato confirmado
+    diretamente pelo Rui em 2026-07-22, letra por letra) — as regras
+    oficiais de qualidade para avaliar cargas de toros. Nota de histórico:
+    esteve temporariamente a apontar para um título diferente ("Ecos-Q -
+    Regras de Análise de Cargas"), com base numa informação que se veio a
+    confirmar incorreta — a correspondência por título aceita agora ambos
+    os nomes (mais "regras"+"análise"+"carga"), para tolerar futuras
+    variações sem repetir este erro. Prefere o resultado cujo projeto seja
     mesmo "Ecos Largos" (evita confundir com um documento homónimo noutro
     projeto, se algum dia existir), mas não bloqueia se o campo de
     projeto não bater certo."""
@@ -238,7 +240,9 @@ def ler_manual_qualidade_cargas_toros() -> dict:
     def _candidatos(itens):
         encontrados = [
             item for item in itens
-            if "ecos q" in _normalizar_titulo(item["titulo"])
+            if ("qualidade" in _normalizar_titulo(item["titulo"])
+                and "toros" in _normalizar_titulo(item["titulo"]))
+            or "ecos q" in _normalizar_titulo(item["titulo"])
             or ("regras" in _normalizar_titulo(item["titulo"])
                 and "analise" in _normalizar_titulo(item["titulo"])
                 and "carga" in _normalizar_titulo(item["titulo"]))
@@ -257,7 +261,7 @@ def ler_manual_qualidade_cargas_toros() -> dict:
         if not candidatos:
             print(f"[ecos_largos] manual não encontrado entre {len(itens_frescos)} "
                   "documentos/ficheiros visíveis à conta da Alma")
-            return {"erro": "não encontrei o documento \"Ecos-Q - Regras de Análise de Cargas\" — "
+            return {"erro": "não encontrei o documento \"Manual Qualidade de Cargas - Toros\" — "
                              "confirma se o título ainda é esse no projeto Ecos Largos, e se está "
                              "partilhado com a conta da Alma no Basecamp"}
     item = candidatos[0]
@@ -273,7 +277,7 @@ def ler_manual_qualidade_cargas_toros() -> dict:
 TOOLS_MANUAL_QUALIDADE_TOROS = [
     {
         "name": "ler_manual_qualidade_cargas_toros",
-        "description": "Lê o documento \"Ecos-Q - Regras de Análise de Cargas\" (projeto Ecos Largos, Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
+        "description": "Lê o documento \"Manual Qualidade de Cargas - Toros\" (projeto Ecos Largos, em Documentos, no Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     }
 ]

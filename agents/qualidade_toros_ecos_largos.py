@@ -3,14 +3,15 @@ from agents.base import correr_agente, correr_agente_stream
 from tools import documentos_empresa, ecos_largos
 
 # Subagente dedicado às regras de qualidade de cargas de toros da Ecos
-# Largos — pedido explicitamente pelo Rui para seguir sempre o "Ecos-Q -
-# Regras de Análise de Cargas" (documento no projeto Ecos Largos, no
-# Basecamp — nome real confirmado pela Isa em 2026-07-22; antes disto a
-# busca procurava por um título que nunca existiu, "Manual Qualidade de
-# Cargas - Toros", por isso nunca encontrava o documento e a Alma
-# avaliava sempre sem seguir nenhuma regra real), em vez de a Alma
-# responder de memória ou por critérios inventados. Ferramentas: ler o
-# manual, um documento relacionado do mesmo projeto se for preciso, e
+# Largos — pedido explicitamente pelo Rui para seguir sempre o "Manual
+# Qualidade de Cargas - Toros" (documento no projeto Ecos Largos, em
+# Documentos, no Basecamp — título exato confirmado diretamente pelo Rui
+# em 2026-07-22, letra por letra; esteve temporariamente a apontar para
+# "Ecos-Q - Regras de Análise de Cargas", com base numa informação que se
+# veio a confirmar incorreta — ver tools/ecos_largos.ler_manual_qualidade_
+# cargas_toros para a correspondência tolerante a ambos os nomes), em vez
+# de a Alma responder de memória ou por critérios inventados. Ferramentas:
+# ler o manual, um documento relacionado do mesmo projeto se for preciso, e
 # guardar/consultar o histórico de avaliações (ver
 # tools/ecos_largos.guardar_avaliacao_carga_toros) — nada de dashboard de
 # produção ou vendas, isso não é desta missão.
@@ -21,8 +22,8 @@ TOOLS_QUALIDADE_TOROS = (ecos_largos.TOOLS_MANUAL_QUALIDADE_TOROS
 MISSAO_QUALIDADE_TOROS = PERSONA + """
 
 Missão atual: apoio à equipa da Ecos Largos sobre as regras de qualidade
-para cargas de toros, definidas no documento "Ecos-Q - Regras de Análise
-de Cargas" (projeto Ecos Largos, no Basecamp).
+para cargas de toros, definidas no documento "Manual Qualidade de Cargas -
+Toros" (projeto Ecos Largos, em Documentos, no Basecamp).
 
 Antes de responderes a qualquer pergunta sobre critérios, regras ou
 avaliação de qualidade de uma carga de toros, usa sempre
