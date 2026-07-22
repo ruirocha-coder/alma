@@ -21,7 +21,7 @@ AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.r
 def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
     """Dentro da Ecos Largos, decide entre o apoio geral (produção, tarefas/
     cards do projeto) e o subagente dedicado às regras de qualidade de
-    cargas de toros (documento "Ecos-Q - Regras de Análise de Cargas") —
+    cargas de toros (documento "Manual Qualidade de Cargas - Toros") —
     pedido explicitamente pelo Rui para não se misturar com o resto. Exposta (sem
     "_" no nome) porque agents/responder_basecamp.py também precisa desta
     mesma decisão para menções no Basecamp do projeto Ecos Largos.
@@ -40,10 +40,10 @@ def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
         model="claude-haiku-4-5-20251001", max_tokens=10,
         system="Esta pergunta é da equipa Ecos Largos. Classifica-a como "
                "'qualidade_toros' se for sobre regras, critérios ou avaliação "
-               "de qualidade de cargas de toros (o documento \"Ecos-Q - Regras "
-               "de Análise de Cargas\"), ou 'geral' para qualquer outra coisa "
-               "(produção, dashboard, tarefas/cards do Basecamp). Responde só "
-               "com uma das duas palavras.",
+               "de qualidade de cargas de toros (o documento \"Manual "
+               "Qualidade de Cargas - Toros\"), ou 'geral' para qualquer "
+               "outra coisa (produção, dashboard, tarefas/cards do "
+               "Basecamp). Responde só com uma das duas palavras.",
         messages=[{"role": "user", "content": pergunta}]
     )
     escolha = r.content[0].text.strip().lower()
