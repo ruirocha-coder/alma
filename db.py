@@ -113,6 +113,32 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS talao TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
 """
 
+# bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
+# produção foi criada há muito com o esquema antigo (cliente/resumo,
+# ambas colunas NOT NULL) — as migrações acima só ACRESCENTARAM colunas
+# novas, nunca mexeram nas antigas. Como o INSERT atual (ver
+# guardar_avaliacao_carga_toros) nunca preenche "cliente" nem "resumo",
+# TODAS as gravações têm falhado desde essa mudança de esquema, sempre
+# com NotNullViolation — silenciosamente, do ponto de vista de quem
+# pergunta (o erro só aparecia nos logs). "ALTER COLUMN ... DROP NOT
+# NULL" não tem uma forma "IF EXISTS" direta, e instalações novas (via
+# CREATE TABLE acima) nunca chegam a ter estas colunas — por isso o bloco
+# verifica primeiro se a coluna existe, para ser seguro correr sempre,
+# em qualquer ambiente.
+MIGRACAO_CLIENTE_RESUMO_NULAVEL = """
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'avaliacoes_cargas_toros' AND column_name = 'cliente') THEN
+        ALTER TABLE avaliacoes_cargas_toros ALTER COLUMN cliente DROP NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'avaliacoes_cargas_toros' AND column_name = 'resumo') THEN
+        ALTER TABLE avaliacoes_cargas_toros ALTER COLUMN resumo DROP NOT NULL;
+    END IF;
+END $$;
+"""
+
 def get_conn():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -121,6 +147,7 @@ def inicializar_schema():
         with conn.cursor() as cur:
             cur.execute(SCHEMA)
             cur.execute(MIGRACOES)
+            cur.execute(MIGRACAO_CLIENTE_RESUMO_NULAVEL)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
