@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
-                obter_documento_gerado)
+                obter_documento_gerado, avaliacoes_cargas_toros_ano)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas)
@@ -542,6 +542,18 @@ def diagnostico_manual_qualidade_toros():
         "candidatos_com_termo_parecido": candidatos_parecidos,
         "resultado_ler_manual_qualidade_cargas_toros": resultado_leitura,
     }
+
+@app.get("/ecos-largos/diagnostico-avaliacoes")
+def diagnostico_avaliacoes_cargas_toros(ano: int = None):
+    """Diagnóstico: lê diretamente da base de dados as avaliações de cargas
+    de toros guardadas (sem passar pela Alma) — usado para confirmar, com
+    dados reais, se as gravações estão mesmo a acontecer, sem depender do
+    que a Alma diz na conversa (ela pode dizer "guardado" mesmo quando uma
+    gravação falhou, ou o inverso). Por omissão usa o ano corrente."""
+    from datetime import date
+    ano_resolvido = ano or date.today().year
+    avaliacoes = avaliacoes_cargas_toros_ano(ano_resolvido)
+    return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
 
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():

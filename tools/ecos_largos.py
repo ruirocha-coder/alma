@@ -306,9 +306,19 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     (número do talão) ficam de fora se não forem mencionados — não
     inventes valores para eles."""
     ano = date.today().year
+    # coerção defensiva: o schema da tool já pede strings, mas o modelo por
+    # vezes devolve um número (ex: quantidade=11850) — psycopg não converte
+    # isso sozinho para a coluna TEXT, e a inserção falhava silenciosamente
+    # do ponto de vista de quem pergunta (o erro ficava só nos logs do
+    # Railway, e a Alma continuava a dizer "guardado" até à correção da
+    # missão que proíbe essa alegação falsa).
     db.guardar_avaliacao_carga_toros(
-        fornecedor or "(fornecedor não identificado)", avaliacao, ano,
-        quantidade=quantidade, data_carga=data_carga, talao=talao)
+        str(fornecedor) if fornecedor else "(fornecedor não identificado)",
+        str(avaliacao), ano,
+        quantidade=str(quantidade) if quantidade is not None else None,
+        data_carga=str(data_carga) if data_carga is not None else None,
+        talao=str(talao) if talao is not None else None)
+    print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano}")
     return {"guardado": True, "ano": ano}
 
 def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> dict:
