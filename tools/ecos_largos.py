@@ -1,7 +1,7 @@
 # tools/ecos_largos.py — recursos próprios da equipa Ecos Largos, uma
 # equipa industrial parceira gerida no mesmo Basecamp mas com o seu próprio
 # projeto, à parte da Interior Guider.
-import os, re, time
+import os, re, time, unicodedata
 from datetime import date, timedelta
 import httpx
 from tools import documentos_empresa
@@ -212,13 +212,24 @@ TOOLS_DASHBOARD_PRODUCAO = [
 _CACHE_MANUAL_QUALIDADE_TOROS = {}  # {"conteudo": (timestamp, dict)}
 TTL_MANUAL_QUALIDADE_TOROS = 900  # segundos
 
+def _normalizar_titulo(titulo: str) -> str:
+    """Minúsculas, sem acentos, sem hífens — para comparar títulos sem
+    depender de a equipa escrever sempre exatamente da mesma forma
+    ("Ecos-Q" vs "Ecos Q", "análise" vs "analise")."""
+    sem_acentos = unicodedata.normalize("NFKD", titulo).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", sem_acentos.lower().replace("-", " ")).strip()
+
 def ler_manual_qualidade_cargas_toros() -> dict:
-    """Lê o documento "Manual Qualidade de Cargas - Toros" (projeto Ecos
+    """Lê o documento "Ecos-Q - Regras de Análise de Cargas" (projeto Ecos
     Largos, no Basecamp) — as regras oficiais de qualidade para avaliar
-    cargas de toros. Prefere o resultado cujo projeto seja mesmo "Ecos
-    Largos" (evita confundir com um documento homónimo noutro projeto, se
-    algum dia existir), mas não bloqueia se o campo de projeto não bater
-    certo — o título já é bastante específico por si só."""
+    cargas de toros. Nome real confirmado pela Isa (2026-07-22) — a busca
+    andou anos à procura de um título diferente ("Manual Qualidade de
+    Cargas - Toros", que nunca existiu com esse nome exato), por isso
+    nunca encontrava mesmo o documento, e a Alma acabava sempre a avaliar
+    sem seguir nenhuma regra real. Prefere o resultado cujo projeto seja
+    mesmo "Ecos Largos" (evita confundir com um documento homónimo noutro
+    projeto, se algum dia existir), mas não bloqueia se o campo de
+    projeto não bater certo."""
     if "conteudo" in _CACHE_MANUAL_QUALIDADE_TOROS:
         ts, resultado_em_cache = _CACHE_MANUAL_QUALIDADE_TOROS["conteudo"]
         if time.time() - ts < TTL_MANUAL_QUALIDADE_TOROS:
@@ -226,12 +237,15 @@ def ler_manual_qualidade_cargas_toros() -> dict:
 
     candidatos = [
         item for item in documentos_empresa._listar_bruto()
-        if "qualidade" in item["titulo"].lower() and "toros" in item["titulo"].lower()
+        if "ecos q" in _normalizar_titulo(item["titulo"])
+        or ("regras" in _normalizar_titulo(item["titulo"])
+            and "analise" in _normalizar_titulo(item["titulo"])
+            and "carga" in _normalizar_titulo(item["titulo"]))
     ]
     da_ecos_largos = [c for c in candidatos if "ecos largos" in (c.get("projeto") or "").lower()]
     candidatos = da_ecos_largos or candidatos
     if not candidatos:
-        return {"erro": "não encontrei o documento \"Manual Qualidade de Cargas - Toros\" — "
+        return {"erro": "não encontrei o documento \"Ecos-Q - Regras de Análise de Cargas\" — "
                          "confirma se o título ainda é esse no projeto Ecos Largos"}
     item = candidatos[0]
     conteudo = documentos_empresa._ler_conteudo(item)
@@ -246,7 +260,7 @@ def ler_manual_qualidade_cargas_toros() -> dict:
 TOOLS_MANUAL_QUALIDADE_TOROS = [
     {
         "name": "ler_manual_qualidade_cargas_toros",
-        "description": "Lê o documento \"Manual Qualidade de Cargas - Toros\" (projeto Ecos Largos, Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
+        "description": "Lê o documento \"Ecos-Q - Regras de Análise de Cargas\" (projeto Ecos Largos, Basecamp) — as regras oficiais de qualidade para avaliar cargas de toros. Usa isto SEMPRE antes de responderes a qualquer pergunta sobre critérios, regras ou avaliação de qualidade de uma carga de toros, antes de dizeres que não tens essa informação — nunca respondas de memória nem inventes critérios que não estejam no documento. Lê sempre o conteúdo todo devolvido, não só o início.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     }
 ]
