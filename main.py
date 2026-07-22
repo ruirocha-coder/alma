@@ -16,7 +16,7 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, logistica
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, logistica, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
 
@@ -499,6 +499,32 @@ def diagnostico_logistica_entregas():
         "campos_disponiveis": sorted(itens[0].keys()),
         "tem_on_hold_at": "on_hold_at" in itens[0],
         "exemplo": itens[0],
+    }
+
+@app.get("/ecos-largos/diagnostico-manual")
+def diagnostico_manual_qualidade_toros():
+    """Diagnóstico: mostra exatamente o que a conta da Alma vê no Basecamp
+    quando procura o manual de qualidade de cargas de toros — usado para
+    perceber, contra dados reais, porque é que a procura por vezes não
+    encontra o documento (título diferente do esperado? documento não
+    partilhado com a conta da Alma? projeto errado?), sem precisar de ir
+    aos logs do Railway. `lista_completa` (bruto, sem tentar casar com o
+    manual) vem sempre com forcar=True, para nunca mostrar uma lista em
+    cache desatualizada."""
+    lista_completa = documentos_empresa._listar_bruto(forcar=True)
+    candidatos_parecidos = [
+        {k: item.get(k) for k in ("id", "tipo", "titulo", "projeto", "pasta")}
+        for item in lista_completa
+        if any(termo in ecos_largos._normalizar_titulo(item["titulo"])
+               for termo in ("ecos", "toros", "carga", "qualidade", "regras", "analise"))
+    ]
+    resultado_leitura = ecos_largos.ler_manual_qualidade_cargas_toros()
+    if "conteudo" in resultado_leitura:
+        resultado_leitura = {**resultado_leitura, "conteudo": resultado_leitura["conteudo"][:500] + "..."}
+    return {
+        "total_documentos_e_ficheiros_visiveis": len(lista_completa),
+        "candidatos_com_termo_parecido": candidatos_parecidos,
+        "resultado_ler_manual_qualidade_cargas_toros": resultado_leitura,
     }
 
 @app.post("/logistica/monitorizar")
