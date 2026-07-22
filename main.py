@@ -12,7 +12,8 @@ from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
-                    resumo_semanal_basecamp, resumo_diario_ecos_largos)
+                    resumo_semanal_basecamp, resumo_diario_ecos_largos,
+                    resumo_anual_cargas_toros)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao
 from db import inicializar_schema
 inicializar_schema()
@@ -34,6 +35,11 @@ scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "c
 # limpeza do estado de reuniões persistido (rede de segurança contra um
 # reinício do servidor a meio de uma reunião) — todos os dias às 4h
 scheduler.add_job(reuniao.limpar_reunioes_antigas, "cron", hour=4, minute=0)
+# resumo anual das avaliações de cargas de toros (Ecos Largos): 31 de
+# dezembro às 22h — bastante antes da meia-noite, para "o ano corrente" no
+# momento em que corre ser sempre o ano que está mesmo a terminar
+scheduler.add_job(resumo_anual_cargas_toros.correr_resumo_anual_cargas_toros, "cron",
+                  month=12, day=31, hour=22, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
