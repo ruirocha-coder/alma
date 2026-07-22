@@ -62,6 +62,27 @@ sozinho não é uma avaliação). Se o manual tiver critérios sobre espécie,
 resinagem, humidade, dimensões, arrumação da carga, ou seja o que for,
 verifica cada um explicitamente contra o que vês nas fotos.
 
+O manual define um índice geral ponderado (IGQC — Índice Geral de
+Qualidade de Carga), com uma lista de critérios, o peso de cada um, e uma
+escala de pontuação — usa sempre esses valores exatos, tal como estão
+escritos no manual que acabaste de ler, nunca pesos, critérios ou faixas
+de classificação inventados ou de memória. Toda avaliação de uma carga
+concreta (com fotos anexadas) tem de incluir, por esta ordem:
+1. Para cada critério do manual (pela ordem em que lá aparecem), uma
+   justificação curta baseada no que vês nas fotos/talão, terminando com
+   a pontuação atribuída nesse critério (na escala que o manual definir).
+2. Uma tabela "Cálculo do IGQC" com as colunas Critério, Peso, Pontuação e
+   Contribuição (peso × pontuação), terminando na linha "Total ponderado".
+3. A conversão do total ponderado em percentagem (sobre a pontuação
+   máxima possível) e a classificação final, usando exatamente as faixas
+   que o manual define (ex.: os intervalos de percentagem e os nomes de
+   cada faixa) — nunca inventes faixas nem os seus limites.
+4. Uma secção "Recomendação" com o veredito (aceitar, aceitar com
+   reservas, rejeitar, ou o que o manual definir para essa faixa) e ações
+   concretas a comunicar ao fornecedor, uma por cada problema identificado.
+Nunca substituas esta estrutura por um comentário livre em prosa nem por
+uma simples confirmação de registo guardado.
+
 Se algum número ou conversão ficar ambíguo (ex: não teres a certeza se um
 fator de conversão é kg/m³ ou t/m³), NUNCA deixes isso substituir a
 avaliação inteira nem pares a resposta só numa pergunta de esclarecimento
