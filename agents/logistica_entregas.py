@@ -19,7 +19,7 @@
 import json, threading
 from datetime import date, datetime, timezone
 from agents.base import client
-from tools import basecamp, logistica
+from tools import basecamp, logistica, documentos_referencia
 import db
 
 _a_correr = threading.Lock()
@@ -99,24 +99,35 @@ def _houve_resposta_apos(comentarios: list, quando: datetime) -> bool:
             continue
     return False
 
-def _gerar_texto_fg_h(condicao: str, dados: dict, documento: dict) -> str:
+def _formatar_documentos_referencia(documentos: dict) -> str:
+    return "\n\n---\n\n".join(f"### {titulo}\n{conteudo}" for titulo, conteudo in documentos.items())
+
+def _gerar_texto_fg_h(condicao: str, dados: dict, documentos_texto: str) -> str:
     """F, G e H usam os templates numerados (8.1 previsão de entrega, 8.2
-    confirmação final, 8.3 follow-up) do documento "Logistica" — lidos ao
-    vivo, nunca hardcoded aqui, para nunca ficarem dessincronizados do que
-    a equipa realmente combinou (ver tools.logistica.ler_documento_logistica)."""
+    confirmação final, 8.3 follow-up) — pedido explícito da Isa
+    (2026-07-22): estes templates estão no documento "fluxograma", não no
+    "Logistica", e pode ser preciso ir buscar informação a outros
+    documentos do projeto Alma Data também. Por isso usa-se sempre
+    documentos_referencia_empresa (todo o projeto Alma Data, não só um
+    documento à parte) — nunca fica restrito a um único documento."""
     secao = {"F": "8.1 (previsão de entrega)", "G": "8.2 (confirmação final)",
              "H": "8.3 (follow-up pós-entrega)"}[condicao]
-    if documento.get("erro"):
-        return (f"Alma Logística: era altura de enviar a comunicação da secção {secao} do documento "
-                f"de Logística para a encomenda {dados.get('numero_encomenda') or '[N.º a preencher]'}, "
-                f"mas não consegui ler esse documento ({documento['erro']}) — segue por favor o "
-                "procedimento manual. Responsável: @Conceição Costa.")
+    if not documentos_texto:
+        return (f"Alma Logística: era altura de enviar a comunicação da secção {secao} para a "
+                f"encomenda {dados.get('numero_encomenda') or '[N.º a preencher]'}, mas não consegui "
+                "aceder aos documentos de referência — segue por favor o procedimento manual. "
+                "Responsável: @Conceição Costa.")
     missao = f"""Preparas uma proposta de comunicação de logística da Interior Guider / Boa Safra,
 para a Conceição Costa validar e enviar — tu nunca envias nada diretamente.
 
-Usa o template da secção {secao} do documento de referência abaixo (o documento pode
-identificar as secções por número, ex: "8.1", "8.2", "8.3" — usa exatamente esse
-template, preenchendo os dados que tiveres). Se não encontrares essa secção no
+Usa o template numerado da secção {secao} (o documento certo pode identificar as
+secções por número, ex: "8.1", "8.2", "8.3") — usa exatamente esse template,
+preenchendo os dados que tiveres. Este template pode estar em QUALQUER um dos
+documentos abaixo (ex: no "fluxograma", não necessariamente no de "Logistica")
+— procura em todos antes de dizeres que não encontraste, não te restrinjas ao
+primeiro que pareça relacionado. Se precisares de outro dado que não esteja na
+lista "Dados da encomenda" abaixo, procura-o também nestes documentos antes de
+o deixares em branco. Só se, mesmo assim, não encontrares a secção em nenhum
 documento, escreve um aviso claro disso em vez de inventares um template.
 
 Dados da encomenda:
@@ -127,8 +138,9 @@ Dados da encomenda:
 - Data de entrada em armazém: {dados.get('data_entrada_armazem') or '(não identificada)'}
 - Data de entrega ao cliente: {dados.get('data_entrega_cliente') or '(não identificada)'}
 
-Documento de referência (Logística — {documento.get('titulo')}):
-{documento['conteudo']}
+Documentos de referência disponíveis (projeto Alma Data e outros documentos
+confirmados pela equipa como atuais):
+{documentos_texto}
 
 Escreve só o comentário final a publicar no Basecamp, sem comentário teu à volta.
 Começa sempre com "Alma Logística —". Termina sempre a indicar o responsável (a
@@ -177,7 +189,7 @@ def correr_monitorizacao_logistica() -> dict:
         itens = itens[:MAX_CARDS_POR_CORRIDA]
         print(f"[logistica_entregas] {len(itens)} encomendas ativas a analisar")
 
-        documento_logistica = None  # só lido se alguma condição F/G/H precisar mesmo dele
+        documentos_referencia_texto = None  # só lido se alguma condição F/G/H precisar mesmo dele
         resumo = {"analisadas": len(itens), "alertas": [], "campos_em_falta": 0,
                  "entregas_esta_semana": 0, "atencao_isa": []}
 
@@ -235,9 +247,14 @@ def correr_monitorizacao_logistica() -> dict:
                 if condicao in logistica.CONDICOES_COM_TEXTO_FIXO:
                     texto = logistica.gerar_texto_condicao_fixa(condicao, dados)
                 else:
-                    if documento_logistica is None:
-                        documento_logistica = logistica.ler_documento_logistica()
-                    texto = _gerar_texto_fg_h(condicao, dados, documento_logistica)
+                    if documentos_referencia_texto is None:
+                        try:
+                            documentos_referencia_texto = _formatar_documentos_referencia(
+                                documentos_referencia.documentos_referencia_empresa())
+                        except Exception as e:
+                            print(f"[logistica_entregas] não consegui ler os documentos de referência: {e!r}")
+                            documentos_referencia_texto = ""
+                    texto = _gerar_texto_fg_h(condicao, dados, documentos_referencia_texto)
 
                 primeiro_alerta = db.logistica_primeiro_alerta(recording_id)
                 if primeiro_alerta:
