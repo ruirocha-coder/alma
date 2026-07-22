@@ -18,6 +18,22 @@ AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder,
 AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream,
                   "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder_stream}
 
+_PALAVRAS_AVALIACAO = ("avalia",)  # cobre avalia/avaliação/avaliações/avaliar/avaliada(s)/avaliado(s)
+_PALAVRAS_CARGA_TOROS = ("carga", "toros", "fornecedor", "talão", "talao", "talões", "taloes")
+
+def _pergunta_sobre_avaliacoes_cargas(pergunta: str) -> bool:
+    """Deteta perguntas sobre o histórico de avaliações de cargas de toros
+    já feitas (ex: "quantas cargas foram avaliadas este ano", "resume as
+    avaliações do fornecedor X") — pedido explícito do Rui para que
+    qualquer pessoa da equipa consiga consultar isto a qualquer momento,
+    mesmo sem foto anexada (nesse caso a decisão já é sempre determinística
+    por tem_anexos). Sem uma foto, quem pergunta pode facilmente não usar a
+    palavra "qualidade" (o que o classificador por Haiku procura), e
+    confiar só nessa classificação já falhou antes com frases curtas."""
+    termo = pergunta.lower()
+    return (any(p in termo for p in _PALAVRAS_AVALIACAO)
+            and any(p in termo for p in _PALAVRAS_CARGA_TOROS))
+
 def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
     """Dentro da Ecos Largos, decide entre o apoio geral (produção, tarefas/
     cards do projeto) e o subagente dedicado às regras de qualidade de
@@ -33,8 +49,10 @@ def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
     uso estabelecido para anexar ficheiros nesta equipa. Confiar só na
     classificação por texto falhava sempre que a legenda era curta ou
     genérica (ex: "analisa a carga", sem a palavra "qualidade"), mandando
-    o pedido para o agente geral, que nem conhece o manual."""
-    if tem_anexos:
+    o pedido para o agente geral, que nem conhece o manual. Ver também
+    _pergunta_sobre_avaliacoes_cargas, para o mesmo problema numa consulta
+    ao histórico de avaliações, sem foto anexada."""
+    if tem_anexos or _pergunta_sobre_avaliacoes_cargas(pergunta):
         return "qualidade_toros_ecos_largos"
     r = client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=10,
