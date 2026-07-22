@@ -18,13 +18,24 @@ AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder,
 AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream,
                   "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder_stream}
 
-def escolher_agente_ecos_largos(pergunta: str) -> str:
+def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
     """Dentro da Ecos Largos, decide entre o apoio geral (produção, tarefas/
     cards do projeto) e o subagente dedicado às regras de qualidade de
     cargas de toros (Manual Qualidade de Cargas - Toros) — pedido
     explicitamente pelo Rui para não se misturar com o resto. Exposta (sem
     "_" no nome) porque agents/responder_basecamp.py também precisa desta
-    mesma decisão para menções no Basecamp do projeto Ecos Largos."""
+    mesma decisão para menções no Basecamp do projeto Ecos Largos.
+
+    `tem_anexos`: a mensagem trouxe ficheiros/fotos anexados — nesse caso
+    salta a classificação por Haiku e vai sempre para o subagente de
+    qualidade. Enviar fotos (a carga de madeira, o talão) para a Ecos
+    Largos é sempre um pedido de avaliação de qualidade — não há outro
+    uso estabelecido para anexar ficheiros nesta equipa. Confiar só na
+    classificação por texto falhava sempre que a legenda era curta ou
+    genérica (ex: "analisa a carga", sem a palavra "qualidade"), mandando
+    o pedido para o agente geral, que nem conhece o manual."""
+    if tem_anexos:
+        return "qualidade_toros_ecos_largos"
     r = client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=10,
         system="Esta pergunta é da equipa Ecos Largos. Classifica-a como "
@@ -50,10 +61,15 @@ def _escolher_agente_interior_guider(pergunta: str) -> str:
     escolha = r.content[0].text.strip().lower()
     return escolha if escolha in AGENTES_INTERIOR_GUIDER else "ceo"  # fallback: CEO
 
-def _escolher_entre_empresas(pergunta: str) -> str:
+def _escolher_entre_empresas(pergunta: str, tem_anexos: bool = False) -> str:
     """Para quem trabalha com as duas equipas: decide pela própria pergunta,
     não só pela identidade, para nunca lhe negar acesso a nenhum dos dois
     lados."""
+    if tem_anexos:
+        # anexar ficheiros é sempre coisa da Ecos Largos (avaliação de
+        # cargas) nesta aplicação — não há um uso equivalente para a
+        # Interior Guider, por isso nem vale a pena perguntar ao Haiku.
+        return escolher_agente_ecos_largos(pergunta, tem_anexos=True)
     r = client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=10,
         system=("Esta pessoa trabalha tanto com a Interior Guider como com a Ecos Largos "
@@ -69,7 +85,7 @@ def _escolher_entre_empresas(pergunta: str) -> str:
         return escolher_agente_ecos_largos(pergunta)
     return _escolher_agente_interior_guider(pergunta)
 
-def encaminhar(pergunta: str, utilizador: str) -> str:
+def encaminhar(pergunta: str, utilizador: str, tem_anexos: bool = False) -> str:
     """Decide primeiro a EMPRESA (quem é a pessoa, não do que fala) — é o que
     faz a mesma consola e o mesmo link adaptarem-se sozinhos.
 
@@ -92,11 +108,11 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         print(f"[orchestrator] não consegui ler o perfil para saber a empresa: {e!r}")
 
     if empresa == "ecos_largos":
-        return escolher_agente_ecos_largos(pergunta)
+        return escolher_agente_ecos_largos(pergunta, tem_anexos=tem_anexos)
     if empresa == "interior_guider":
         return _escolher_agente_interior_guider(pergunta)
     if empresa == "ambas":
-        return _escolher_entre_empresas(pergunta)
+        return _escolher_entre_empresas(pergunta, tem_anexos=tem_anexos)
 
     # perfil sem 'empresa' definida — recorre à deteção pela equipa do
     # projeto no Basecamp (comportamento anterior a esta pergunta existir).
@@ -115,7 +131,7 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         eh_ecos_largos = False
 
     if not eh_ecos_largos:
-        return _escolher_entre_empresas(pergunta)
+        return _escolher_entre_empresas(pergunta, tem_anexos=tem_anexos)
 
     try:
         eh_tambem_interior_guider = basecamp.pertence_a_projeto(utilizador, "Gestão")
@@ -124,6 +140,6 @@ def encaminhar(pergunta: str, utilizador: str) -> str:
         eh_tambem_interior_guider = False
 
     if not eh_tambem_interior_guider:
-        return escolher_agente_ecos_largos(pergunta)
+        return escolher_agente_ecos_largos(pergunta, tem_anexos=tem_anexos)
 
-    return _escolher_entre_empresas(pergunta)
+    return _escolher_entre_empresas(pergunta, tem_anexos=tem_anexos)

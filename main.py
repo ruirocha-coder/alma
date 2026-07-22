@@ -51,11 +51,16 @@ class Pedido(BaseModel):
     sessao: str
     mensagem: str
 
-def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None):
+def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, mensagem_visivel: str = None,
+                         tem_anexos: bool = False):
     """Núcleo partilhado por /alma e /alma/ficheiro: o que é enviado ao agente
     (mensagem_agente) pode ser maior do que o que fica guardado no histórico
     (mensagem_visivel) — ex: um ficheiro anexado não deve inchar todas as
-    chamadas futuras à API com o texto extraído inteiro outra vez."""
+    chamadas futuras à API com o texto extraído inteiro outra vez.
+
+    `tem_anexos`: se esta mensagem trouxe ficheiros/fotos anexados — usado
+    para o encaminhamento nunca depender só da classificação por texto
+    (ver orchestrator.escolher_agente_ecos_largos)."""
     mensagens = historico_sessao(sessao, utilizador)   # memória por utilizador
     mensagens.append({"role": "user", "content": mensagem_agente})
 
@@ -64,7 +69,7 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
             resposta = acolhimento.responder(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500], utilizador)
+            agente = encaminhar(mensagem_agente[:500], utilizador, tem_anexos=tem_anexos)
             log_routing(mensagem_agente[:500], agente)
             resposta = AGENTES[agente](utilizador, mensagens)
     except Exception as e:
@@ -340,6 +345,13 @@ async def _processar_ficheiro_anexado(ficheiro: UploadFile) -> str:
                 f'{ficheiro.content_type or "(desconhecido)"}.')
     return f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}'
 
+_EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+def _e_imagem(ficheiro: UploadFile) -> bool:
+    if ficheiro.content_type and ficheiro.content_type.startswith("image/"):
+        return True
+    return (ficheiro.filename or "").lower().endswith(_EXTENSOES_IMAGEM)
+
 @app.post("/alma/ficheiro")
 async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...),
                             mensagem: str = Form(""), ficheiros: list[UploadFile] = File(...)):
@@ -350,6 +362,7 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
     serem lidos, só fica assinalado para o agente saber que não conseguiu
     ler esse em concreto."""
     nomes = [ficheiro.filename for ficheiro in ficheiros]
+    tem_imagem = any(_e_imagem(f) for f in ficheiros)
     partes = await asyncio.gather(*(_processar_ficheiro_anexado(f) for f in ficheiros))
 
     mensagem_visivel = "\n".join(f"📎 {nome}" for nome in nomes) + (f"\n{mensagem}" if mensagem else "")
@@ -363,7 +376,14 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
     mensagem_agente = ((mensagem or ("O que achas deste ficheiro?" if len(nomes) == 1
                                      else "O que achas destes ficheiros?"))
                        + "\n\n" + "\n\n---\n\n".join(partes))
-    return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel)
+    # mesmo com o pedido em primeiro lugar, uma legenda curta/genérica (ex:
+    # "analisa a carga", sem a palavra "qualidade") podia continuar a ser
+    # classificada como pergunta "geral" da Ecos Largos em vez de uma
+    # avaliação de qualidade — anexar uma foto é por si só um sinal forte
+    # e determinístico de pedido de avaliação, não vale a pena arriscar a
+    # classificação por texto quando este sinal já existe (ver
+    # orchestrator.escolher_agente_ecos_largos).
+    return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel, tem_anexos=tem_imagem)
 
 @app.get("/documentos-gerados/{id}")
 def documento_gerado(id: int):
