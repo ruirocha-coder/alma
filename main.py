@@ -15,8 +15,8 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
                 obter_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
-                    resumo_anual_cargas_toros)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao
+                    resumo_anual_cargas_toros, logistica_entregas)
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, logistica
 from db import inicializar_schema
 inicializar_schema()
 
@@ -42,6 +42,8 @@ scheduler.add_job(reuniao.limpar_reunioes_antigas, "cron", hour=4, minute=0)
 # momento em que corre ser sempre o ano que está mesmo a terminar
 scheduler.add_job(resumo_anual_cargas_toros.correr_resumo_anual_cargas_toros, "cron",
                   month=12, day=31, hour=22, minute=0)
+# monitorização de logística (projeto Entregas): todos os dias antes das 9h
+scheduler.add_job(logistica_entregas.correr_monitorizacao_logistica, "cron", hour=7, minute=30)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -458,6 +460,32 @@ def diagnostico_pessoas_basecamp(projeto: str = "Gestão"):
 def resumo_semanal_basecamp_agora():
     """Dispara já o resumo semanal de atividade no Mural, em segundo plano."""
     threading.Thread(target=resumo_semanal_basecamp.correr_resumo_semanal, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.get("/logistica/diagnostico")
+def diagnostico_logistica_entregas():
+    """Diagnóstico: mostra os campos brutos de um card ativo do projeto
+    "Entregas" — usado para confirmar, contra dados reais, o nome exato do
+    campo que diz se um card está "On Hold" (nunca verificado ao vivo até
+    agora, ver tools.logistica.esta_em_on_hold), sem precisar de ir aos
+    logs do Railway."""
+    itens = [i for i in basecamp._itens_ativos()
+            if i.get("type") == "Kanban::Card"
+            and logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
+    if not itens:
+        return {"aviso": "nenhum card ativo encontrado no projeto Entregas"}
+    return {
+        "total": len(itens),
+        "campos_disponiveis": sorted(itens[0].keys()),
+        "tem_on_hold_at": "on_hold_at" in itens[0],
+        "exemplo": itens[0],
+    }
+
+@app.post("/logistica/monitorizar")
+def monitorizar_logistica_agora():
+    """Dispara já a monitorização de logística (projeto Entregas), em
+    segundo plano — os resultados/erros ficam nos logs do servidor."""
+    threading.Thread(target=logistica_entregas.correr_monitorizacao_logistica, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/ecos-largos/resumo-diario")

@@ -1,0 +1,242 @@
+# tools/logistica.py — regras de negócio da equipa de Logística (projeto
+# "Entregas" no Basecamp), pedidas pela Isa Moreira/Conceição Costa. Só as
+# regras determinísticas ficam aqui (fases do fluxo, aritmética de datas,
+# textos fixos) — sem depender do cliente da Anthropic, para poderem ser
+# testadas isoladamente. A orquestração (ler cards, extrair dados via IA,
+# publicar comentários) vive em agents/logistica_entregas.py, tal como
+# agents/monitor_basecamp.py já faz para os atrasos gerais.
+import time
+from datetime import date, timedelta
+from tools import documentos_empresa
+
+PROJETO_ENTREGAS = "Entregas"
+
+# a coluna "Produção" (e variantes de escrita) significa que a encomenda
+# ainda está no fornecedor; as colunas por região são onde a encomenda
+# aguarda para ser entregue ao cliente — pedido explícito da Isa/Conceição
+# (2026-07-22): "quando os cards passam para On Hold [numa coluna de
+# região], significa que estão prontos a serem entregues"; assim que saem
+# de On Hold nessa coluna, já estão a ser entregues.
+COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outros"}
+
+def esta_em_on_hold(item_bruto: dict) -> bool:
+    """Se um card do Kanban está marcado como "On Hold" no Basecamp — este
+    campo nunca foi confirmado ao vivo contra a API real (nenhuma outra
+    parte desta aplicação precisou disto até agora), por isso aceita as
+    variantes de nome mais prováveis. Se nenhuma bater certo com os dados
+    reais da conta, isto precisa de ajuste depois de uma verificação ao
+    vivo (ver nota em agents/logistica_entregas.py)."""
+    return bool(item_bruto.get("on_hold_at") or item_bruto.get("on_hold"))
+
+def fase_encomenda(estado: str, on_hold: bool) -> str:
+    """Em que fase do fluxo de entrega está uma encomenda, a partir da
+    coluna do Kanban ("estado") e de estar ou não em "On Hold":
+    - "producao": ainda no fornecedor, à espera de chegar ao armazém.
+    - "pronto_entrega": já numa coluna de região e em On Hold — pronta a
+      ser entregue, é aqui que a chegada ao armazém se considera confirmada.
+    - "em_entrega": já numa coluna de região mas fora de On Hold — entrega
+      já em curso, não precisa de mais sugestões de logística.
+    - "outro": nenhuma das anteriores (ex: já concluído, ou outra coluna
+      fora deste fluxo)."""
+    coluna = (estado or "").strip().lower()
+    if "produ" in coluna:  # "Produção"/"Producao", tolera acentuação/maiúsculas
+        return "producao"
+    if coluna in COLUNAS_REGIAO_ENTREGA:
+        return "pronto_entrega" if on_hold else "em_entrega"
+    return "outro"
+
+def dias_uteis_entre(inicio: date, fim: date) -> int:
+    """Dias úteis (segunda a sexta) entre duas datas, sem contar o dia de
+    início — para "há mais de 3 dias úteis", que a equipa não trata da
+    mesma forma que dias corridos. Sempre calculado aqui, nunca pelo
+    modelo — a mesma razão de sempre: aritmética de datas é fácil de errar
+    e o Python calcula sempre certo."""
+    if fim <= inicio:
+        return 0
+    dias, atual = 0, inicio
+    while atual < fim:
+        atual += timedelta(days=1)
+        if atual.weekday() < 5:  # 0=segunda ... 4=sexta
+            dias += 1
+    return dias
+
+# --- limiares pedidos explicitamente pela Isa/Conceição (documento
+# "Logistica", projeto Alma Data) — ficam aqui como constantes de código,
+# não são recalculados pelo modelo em cada ciclo. ---
+DIAS_UTEIS_CAMPOS_EM_FALTA = 3
+PRESSAO_DIAS_ANTES_MIN = 6
+PRESSAO_DIAS_ANTES_MAX = 8
+HORAS_SEM_RESPOSTA_FORNECEDOR = 48
+HORAS_CONFIRMACAO_FINAL = 48
+FOLLOWUP_DIAS_MIN = 3
+FOLLOWUP_DIAS_MAX = 5
+DIAS_ENTREGA_SEM_FECHO = 7
+
+# janela de repetição de cada condição, em dias — quanto tempo depois de
+# um alerta a mesma condição pode voltar a disparar para o mesmo card.
+# F, G e H são passos únicos por encomenda (não fazem sentido repetir).
+JANELA_REPETICAO_DIAS = {"A": 7, "B": 7, "C": 999999, "D": 3, "E": 999999,
+                        "F": 999999, "G": 999999, "H": 999999, "I": 7}
+
+def avaliar_condicao(*, hoje: date, estado: str, on_hold: bool, criado_em: date,
+                     data_entrada_armazem: date = None, data_entrega_cliente: date = None,
+                     ja_alertado_recente: dict, horas_desde_alerta_b: float = None,
+                     pedido_email_atraso: bool = False):
+    """Devolve (condicao, variaveis) para a PRIMEIRA condição (A a I, pela
+    mesma ordem do documento) que se aplica agora a esta encomenda, ou
+    None se nenhuma se aplicar. `ja_alertado_recente` é um dict
+    {"A": bool, "B": bool, ...} já calculado pelo chamador (consultando a
+    janela de repetição própria de cada condição em db.py) —
+    esta função em si não sabe nada de base de dados, só de regras."""
+    fase = fase_encomenda(estado, on_hold)
+
+    # A — campos críticos em falta, encomenda já em curso há mais de 3 dias úteis
+    if ((data_entrada_armazem is None or data_entrega_cliente is None)
+            and fase in ("producao", "pronto_entrega", "em_entrega")
+            and dias_uteis_entre(criado_em, hoje) > DIAS_UTEIS_CAMPOS_EM_FALTA
+            and not ja_alertado_recente.get("A")):
+        return "A", {}
+
+    if fase == "producao" and data_entrada_armazem:
+        dias_para_entrada = (data_entrada_armazem - hoje).days
+
+        # B — pressão ao fornecedor, entre 8 e 6 dias antes da entrada em armazém
+        if (PRESSAO_DIAS_ANTES_MIN <= dias_para_entrada <= PRESSAO_DIAS_ANTES_MAX
+                and not ja_alertado_recente.get("B")):
+            return "B", {}
+
+        # C — sem resposta do fornecedor 48h depois do alerta B
+        if (horas_desde_alerta_b is not None and horas_desde_alerta_b >= HORAS_SEM_RESPOSTA_FORNECEDOR
+                and not ja_alertado_recente.get("C")):
+            return "C", {}
+
+        # D — data de entrada em armazém já passada (ainda em "produção" —
+        # se já tivesse chegado, o card já teria mudado de coluna/on hold)
+        if dias_para_entrada < 0 and not ja_alertado_recente.get("D"):
+            return "D", {}
+
+    # E — pediram uma proposta de email de atraso ao cliente (independente da fase)
+    if pedido_email_atraso and not ja_alertado_recente.get("E"):
+        return "E", {}
+
+    if fase == "pronto_entrega":
+        # F — chegada ao armazém confirmada (é o que "pronto_entrega" significa),
+        # falta combinar/comunicar a previsão de entrega ao cliente
+        if not ja_alertado_recente.get("F"):
+            return "F", {}
+
+        if data_entrega_cliente:
+            horas_para_entrega = (data_entrega_cliente - hoje).days * 24
+            # G — confirmação final, 48h ou menos antes da entrega ao cliente
+            if horas_para_entrega <= HORAS_CONFIRMACAO_FINAL and not ja_alertado_recente.get("G"):
+                return "G", {}
+
+    if data_entrega_cliente:
+        dias_desde_entrega = (hoje - data_entrega_cliente).days
+        # H — follow-up pós-entrega, 3 a 5 dias depois da entrega
+        if FOLLOWUP_DIAS_MIN <= dias_desde_entrega <= FOLLOWUP_DIAS_MAX and not ja_alertado_recente.get("H"):
+            return "H", {}
+        # I — entrega concluída há mais de 7 dias sem o card ter sido fechado
+        if dias_desde_entrega > DIAS_ENTREGA_SEM_FECHO and not ja_alertado_recente.get("I"):
+            return "I", {}
+
+    return None
+
+def _fmt_data(d: date) -> str:
+    return d.strftime("%d/%m/%Y") if d else None
+
+def _campo(valor, rotulo: str) -> str:
+    return valor if valor else f"[{rotulo} — por preencher]"
+
+# condições com o texto literal exatamente como pedido pela Isa/Conceição
+# (documento "Logistica") — geradas aqui em Python, não pelo modelo, para
+# nunca haver deriva na redação combinada com a equipa.
+CONDICOES_COM_TEXTO_FIXO = {"A", "B", "C", "D", "E", "I"}
+
+def gerar_texto_condicao_fixa(condicao: str, dados: dict) -> str:
+    """Texto do comentário para uma condição com redação fixa (A, B, C, D,
+    E, I) — ver CONDICOES_COM_TEXTO_FIXO. As condições F, G, H usam antes
+    os templates numerados (8.1/8.2/8.3) do documento "Logistica", lidos
+    em tempo real (ver agents/logistica_entregas.py) em vez de fixos aqui,
+    porque essa parte do documento não foi transcrita para este ficheiro."""
+    numero = _campo(dados.get("numero_encomenda"), "N.º da encomenda")
+    projeto_cliente = _campo(dados.get("cliente"), "nome do cliente/projeto")
+    fornecedor = _campo(dados.get("fornecedor"), "nome do fornecedor")
+    data_entrada = _campo(_fmt_data(dados.get("data_entrada_armazem")), "data de entrada em armazém")
+    data_entrega = _campo(_fmt_data(dados.get("data_entrega_cliente")), "data de entrega ao cliente")
+
+    if condicao == "A":
+        return ("Alma Logística: esta encomenda não tem data de entrada em armazém ou data de "
+                "entrega ao cliente registada. Por favor preenche estes campos para eu poder "
+                "monitorizar. CC: @Isa Moreira")
+
+    if condicao == "B":
+        data_entrada_dt = dados.get("data_entrada_armazem")
+        data_limite = _campo(_fmt_data(data_entrada_dt + timedelta(days=2)) if data_entrada_dt else None,
+                             "data limite de resposta")
+        return f"""Alma Logística — proposta de email ao fornecedor (para envio pela Conceição após validação):
+
+Assunto: Confirmação de expedição — Encomenda {numero} — {projeto_cliente}
+
+Exmo(a) Sr(a) {fornecedor}, gostaríamos de confirmar o estado da encomenda {numero}, com entrada em armazém prevista para {data_entrada}. Pedimos a indicação da data de expedição e, se possível, os dados de tracking/transportador. Agradecemos a confirmação até {data_limite}. Com os melhores cumprimentos, Conceição Costa | Interior Guider / Boa Safra.
+
+Responsável: @Conceição Costa — por favor valida e envia."""
+
+    if condicao == "C":
+        return ("Alma Logística: ainda não há registo de resposta do fornecedor ao email de "
+                "confirmação enviado há 48h. Sugere-se contacto telefónico. "
+                "CC: @Conceição Costa @Isa Moreira")
+
+    if condicao == "D":
+        return (f"Alma Logística: a data de entrada em armazém prevista ({data_entrada}) já passou "
+                "sem registo de confirmação. É necessário apurar o estado com o fornecedor e, se "
+                "houver atraso, comunicar ao cliente em menos de 24h. Proposta de email ao cliente "
+                "disponível a pedido. CC: @Conceição Costa @Isa Moreira")
+
+    if condicao == "E":
+        return f"""Alma Logística — proposta de email ao cliente (para envio após validação):
+
+Assunto: Atualização da sua encomenda {numero} — {projeto_cliente}
+
+Exmo(a) Sr(a) {_campo(dados.get('cliente'), 'nome do cliente')}, gostaríamos de o(a) informar que a entrega da sua encomenda sofreu um ajuste no prazo previsto. A nova data estimada de entrega é [nova data — por preencher]. [Se entrega parcial possível: temos disponibilidade para entregar as peças disponíveis na data inicialmente prevista, caso seja do seu interesse.] Lamentamos qualquer inconveniente e estamos à sua disposição. Com os melhores cumprimentos, [Conceição Costa / Isa Moreira] | Interior Guider / Boa Safra.
+
+Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche os campos em falta e envia."""
+
+    if condicao == "I":
+        return (f"Alma Logística: esta encomenda tem data de entrega passada há mais de 7 dias "
+                f"({data_entrega}) e o card ainda está em aberto. Por favor confirma se a entrega "
+                "foi concluída e fecha o card se sim. CC: @Conceição Costa @Isa Moreira")
+
+    raise ValueError(f"condição sem texto fixo definido: {condicao!r}")
+
+# --- documento "Logistica" (projeto Alma Data) — usado só para as
+# condições F/G/H (os templates numerados 8.1/8.2/8.3, não transcritos
+# para este ficheiro) e como referência geral. Mesma cache curta já usada
+# para o manual de qualidade de cargas de toros: reler e reprocessar um
+# documento em todo ciclo diário é desnecessário. ---
+_CACHE_DOCUMENTO_LOGISTICA = {}
+TTL_DOCUMENTO_LOGISTICA = 900
+
+def ler_documento_logistica() -> dict:
+    """Lê o documento de procedimentos de logística (título contém
+    "logistica"/"logística", projeto Alma Data no Basecamp) — usado pelas
+    condições F/G/H para encontrar os templates de email numerados
+    (8.1 previsão de entrega, 8.2 confirmação final, 8.3 follow-up)."""
+    if "conteudo" in _CACHE_DOCUMENTO_LOGISTICA:
+        ts, resultado = _CACHE_DOCUMENTO_LOGISTICA["conteudo"]
+        if time.time() - ts < TTL_DOCUMENTO_LOGISTICA:
+            return resultado
+
+    candidatos = [item for item in documentos_empresa._listar_bruto()
+                 if "logistic" in item["titulo"].lower() or "logístic" in item["titulo"].lower()]
+    if not candidatos:
+        return {"erro": "não encontrei o documento de logística — confirma o título no projeto Alma Data"}
+    item = candidatos[0]
+    conteudo = documentos_empresa._ler_conteudo(item)
+    if not conteudo:
+        return {"erro": "o documento de logística existe mas não consegui extrair texto legível dele",
+                "titulo": item["titulo"]}
+
+    resultado = {"titulo": item["titulo"], "conteudo": conteudo}
+    _CACHE_DOCUMENTO_LOGISTICA["conteudo"] = (time.time(), resultado)
+    return resultado

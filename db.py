@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS reunioes_em_curso (
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS logistica_alertas (
+    recording_id BIGINT NOT NULL,
+    condicao TEXT NOT NULL,        -- 'A'..'I', ver tools/logistica.py
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (recording_id, condicao)
+);
+
 CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
     id SERIAL PRIMARY KEY,
     fornecedor TEXT NOT NULL,
@@ -350,6 +357,60 @@ def registar_alerta(recording_id: int, prazo: str, comentario: str):
                        prazo = EXCLUDED.prazo, comentario = EXCLUDED.comentario,
                        criado_em = now()""",
                 (recording_id, prazo, comentario)
+            )
+        conn.commit()
+
+def logistica_ja_alertado_recente(recording_id: int, condicao: str, dias: int) -> bool:
+    """Se já foi publicado um alerta desta condição para este card nos
+    últimos `dias` dias — cada condição (A a I) tem a sua própria janela de
+    repetição (ver tools/logistica.py), por isso isto não é um simples
+    "já alguma vez", é sempre relativo a um período."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT 1 FROM logistica_alertas
+                   WHERE recording_id = %s AND condicao = %s
+                   AND criado_em > now() - (%s || ' days')::interval""",
+                (recording_id, condicao, dias)
+            )
+            return cur.fetchone() is not None
+
+def logistica_data_ultimo_alerta(recording_id: int, condicao: str):
+    """Timestamp do último alerta desta condição para este card, ou None —
+    usado pela condição C (sem resposta do fornecedor 48h depois do alerta
+    B) para medir o tempo decorrido desde esse alerta em concreto."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT criado_em FROM logistica_alertas
+                   WHERE recording_id = %s AND condicao = %s""",
+                (recording_id, condicao)
+            )
+            linha = cur.fetchone()
+            return linha["criado_em"] if linha else None
+
+def logistica_primeiro_alerta(recording_id: int):
+    """Timestamp do alerta mais antigo (de qualquer condição) para este
+    card — usado para escalar para a Isa Moreira quando uma situação está
+    em curso há mais de duas semanas, independentemente de qual condição
+    a foi sinalizando ao longo do tempo."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT MIN(criado_em) AS primeiro FROM logistica_alertas WHERE recording_id = %s",
+                (recording_id,)
+            )
+            linha = cur.fetchone()
+            return linha["primeiro"] if linha and linha["primeiro"] else None
+
+def logistica_registar_alerta(recording_id: int, condicao: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO logistica_alertas (recording_id, condicao, criado_em)
+                   VALUES (%s, %s, now())
+                   ON CONFLICT (recording_id, condicao) DO UPDATE SET criado_em = now()""",
+                (recording_id, condicao)
             )
         conn.commit()
 
