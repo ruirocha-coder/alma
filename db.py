@@ -73,9 +73,12 @@ CREATE TABLE IF NOT EXISTS reunioes_em_curso (
 
 CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
     id SERIAL PRIMARY KEY,
-    cliente TEXT NOT NULL,
-    resumo TEXT NOT NULL,
-    ano INTEGER NOT NULL,          -- calculado em Python (ver tools/ecos_largos), nunca pelo modelo
+    fornecedor TEXT NOT NULL,
+    quantidade TEXT,                -- peso/quantidade da carga, texto livre (as unidades variam)
+    data_carga TEXT,                -- data da carga tal como mencionada (texto livre, não normalizada)
+    talao TEXT,                     -- número do talão
+    avaliacao TEXT NOT NULL,        -- os pontos importantes da avaliação em si
+    ano INTEGER NOT NULL,           -- calculado em Python (ver tools/ecos_largos), nunca pelo modelo
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 """
@@ -83,8 +86,17 @@ CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
 # dados reais, e CREATE TABLE IF NOT EXISTS não acrescenta colunas novas a
 # uma tabela já existente — precisa de um ALTER TABLE explícito, idempotente.
+# O mesmo para avaliacoes_cargas_toros: os campos importantes (fornecedor,
+# quantidade, data_carga, talao, avaliacao) foram pedidos depois da tabela
+# já ter sido criada com um esquema mais simples (cliente/resumo) — estas
+# colunas ficam de fora nesse caso até serem acrescentadas aqui.
 MIGRACOES = """
 ALTER TABLE perfis ADD COLUMN IF NOT EXISTS empresa TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS fornecedor TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS quantidade TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS data_carga TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS talao TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
 """
 
 def get_conn():
@@ -236,12 +248,15 @@ def factos_utilizador(utilizador: str, limite: int = 50) -> list[str]:
             )
             return [l["facto"] for l in cur.fetchall()]
 
-def guardar_avaliacao_carga_toros(cliente: str, resumo: str, ano: int):
+def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, ano: int,
+                                  quantidade: str = None, data_carga: str = None, talao: str = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO avaliacoes_cargas_toros (cliente, resumo, ano) VALUES (%s, %s, %s)",
-                (cliente, resumo, ano)
+                """INSERT INTO avaliacoes_cargas_toros
+                   (fornecedor, quantidade, data_carga, talao, avaliacao, ano)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (fornecedor, quantidade, data_carga, talao, avaliacao, ano)
             )
         conn.commit()
 
@@ -249,12 +264,19 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT cliente, resumo, criado_em FROM avaliacoes_cargas_toros
+                """SELECT fornecedor, quantidade, data_carga, talao, avaliacao, criado_em
+                   FROM avaliacoes_cargas_toros
                    WHERE ano = %s ORDER BY criado_em ASC""",
                 (ano,)
             )
-            return [{"cliente": l["cliente"], "resumo": l["resumo"],
-                     "data": l["criado_em"].date().isoformat()} for l in cur.fetchall()]
+            return [{
+                "fornecedor": l["fornecedor"],
+                "quantidade": l["quantidade"],
+                "data_carga": l["data_carga"],
+                "talao": l["talao"],
+                "avaliacao": l["avaliacao"],
+                "registado_em": l["criado_em"].date().isoformat(),
+            } for l in cur.fetchall()]
 
 def contexto_utilizador(utilizador: str) -> str:
     """Bloco de texto com perfil + memórias, para injetar no system prompt.
