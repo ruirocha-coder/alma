@@ -5,9 +5,7 @@
 # testadas isoladamente. A orquestração (ler cards, extrair dados via IA,
 # publicar comentários) vive em agents/logistica_entregas.py, tal como
 # agents/monitor_basecamp.py já faz para os atrasos gerais.
-import time
 from datetime import date, timedelta
-from tools import documentos_empresa
 
 PROJETO_ENTREGAS = "Entregas"
 
@@ -208,35 +206,3 @@ Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche 
                 "foi concluída e fecha o card se sim. CC: @Conceição Costa @Isa Moreira")
 
     raise ValueError(f"condição sem texto fixo definido: {condicao!r}")
-
-# --- documento "Logistica" (projeto Alma Data) — usado só para as
-# condições F/G/H (os templates numerados 8.1/8.2/8.3, não transcritos
-# para este ficheiro) e como referência geral. Mesma cache curta já usada
-# para o manual de qualidade de cargas de toros: reler e reprocessar um
-# documento em todo ciclo diário é desnecessário. ---
-_CACHE_DOCUMENTO_LOGISTICA = {}
-TTL_DOCUMENTO_LOGISTICA = 900
-
-def ler_documento_logistica() -> dict:
-    """Lê o documento de procedimentos de logística (título contém
-    "logistica"/"logística", projeto Alma Data no Basecamp) — usado pelas
-    condições F/G/H para encontrar os templates de email numerados
-    (8.1 previsão de entrega, 8.2 confirmação final, 8.3 follow-up)."""
-    if "conteudo" in _CACHE_DOCUMENTO_LOGISTICA:
-        ts, resultado = _CACHE_DOCUMENTO_LOGISTICA["conteudo"]
-        if time.time() - ts < TTL_DOCUMENTO_LOGISTICA:
-            return resultado
-
-    candidatos = [item for item in documentos_empresa._listar_bruto()
-                 if "logistic" in item["titulo"].lower() or "logístic" in item["titulo"].lower()]
-    if not candidatos:
-        return {"erro": "não encontrei o documento de logística — confirma o título no projeto Alma Data"}
-    item = candidatos[0]
-    conteudo = documentos_empresa._ler_conteudo(item)
-    if not conteudo:
-        return {"erro": "o documento de logística existe mas não consegui extrair texto legível dele",
-                "titulo": item["titulo"]}
-
-    resultado = {"titulo": item["titulo"], "conteudo": conteudo}
-    _CACHE_DOCUMENTO_LOGISTICA["conteudo"] = (time.time(), resultado)
-    return resultado
