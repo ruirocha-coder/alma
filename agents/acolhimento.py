@@ -78,7 +78,8 @@ def responder(utilizador: str, mensagens: list) -> str:
             return "".join(b.text for b in resposta.content if b.type == "text")
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes)})
+        resultados, _ = _executar_tool_uses(resposta.content, funcoes)
+        mensagens.append({"role": "user", "content": resultados})
 
 def responder_stream(utilizador: str, mensagens: list):
     system, tools, funcoes = _preparar(utilizador)
@@ -95,4 +96,5 @@ def responder_stream(utilizador: str, mensagens: list):
             return
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes)})
+        resultados, _ = _executar_tool_uses(resposta.content, funcoes)
+        mensagens.append({"role": "user", "content": resultados})

@@ -143,8 +143,22 @@ def _tools_com_cache(tools: list) -> list:
         return tools
     return [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
 
-def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> list:
+# Algumas tools recebem, num argumento, um texto que TEM de aparecer na
+# resposta visível — mas confiar no modelo para o repetir na sua própria
+# resposta falhava sistematicamente (ver guardar_avaliacao_carga_toros:
+# mesmo depois de 3 reforços sucessivos na missão, o modelo continuava a
+# escrever a avaliação detalhada inteira SÓ dentro deste argumento —
+# invisível à pessoa — e a deixar um resumo curto como resposta visível).
+# Em vez de continuar a tentar convencer por instrução, o conteúdo deste
+# campo passa a ser sempre forçado para a resposta, por código — nome da
+# tool -> nome do argumento a forçar.
+CAMPOS_FORCADOS_NA_RESPOSTA = {
+    "guardar_avaliacao_carga_toros": "avaliacao",
+}
+
+def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> tuple:
     resultados = []
+    texto_forcado = ""
     for bloco in blocos:
         if bloco.type == "tool_use":
             try:
@@ -153,12 +167,17 @@ def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> list:
             except Exception as e:
                 print(f"[ferramenta] {bloco.name}({bloco.input}) falhou: {e!r}")
                 out = {"erro": str(e)}
+            else:
+                campo = CAMPOS_FORCADOS_NA_RESPOSTA.get(bloco.name)
+                valor = bloco.input.get(campo) if campo else None
+                if valor:
+                    texto_forcado += "\n\n" + valor
             resultados.append({
                 "type": "tool_result",
                 "tool_use_id": bloco.id,
                 "content": json.dumps(out, ensure_ascii=False, default=str)
             })
-    return resultados
+    return resultados, texto_forcado
 
 def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, projeto_mural: str):
     contexto = db.contexto_utilizador(utilizador)
@@ -190,16 +209,28 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
     utilizador em si (alguém pode trabalhar com as duas equipas)."""
     system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem, projeto_mural)
 
+    # acumula o texto de TODAS as rondas, não só da última — uma ronda com
+    # texto antes de uma tool_use (ex: a Alma escreve a avaliação e só
+    # depois chama guardar_avaliacao_carga_toros) não pode perder-se; só
+    # devolver o texto da ronda final ignorava por completo o que tivesse
+    # sido escrito antes de qualquer chamada a uma tool.
+    partes_resposta = []
     while True:
         resposta = client.messages.create(
             model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
             system=system, tools=tools_completas, messages=mensagens
         )
+        texto_ronda = "".join(b.text for b in resposta.content if b.type == "text")
+        if texto_ronda:
+            partes_resposta.append(texto_ronda)
         if resposta.stop_reason != "tool_use":
-            return "".join(b.text for b in resposta.content if b.type == "text")
+            return "".join(partes_resposta)
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        mensagens.append({"role": "user", "content": _executar_tool_uses(resposta.content, funcoes_utilizador)})
+        resultados, texto_forcado = _executar_tool_uses(resposta.content, funcoes_utilizador)
+        if texto_forcado:
+            partes_resposta.append(texto_forcado)
+        mensagens.append({"role": "user", "content": resultados})
 
 def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utilizador: str,
                          modelo: str = "claude-sonnet-4-6", origem: str = "consola",
@@ -232,12 +263,18 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utili
 
         resultado = {}
         def _correr_tools():
-            resultado["saida"] = _executar_tool_uses(resposta.content, funcoes_utilizador)
+            resultado["saida"], resultado["forcado"] = _executar_tool_uses(resposta.content, funcoes_utilizador)
         tarefa = threading.Thread(target=_correr_tools, daemon=True)
         tarefa.start()
         while tarefa.is_alive():
             tarefa.join(timeout=_INTERVALO_SINAL_DE_VIDA)
             if tarefa.is_alive():
                 yield None
+
+        # ver CAMPOS_FORCADOS_NA_RESPOSTA: o texto de certos argumentos (ex:
+        # a avaliação detalhada passada a guardar_avaliacao_carga_toros) é
+        # sempre transmitido, mesmo que o modelo não o repita por si.
+        if resultado.get("forcado"):
+            yield resultado["forcado"]
 
         mensagens.append({"role": "user", "content": resultado["saida"]})
