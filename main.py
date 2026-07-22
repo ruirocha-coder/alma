@@ -349,9 +349,16 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
     partes = await asyncio.gather(*(_processar_ficheiro_anexado(f) for f in ficheiros))
 
     mensagem_visivel = "\n".join(f"📎 {nome}" for nome in nomes) + (f"\n{mensagem}" if mensagem else "")
-    mensagem_agente = ("\n\n---\n\n".join(partes) + "\n\n"
-                       + (mensagem or ("O que achas deste ficheiro?" if len(nomes) == 1
-                                       else "O que achas destes ficheiros?")))
+    # o pedido em si vem sempre primeiro, antes do conteúdo dos ficheiros —
+    # main.py trunca esta mensagem a 500 carateres só para escolher o
+    # agente/subagente certo (ver orchestrator.encaminhar); com fotos
+    # grandes ou várias, o conteúdo delas sozinho já passa dos 500
+    # carateres, e se o pedido viesse depois nunca chegava a entrar nesse
+    # excerto — a classificação via só descrições de imagem, sem saber que
+    # a pessoa pediu uma avaliação, e escolhia o agente errado.
+    mensagem_agente = ((mensagem or ("O que achas deste ficheiro?" if len(nomes) == 1
+                                     else "O que achas destes ficheiros?"))
+                       + "\n\n" + "\n\n---\n\n".join(partes))
     return _responder_e_guardar(utilizador, sessao, mensagem_agente, mensagem_visivel)
 
 @app.get("/health")
