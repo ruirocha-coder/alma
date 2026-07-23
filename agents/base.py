@@ -25,6 +25,15 @@ TOOLS_COMUNS = (bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE
                 + documentos_referencia.TOOLS_DOCUMENTOS_REFERENCIA
                 + basecamp.TOOLS_ESTADO_PROJETO)
 
+def _disparar_sugestao_semanal_logistica():
+    # import feito aqui dentro (não no topo do módulo) de propósito:
+    # agents/sugestao_logistica_semanal.py importa `client` deste ficheiro
+    # (agents/base.py) — um import direto no topo criava um ciclo
+    # (base -> sugestao_logistica_semanal -> base). Adiado até à chamada,
+    # já com os dois módulos totalmente carregados, evita o ciclo.
+    from agents import sugestao_logistica_semanal
+    return sugestao_logistica_semanal.correr_sugestao_semanal_logistica()
+
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
     "procurar_paginas": bigcommerce.procurar_paginas,
@@ -44,6 +53,7 @@ FUNCOES = {
     "guardar_avaliacao_carga_toros": ecos_largos.guardar_avaliacao_carga_toros,
     "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
     "gerar_pdf": documentos_gerados.gerar_pdf,
+    "disparar_sugestao_semanal_logistica": _disparar_sugestao_semanal_logistica,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
