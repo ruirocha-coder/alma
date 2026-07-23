@@ -32,12 +32,15 @@ logística da Interior Guider / Boa Safra. Responde APENAS com um objeto
 JSON, sem mais nenhum texto antes ou depois, com exatamente estas chaves:
 {"cliente": string ou null, "numero_encomenda": string ou null,
 "fornecedor": string ou null, "designer": string ou null,
+"morada": string ou null, "produtos_encomendados": string ou null,
 "data_entrada_armazem": "AAAA-MM-DD" ou null,
 "data_entrega_cliente": "AAAA-MM-DD" ou null}
 Usa null sempre que a informação não estiver mesmo presente no texto —
-nunca inventes um valor. As datas podem aparecer em qualquer formato
-(ex: 25/07/2026, 25-07-2026, 2026-07-25) — converte sempre para
-AAAA-MM-DD."""
+nunca inventes um valor. "morada" é o endereço de entrega completo, tal
+como escrito nas notas (nunca resumido nem alterado). "produtos_encomendados"
+resume, em poucas palavras, o que foi encomendado. As datas podem aparecer
+em qualquer formato (ex: 25/07/2026, 25-07-2026, 2026-07-25) — converte
+sempre para AAAA-MM-DD."""
 
 def _extrair_dados_encomenda(titulo: str, notas: str) -> dict:
     resposta = client.messages.create(
