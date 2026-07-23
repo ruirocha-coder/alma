@@ -168,6 +168,46 @@ def _ja_alertado_recente_por_condicao(recording_id: int) -> dict:
     return {c: db.logistica_ja_alertado_recente(recording_id, c, dias)
            for c, dias in logistica.JANELA_REPETICAO_DIAS.items()}
 
+_COLUNAS_REGIAO_CONHECIDAS = ("lisboa", "porto", "outro", "outros")
+
+def diagnostico_cards_regiao(limite: int = 5) -> dict:
+    """Mostra os campos brutos de cards do projeto Entregas que estejam
+    numa coluna de região (Lisboa/Porto/Outro), com o resultado atual de
+    esta_em_on_hold ao lado de cada um — para confirmar contra dados reais
+    o nome exato do campo que o Basecamp usa para "On Hold" (nunca
+    verificado ao vivo, ver a nota no topo deste ficheiro e
+    tools.logistica.esta_em_on_hold). Partilhado entre o endpoint
+    /logistica/diagnostico (main.py) e a tool de chat do mesmo nome, para
+    nunca haver duas versões desta lógica a divergir uma da outra."""
+    try:
+        itens = [i for i in basecamp._itens_ativos()
+                if i.get("type") == "Kanban::Card"
+                and logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
+    except Exception as e:
+        return {"erro": str(e)}
+    if not itens:
+        return {"aviso": "nenhum card ativo encontrado no projeto Entregas"}
+
+    itens_regiao = [i for i in itens
+                    if ((i.get("parent") or {}).get("title") or "").strip().lower() in _COLUNAS_REGIAO_CONHECIDAS]
+    if not itens_regiao:
+        return {"aviso": "nenhum card encontrado numa coluna de região (Lisboa/Porto/Outro) — "
+                         "confirma o nome exato das colunas no Basecamp",
+                "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens})}
+
+    exemplos = itens_regiao[:limite]
+    return {
+        "total_no_projeto": len(itens),
+        "total_em_coluna_de_regiao": len(itens_regiao),
+        "campos_disponiveis": sorted(exemplos[0].keys()),
+        "exemplos": [{
+            "titulo": i.get("title") or i.get("content"),
+            "coluna": (i.get("parent") or {}).get("title"),
+            "esta_em_on_hold_resultado_atual": logistica.esta_em_on_hold(i),
+            "campos_relacionados_com_hold": {k: v for k, v in i.items() if "hold" in k.lower()},
+        } for i in exemplos],
+    }
+
 def correr_monitorizacao_logistica() -> dict:
     """Um ciclo da monitorização de logística: lê as encomendas ativas no
     projeto "Entregas", avalia as condições A a I para cada uma, e publica

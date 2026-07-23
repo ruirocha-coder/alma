@@ -17,7 +17,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
                     sugestao_logistica_semanal)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, logistica, documentos_empresa, ecos_largos
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
 
@@ -515,36 +515,11 @@ def diagnostico_logistica_entregas():
     que não havia nenhum card pronto, apesar de existirem vários em On
     Hold nessas colunas, visíveis no Basecamp — sinal de que o campo
     assumido em tools.logistica.esta_em_on_hold está errado), sem
-    precisar de ir aos logs do Railway. Mostra até 5 exemplos, cada um
-    com a coluna e o resultado atual de esta_em_on_hold, para comparar
-    contra o que se vê mesmo no Basecamp."""
-    itens = [i for i in basecamp._itens_ativos()
-            if i.get("type") == "Kanban::Card"
-            and logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
-    if not itens:
-        return {"aviso": "nenhum card ativo encontrado no projeto Entregas"}
-
-    itens_regiao = [i for i in itens
-                    if ((i.get("parent") or {}).get("title") or "").strip().lower()
-                    in ("lisboa", "porto", "outro", "outros")]
-    if not itens_regiao:
-        return {"aviso": "nenhum card encontrado numa coluna de região (Lisboa/Porto/Outro) — "
-                         "confirma o nome exato das colunas no Basecamp",
-                "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens})}
-
-    exemplos = itens_regiao[:5]
-    return {
-        "total_no_projeto": len(itens),
-        "total_em_coluna_de_regiao": len(itens_regiao),
-        "campos_disponiveis": sorted(exemplos[0].keys()),
-        "exemplos": [{
-            "titulo": i.get("title") or i.get("content"),
-            "coluna": (i.get("parent") or {}).get("title"),
-            "esta_em_on_hold_resultado_atual": logistica.esta_em_on_hold(i),
-            "campos_relacionados_com_hold": {k: v for k, v in i.items() if "hold" in k.lower()},
-            "item_completo": i,
-        } for i in exemplos],
-    }
+    precisar de ir aos logs do Railway. A mesma informação também está
+    disponível diretamente na conversa com a Alma (ver
+    agents.logistica_entregas.diagnostico_cards_regiao, a mesma função
+    usada aqui, para nunca haver duas versões desta lógica a divergir)."""
+    return logistica_entregas.diagnostico_cards_regiao()
 
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():

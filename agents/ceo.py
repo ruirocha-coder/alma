@@ -13,7 +13,18 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
-TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL]
+# pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia
+# ("não há nenhum card pronto a entregar"), apesar de existirem cards
+# visivelmente em On Hold no Basecamp — o nome do campo "On Hold" nunca
+# tinha sido confirmado contra dados reais da API. Esta tool mostra os
+# dados reais diretamente na conversa, sem precisar de abrir nenhum URL.
+TOOL_DIAGNOSTICO_LOGISTICA = {
+    "name": "diagnosticar_logistica_on_hold",
+    "description": "Mostra os campos brutos de cards do projeto Entregas nas colunas Lisboa/Porto/Outro, com o resultado atual da deteção de \"On Hold\" ao lado de cada um — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
+    "input_schema": {"type": "object", "properties": {}, "required": []}
+}
+
+TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL, TOOL_DIAGNOSTICO_LOGISTICA]
 
 MISSAO_CEO = PERSONA + """
 
@@ -84,6 +95,15 @@ Mural "Programação" do projeto Entregas, e notifica a Conceição Costa de
 verdade (não é uma simulação). Depois de a chamares, informa quantas
 entregas estavam prontas (por região) e que a publicação foi feita,
 usando o resultado devolvido pela tool.
+
+Se a sugestão semanal de logística vier vazia (sem cards prontos) mas a
+pessoa disser que vê cards em On Hold no Basecamp, ou pedirem para
+diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
+mostra os campos reais dos cards e o resultado atual da deteção de "On
+Hold" para cada um. Apresenta isto de forma legível (coluna, se foi
+detetado como "On Hold" ou não, e os campos com "hold" no nome), para se
+perceber se o nome do campo usado no código está certo ou precisa de
+ajuste — nunca despejes o JSON em bruto sem organizar.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
