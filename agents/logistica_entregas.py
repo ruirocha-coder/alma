@@ -204,7 +204,21 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "titulo": i.get("title") or i.get("content"),
             "coluna": (i.get("parent") or {}).get("title"),
             "esta_em_on_hold_resultado_atual": logistica.esta_em_on_hold(i),
+            # bug real (2026-07-23): a lista de campos reais devolvida pelo
+            # Basecamp não tem NENHUM campo com "hold" no nome (nem
+            # on_hold_at nem on_hold, os dois assumidos em
+            # tools.logistica.esta_em_on_hold) — por isso mostram-se aqui
+            # os valores concretos dos campos mais prováveis de codificar
+            # esse estado (status costuma ser "active"/"archived"/
+            # "trashed" nos outros tipos de registo do Basecamp, mas pode
+            # estar a ser reaproveitado para cards de Kanban), e o item
+            # completo, para se poder inspecionar tudo sem adivinhar.
             "campos_relacionados_com_hold": {k: v for k, v in i.items() if "hold" in k.lower()},
+            "status": i.get("status"),
+            "position": i.get("position"),
+            "inherits_status": i.get("inherits_status"),
+            "parent": i.get("parent"),
+            "item_completo": i,
         } for i in exemplos],
     }
 

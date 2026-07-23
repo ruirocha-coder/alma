@@ -103,7 +103,12 @@ mostra os campos reais dos cards e o resultado atual da deteção de "On
 Hold" para cada um. Apresenta isto de forma legível (coluna, se foi
 detetado como "On Hold" ou não, e os campos com "hold" no nome), para se
 perceber se o nome do campo usado no código está certo ou precisa de
-ajuste — nunca despejes o JSON em bruto sem organizar.
+ajuste — nunca despejes o JSON em bruto sem organizar, mas TAMBÉM nunca
+te limites a dizer "não encontrei nenhum campo relevante" sem mostrares
+os valores concretos que a tool devolve (o campo `status`, `position`,
+`parent` e `inherits_status` de cada exemplo) — esses valores exatos,
+tal como vêm, são o que permite identificar o campo certo; interpretar
+sem os mostrar não ajuda a corrigir nada.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
