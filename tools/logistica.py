@@ -12,13 +12,16 @@ PROJETO_ENTREGAS = "Entregas"
 
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
 # ainda está no fornecedor; as colunas por região são onde a encomenda é
-# entregue ao cliente. MODELO CONFIRMADO em 2026-07-23 por diagnóstico ao
-# vivo: os 31 cards prontos a entregar estão todos numa única coluna
-# "On Hold" — o avô estrutural desses cards é o quadro geral "Logística",
-# não uma coluna de região. Ou seja, a estrutura do Kanban NÃO preserva a
-# região quando um card entra em "On Hold" (isto foi tentado ler dos
-# dados e não funciona) — a região só existe na morada nas notas do card
-# (ver agents.sugestao_logistica_semanal._classificar_regiao).
+# entregue ao cliente. MODELO CONFIRMADO em 2026-07-23 contra a API real
+# do Basecamp: um card pronto a entregar tem como `parent` um objeto do
+# tipo "Kanban::OnHold" (título sempre genérico "On hold") — mas o `url`
+# desse objeto aponta diretamente para a coluna de região REAL por trás
+# dessa secção (ex: confirmado ao vivo, uma secção "On Hold" com url para
+# a coluna "Porto"). A região lê-se buscando esse url (ver
+# agents.sugestao_logistica_semanal._regiao_estrutural) — a morada nas
+# notas do card só é usada como rede de segurança, para os casos raros
+# em que essa coluna real ainda é "Produção" (card marcado pronto antes
+# de ser movido para a coluna de região certa).
 COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
 COLUNA_PRONTO_ENTREGA = "on hold"
 
@@ -35,8 +38,8 @@ def fase_encomenda(estado: str) -> str:
     pela API) onde o card está agora:
     - "producao": ainda no fornecedor, à espera de chegar ao armazém.
     - "pronto_entrega": na coluna "On Hold" — chegou ao armazém, pronta a
-      ser entregue, ainda por agendar. A região não vem daqui (ver
-      agents.sugestao_logistica_semanal._classificar_regiao).
+      ser entregue, ainda por agendar. A região vem do url do parent
+      (ver agents.sugestao_logistica_semanal._regiao_estrutural).
     - "em_entrega": diretamente numa coluna de região (Lisboa/Porto/
       Outro) — a entrega está em curso, não precisa de mais sugestões de
       logística.

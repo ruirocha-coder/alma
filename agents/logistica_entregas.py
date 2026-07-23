@@ -5,14 +5,15 @@
 # publica comentários a propor o que fazer a seguir, sempre validados por
 # um humano antes de qualquer envio.
 #
-# NOTA (2026-07-23, confirmado diretamente pelo Rui, e pela documentação
-# oficial da API do Basecamp — ver tools.logistica.fase_encomenda): "On
-# Hold" é uma secção dentro de uma coluna, não uma coluna irmã. Um card
-# em "On Hold" está pronto a entregar INDEPENDENTEMENTE da coluna onde
-# estiver — a coluna (Lisboa/Porto/Outro) indica sempre a rota/região,
-# quer o card esteja em "On Hold" quer já esteja a ser entregue a sério.
-# A assunção original (um campo tipo on_hold_at/on_hold no próprio card)
-# estava errada e foi removida.
+# NOTA (2026-07-23, confirmado contra a API real do Basecamp — ver
+# tools.logistica.fase_encomenda): "On Hold" é uma secção dentro de uma
+# coluna, do tipo "Kanban::OnHold" — não uma coluna irmã. Um card em "On
+# Hold" está pronto a entregar INDEPENDENTEMENTE da coluna onde estiver;
+# a coluna real (Lisboa/Porto/Outro) por trás dessa secção é lida
+# diretamente do `url` do parent (ver
+# agents.sugestao_logistica_semanal._regiao_estrutural). A assunção
+# original (um campo tipo on_hold_at/on_hold no próprio card) estava
+# errada e foi removida.
 # - As duas datas críticas (entrada em armazém / entrega ao cliente) e os
 #   restantes dados (cliente, n.º de encomenda, fornecedor) vêm das notas
 #   do card em texto livre, por isso são extraídos por IA (não há um
@@ -192,19 +193,17 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     (main.py) e a tool de chat do mesmo nome, para nunca haver duas
     versões desta lógica a divergir uma da outra.
 
-    NOTA (2026-07-23): um diagnóstico anterior mostrou o avô estrutural
-    dos cards numa coluna "On hold" à parte como sendo o quadro geral
-    (não uma coluna de região) — mas o Rui viu ao vivo no Basecamp que
-    "On Hold" também aparece como uma DIVISÃO dentro de cada coluna de
-    região (Porto/Lisboa/Outro têm cada uma a sua própria secção "ON
-    HOLD" visível na página da própria coluna). As duas coisas podem
-    coexistir sem se contradizerem. Por isso esta função devolve também
-    `cards_por_coluna_regiao`: TODOS os cards de cada coluna de região
-    (Lisboa/Porto/Outro), com TODOS os campos brutos de cada um (não só
-    o título) — para comparar diretamente um card visivelmente em "On
-    Hold" dentro da coluna com um que não está, e encontrar o campo
-    exato que os distingue (a região, nestes casos, é sempre a própria
-    coluna — não precisa de classificação por morada).
+    CONFIRMADO (2026-07-23) contra a API real do Basecamp: o `parent` de
+    um card em "On Hold" é um objeto do tipo "Kanban::OnHold" — o `url`
+    desse objeto aponta diretamente para a coluna de região REAL por
+    trás dessa secção (ex: confirmado ao vivo, uma secção "On Hold" com
+    url para a coluna "Porto"). Um diagnóstico anterior tinha ido um
+    nível a mais na hierarquia (o parent DESSE objeto é sim o quadro
+    geral "Logística", mas o objeto obtido a partir do próprio `url` já
+    É a coluna de região) — daí a conclusão errada de que a região não
+    era recuperável. Esta função devolve também `cards_por_coluna_regiao`
+    (todos os cards de Lisboa/Porto/Outro, com todos os campos brutos)
+    para continuar a confirmar isto ao vivo sempre que necessário.
 
     bug real (2026-07-23): a sugestão semanal publicada mostrou cliente/
     morada/produto/data "não identificado" em TODOS os 20 cards, apesar

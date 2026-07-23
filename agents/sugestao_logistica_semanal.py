@@ -4,17 +4,23 @@
 # uma sugestão de como organizar a semana de entregas, dirigida à
 # Conceição Costa (e só a ela).
 #
-# Modelo CONFIRMADO em 2026-07-23, com diagnóstico ao vivo: os 31 cards
-# prontos a entregar estão todos na MESMA coluna "On Hold" — o avô do seu
-# parent é o quadro geral "Logística", não uma coluna de região. Ou seja,
-# a estrutura do Kanban NÃO preserva a região quando um card entra em
-# "On Hold" (ao contrário do que se pensou antes) — não há nenhuma
-# camada estrutural de onde ler Lisboa/Porto/Outro para estes cards. A
-# única fonte fiável é a morada nas notas do card (confirmado ao vivo:
-# "Av. Visconde de Valmor, 77 - Lisboa", "Travessa de Casais lote 6, São
-# Félix da Marinha") — por isso a região volta a ser classificada por
-# IA a partir da morada extraída (ver _classificar_regiao). O Rui
-# confirmou esta opção em vez de reestruturar o quadro no Basecamp.
+# Modelo CONFIRMADO em 2026-07-23, contra a API real do Basecamp (com
+# credenciais partilhadas pelo Rui para o efeito): o `parent` de um card
+# em "On Hold" é do tipo "Kanban::OnHold" — um objeto próprio, à parte da
+# coluna de região. O seu `title` é sempre genérico ("On hold"), mas o
+# seu `url` aponta diretamente para a coluna de região REAL por trás
+# dessa secção (confirmado: duas cartas diferentes, uma com url para a
+# coluna "Porto", outra para "Produção"). Um diagnóstico anterior
+# concluiu (erradamente) que a região não era recuperável — mas nesse
+# diagnóstico foi-se um nível a mais na hierarquia (o `parent` do `parent`
+# é sim o quadro geral "Logística", mas o PRÓPRIO objeto obtido a partir
+# do `url` já É a coluna de região, sem precisar de mais nenhum passo).
+# Por isso a região volta a ser lida da estrutura (ver
+# _regiao_estrutural) — SÓ quando isso não resolver para Lisboa/Porto/
+# Outro (ex: um card cuja secção "On Hold" ainda aponta para "Produção",
+# porque nunca chegou a ser movido para a coluna de região certa) é que
+# se cai na classificação por morada (ver _classificar_regiao), como
+# rede de segurança.
 #
 # Esta sugestão organiza: que dia visitar cada região, e por que ordem
 # dentro de cada dia. Nunca calcula uma rota otimizada real (sem API de
@@ -35,6 +41,7 @@ MAX_CARDS_POR_CORRIDA = 40
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
 _REGIOES = ("Lisboa", "Porto", "Outro")
+_REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
 _MISSAO_CLASSIFICAR_REGIAO = """Classificas a morada de entrega abaixo
 numa destas três regiões: "Lisboa", "Porto", ou "Outro" (qualquer
@@ -42,11 +49,26 @@ localização que não seja claramente da área de Lisboa ou do Porto,
 incluindo arredores/área metropolitana). Responde só com uma destas três
 palavras, nada mais."""
 
+def _regiao_estrutural(item: dict):
+    """Tenta ler a região diretamente da coluna real por trás da secção
+    "On Hold" do card — devolve None (não Lisboa/Porto/Outro) se não
+    conseguir, ou se essa coluna real não for uma coluna de região (ex:
+    ainda "Produção"), para o chamador cair na morada nesse caso."""
+    parent_url = (item.get("parent") or {}).get("url")
+    if not parent_url:
+        return None
+    try:
+        coluna_real = basecamp.obter_recording(parent_url)
+    except Exception as e:
+        print(f"[sugestao_logistica_semanal] não consegui obter a coluna real de {item.get('id')}: {e!r}")
+        return None
+    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(coluna_real.get("title")))
+
 def _classificar_regiao(morada: str) -> str:
-    """A coluna "On Hold" (onde ficam os cards prontos a entregar) não
-    distingue a região — confirmado ao vivo que o avô estrutural destes
-    cards é o quadro geral, não uma coluna de região. A morada de entrega
-    é a única fonte fiável para saber a região."""
+    """Rede de segurança para quando a coluna real por trás da secção
+    "On Hold" não é uma coluna de região (ex: o card ainda não foi movido
+    de "Produção" para a coluna certa, mas já foi marcado pronto) — a
+    morada de entrega é o sinal mais fiável que resta nesse caso."""
     if not morada:
         return "Outro"
     resposta = client.messages.create(
@@ -88,8 +110,7 @@ Entregas no Basecamp. Semana de {inicio_semana.strftime('%d/%m/%Y')} a
 
 Abaixo estão os cards já em "On Hold" — significa que a encomenda já foi
 feita ao fornecedor e o produto já está em armazém, pronto a ser
-entregue. Já vêm agrupados por região (Lisboa/Porto/Outro), determinada
-pela morada de entrega de cada um.
+entregue. Já vêm agrupados por região (Lisboa/Porto/Outro).
 
 {contexto}
 
@@ -123,11 +144,12 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards ativos do projeto "Entregas", filtra os que estão prontos a
-    entregar (em "On Hold" — ver tools.logistica.fase_encomenda),
-    classifica a região de cada um pela morada, e publica uma sugestão
-    de organização no Mural "Programação", dirigida à Conceição Costa.
-    Pensado para correr às segundas de manhã (agendado), mas pode ser
-    disparado manualmente."""
+    entregar (em "On Hold" — ver tools.logistica.fase_encomenda), lê a
+    região de cada um a partir da coluna real por trás da secção "On
+    Hold" (com a morada como rede de segurança — ver _regiao_estrutural
+    e _classificar_regiao), e publica uma sugestão de organização no
+    Mural "Programação", dirigida à Conceição Costa. Pensado para correr
+    às segundas de manhã (agendado), mas pode ser disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
@@ -157,7 +179,7 @@ def correr_sugestao_semanal_logistica() -> dict:
                 print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
                 dados = {}
 
-            regiao = _classificar_regiao(dados.get("morada"))
+            regiao = _regiao_estrutural(item) or _classificar_regiao(dados.get("morada"))
             cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
 
         inicio_semana, fim_semana = _semana_atual()
