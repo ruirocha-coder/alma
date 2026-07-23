@@ -108,7 +108,16 @@ te limites a dizer "não encontrei nenhum campo relevante" sem mostrares
 os valores concretos que a tool devolve (o campo `status`, `position`,
 `parent` e `inherits_status` de cada exemplo) — esses valores exatos,
 tal como vêm, são o que permite identificar o campo certo; interpretar
-sem os mostrar não ajuda a corrigir nada.
+sem os mostrar não ajuda a corrigir nada. Os exemplos que a tool mostra
+podem calhar todos em cards que não estão mesmo em On Hold (isso já
+aconteceu) — o que não prova nada sobre o valor real de um card que
+esteja mesmo em On Hold. Por isso a tool também devolve dois testes
+diretos, que tens sempre de reportar com os valores exatos que vierem
+(nunca resumidos): `teste_sem_filtro_status_active` (mostra se pedir os
+cards sem o filtro status="active" traz cards a mais — sinal de que
+esse filtro está a excluir os cards em On Hold já do lado do Basecamp) e
+`teste_detalhe_completo_do_card` (mostra se o card, pedido em detalhe
+completo, tem campos extra que a lista resumida não mostra).
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
