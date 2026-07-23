@@ -14,15 +14,16 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
 }
 
 # pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia ("não
-# há nenhum card pronto a entregar"). Em vez de tentar decidir se "On
-# Hold" era uma coluna irmã de Lisboa/Porto/Outro ou uma divisão dentro
-# delas (ambíguo, nunca confirmado com certeza), o Rui optou por criar
-# uma coluna nova e simples chamada "Armazém" — ver
-# tools.logistica.fase_encomenda. Esta tool mostra os dados reais
+# há nenhum card pronto a entregar"). Confirmado diretamente pelo Rui, e
+# pela documentação oficial da API do Basecamp: "On Hold" é uma secção
+# dentro de uma coluna, não uma coluna irmã — um card em "On Hold" está
+# pronto a entregar independentemente da coluna onde estiver, e a coluna
+# (Lisboa/Porto/Outro) indica sempre a rota/região (ver
+# tools.logistica.fase_encomenda). Esta tool mostra os dados reais
 # diretamente na conversa, sem precisar de abrir nenhum URL.
 TOOL_DIAGNOSTICO_LOGISTICA = {
     "name": "diagnosticar_logistica_on_hold",
-    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (na coluna \"Armazém\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
+    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (em \"On Hold\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
@@ -101,15 +102,14 @@ usando o resultado devolvido pela tool.
 Se a sugestão semanal de logística vier vazia (sem cards prontos) mas a
 pessoa disser que vê cards prontos a entregar no Basecamp, ou pedirem
 para diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
-mostra as colunas reais vistas no projeto e os cards já na coluna
-"Armazém" (prontos a entregar), com título e notas. Apresenta isto de
-forma legível (quantos cards no total, que colunas existem, quantos
-estão prontos a entregar, e os exemplos com título/notas) — nunca
-despejes o JSON em bruto sem organizar. Se `colunas_vistas` não incluir
-nenhuma coluna parecida com "Armazém", ou `total_pronto_a_entregar` vier
-a zero apesar de a pessoa ver cards lá, mostra exatamente que colunas
-foram vistas para se perceber se o nome mudou ou se a coluna ainda não
-foi criada.
+mostra as colunas reais vistas no projeto e os cards já em "On Hold"
+(prontos a entregar, independentemente da coluna onde estiverem), com
+título e notas. Apresenta isto de forma legível (quantos cards no
+total, que colunas existem, quantos estão prontos a entregar, e os
+exemplos com título/notas) — nunca despejes o JSON em bruto sem
+organizar. Se `total_pronto_a_entregar` vier a zero apesar de a pessoa
+ver cards em "On Hold" no Basecamp, mostra exatamente que colunas foram
+vistas para se perceber se algo mudou.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa

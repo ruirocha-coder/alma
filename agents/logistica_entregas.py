@@ -5,14 +5,14 @@
 # publica comentários a propor o que fazer a seguir, sempre validados por
 # um humano antes de qualquer envio.
 #
-# NOTA (2026-07-23, pedido explícito do Rui — ver
-# tools.logistica.fase_encomenda): em vez de tentar decidir se "On Hold"
-# era uma coluna irmã das colunas de região ou uma divisão dentro delas
-# (ambíguo, nunca confirmado com certeza contra dados reais), o Rui criou
-# antes uma coluna nova e simples chamada "Armazém" — um card muda de
-# coluna (Produção -> Armazém -> Lisboa/Porto/Outro) em vez de ficar
-# marcado dentro da mesma coluna. A assunção original (um campo tipo
-# on_hold_at/on_hold) estava errada e foi removida.
+# NOTA (2026-07-23, confirmado diretamente pelo Rui, e pela documentação
+# oficial da API do Basecamp — ver tools.logistica.fase_encomenda): "On
+# Hold" é uma secção dentro de uma coluna, não uma coluna irmã. Um card
+# em "On Hold" está pronto a entregar INDEPENDENTEMENTE da coluna onde
+# estiver — a coluna (Lisboa/Porto/Outro) indica sempre a rota/região,
+# quer o card esteja em "On Hold" quer já esteja a ser entregue a sério.
+# A assunção original (um campo tipo on_hold_at/on_hold no próprio card)
+# estava errada e foi removida.
 # - As duas datas críticas (entrada em armazém / entrega ao cliente) e os
 #   restantes dados (cliente, n.º de encomenda, fornecedor) vêm das notas
 #   do card em texto livre, por isso são extraídos por IA (não há um
@@ -174,10 +174,10 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     """Mostra os campos brutos de cards do projeto Entregas, agrupados
     pela fase atual (ver tools.logistica.fase_encomenda) — útil para
     confirmar ao vivo que a deteção de fase bate certo com o que se vê no
-    Basecamp (ex: um nome de coluna diferente do esperado, ou a coluna
-    "Armazém" ainda não ter sido criada). Partilhado entre o endpoint
-    /logistica/diagnostico (main.py) e a tool de chat do mesmo nome, para
-    nunca haver duas versões desta lógica a divergir uma da outra."""
+    Basecamp (ex: um nome de coluna diferente do esperado, ou nenhum card
+    ainda em "On Hold"). Partilhado entre o endpoint /logistica/diagnostico
+    (main.py) e a tool de chat do mesmo nome, para nunca haver duas
+    versões desta lógica a divergir uma da outra."""
     try:
         itens = [i for i in basecamp._itens_ativos()
                 if i.get("type") == "Kanban::Card"
