@@ -117,7 +117,13 @@ diretos, que tens sempre de reportar com os valores exatos que vierem
 cards sem o filtro status="active" traz cards a mais — sinal de que
 esse filtro está a excluir os cards em On Hold já do lado do Basecamp) e
 `teste_detalhe_completo_do_card` (mostra se o card, pedido em detalhe
-completo, tem campos extra que a lista resumida não mostra).
+completo, tem campos extra que a lista resumida não mostra). Mostra
+também sempre `cards_numa_coluna_chamada_on_hold` — pode existir uma
+coluna própria chamada "On hold" (à parte de Lisboa/Porto/Outro), com os
+seus próprios cards; se existir, repara nos títulos/notas desses
+exemplos para perceber como fica identificada a região de cada um
+(pode estar no título, ex: um prefixo "LX"/"PO", já que a coluna deixa
+de ser Lisboa/Porto/Outro assim que o card lá está).
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
