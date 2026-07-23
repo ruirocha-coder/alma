@@ -29,7 +29,7 @@
 import threading
 from datetime import date, timedelta
 from agents.base import client
-from agents.logistica_entregas import _extrair_dados_encomenda
+from agents.logistica_entregas import _extrair_dados_encomenda, _regiao_estrutural
 from tools import basecamp, logistica
 
 _a_correr = threading.Lock()
@@ -41,28 +41,12 @@ MAX_CARDS_POR_CORRIDA = 40
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
 _REGIOES = ("Lisboa", "Porto", "Outro")
-_REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
 _MISSAO_CLASSIFICAR_REGIAO = """Classificas a morada de entrega abaixo
 numa destas três regiões: "Lisboa", "Porto", ou "Outro" (qualquer
 localização que não seja claramente da área de Lisboa ou do Porto,
 incluindo arredores/área metropolitana). Responde só com uma destas três
 palavras, nada mais."""
-
-def _regiao_estrutural(item: dict):
-    """Tenta ler a região diretamente da coluna real por trás da secção
-    "On Hold" do card — devolve None (não Lisboa/Porto/Outro) se não
-    conseguir, ou se essa coluna real não for uma coluna de região (ex:
-    ainda "Produção"), para o chamador cair na morada nesse caso."""
-    parent_url = (item.get("parent") or {}).get("url")
-    if not parent_url:
-        return None
-    try:
-        coluna_real = basecamp.obter_recording(parent_url)
-    except Exception as e:
-        print(f"[sugestao_logistica_semanal] não consegui obter a coluna real de {item.get('id')}: {e!r}")
-        return None
-    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(coluna_real.get("title")))
 
 def _classificar_regiao(morada: str) -> str:
     """Rede de segurança para quando a coluna real por trás da secção
