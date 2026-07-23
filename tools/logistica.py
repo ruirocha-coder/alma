@@ -10,40 +10,38 @@ from datetime import date, timedelta
 PROJETO_ENTREGAS = "Entregas"
 
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
-# ainda está no fornecedor; as colunas por região são onde a encomenda
-# aguarda para ser entregue ao cliente — pedido explícito da Isa/Conceição
-# (2026-07-22): "quando os cards passam para On Hold [numa coluna de
-# região], significa que estão prontos a serem entregues"; assim que saem
-# de On Hold nessa coluna, já estão a ser entregues.
-# Nome real da 3ª coluna confirmado ao vivo no Basecamp (2026-07-23):
-# "Outro", no singular — inclui-se "outros" também, por tolerância, caso
-# seja renomeada no futuro.
+# ainda está no fornecedor; as colunas por região são onde a encomenda é
+# entregue ao cliente. Modelo CORRIGIDO em 2026-07-23, depois de um
+# diagnóstico ao vivo com o Rui: "On Hold" não é uma marca dentro da
+# coluna de região (assunção original, nunca confirmada) — é uma coluna
+# própria e à parte, chamada mesmo "On hold". Um card passa para lá
+# quando a encomenda chega ao armazém e fica pronta a entregar; quando a
+# entrega começa a sério, volta para a coluna da região (Lisboa/Porto/
+# Outro) — confirmado pelo Rui: "quando está na coluna [de região] mas
+# não está em On Hold significa que está a ser entregue". O significado
+# de cada fase não mudou desde o pedido original, só o mecanismo: antes
+# assumia-se um campo por card (esta_em_on_hold, nunca confirmado e
+# entretanto removido), agora é o NOME da coluna que decide tudo.
 COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
+COLUNA_PRONTO_ENTREGA = "on hold"
 
-def esta_em_on_hold(item_bruto: dict) -> bool:
-    """Se um card do Kanban está marcado como "On Hold" no Basecamp — este
-    campo nunca foi confirmado ao vivo contra a API real (nenhuma outra
-    parte desta aplicação precisou disto até agora), por isso aceita as
-    variantes de nome mais prováveis. Se nenhuma bater certo com os dados
-    reais da conta, isto precisa de ajuste depois de uma verificação ao
-    vivo (ver nota em agents/logistica_entregas.py)."""
-    return bool(item_bruto.get("on_hold_at") or item_bruto.get("on_hold"))
-
-def fase_encomenda(estado: str, on_hold: bool) -> str:
-    """Em que fase do fluxo de entrega está uma encomenda, a partir da
-    coluna do Kanban ("estado") e de estar ou não em "On Hold":
+def fase_encomenda(estado: str) -> str:
+    """Em que fase do fluxo de entrega está uma encomenda, a partir do
+    nome da coluna do Kanban ("estado") onde o card está agora:
     - "producao": ainda no fornecedor, à espera de chegar ao armazém.
-    - "pronto_entrega": já numa coluna de região e em On Hold — pronta a
-      ser entregue, é aqui que a chegada ao armazém se considera confirmada.
-    - "em_entrega": já numa coluna de região mas fora de On Hold — entrega
-      já em curso, não precisa de mais sugestões de logística.
+    - "pronto_entrega": na coluna "On hold" — chegou ao armazém, pronta a
+      ser entregue, ainda por agendar.
+    - "em_entrega": já numa coluna de região (Lisboa/Porto/Outro) — a
+      entrega está em curso, não precisa de mais sugestões de logística.
     - "outro": nenhuma das anteriores (ex: já concluído, ou outra coluna
       fora deste fluxo)."""
     coluna = (estado or "").strip().lower()
     if "produ" in coluna:  # "Produção"/"Producao", tolera acentuação/maiúsculas
         return "producao"
+    if coluna == COLUNA_PRONTO_ENTREGA:
+        return "pronto_entrega"
     if coluna in COLUNAS_REGIAO_ENTREGA:
-        return "pronto_entrega" if on_hold else "em_entrega"
+        return "em_entrega"
     return "outro"
 
 def dias_uteis_entre(inicio: date, fim: date) -> int:
@@ -79,7 +77,7 @@ DIAS_ENTREGA_SEM_FECHO = 7
 JANELA_REPETICAO_DIAS = {"A": 7, "B": 7, "C": 999999, "D": 3, "E": 999999,
                         "F": 999999, "G": 999999, "H": 999999, "I": 7}
 
-def avaliar_condicao(*, hoje: date, estado: str, on_hold: bool, criado_em: date,
+def avaliar_condicao(*, hoje: date, estado: str, criado_em: date,
                      data_entrada_armazem: date = None, data_entrega_cliente: date = None,
                      ja_alertado_recente: dict, horas_desde_alerta_b: float = None,
                      pedido_email_atraso: bool = False):
@@ -89,7 +87,7 @@ def avaliar_condicao(*, hoje: date, estado: str, on_hold: bool, criado_em: date,
     {"A": bool, "B": bool, ...} já calculado pelo chamador (consultando a
     janela de repetição própria de cada condição em db.py) —
     esta função em si não sabe nada de base de dados, só de regras."""
-    fase = fase_encomenda(estado, on_hold)
+    fase = fase_encomenda(estado)
 
     # A — campos críticos em falta, encomenda já em curso há mais de 3 dias úteis
     if ((data_entrada_armazem is None or data_entrega_cliente is None)

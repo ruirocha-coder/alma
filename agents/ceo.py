@@ -15,12 +15,13 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
 
 # pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia
 # ("não há nenhum card pronto a entregar"), apesar de existirem cards
-# visivelmente em On Hold no Basecamp — o nome do campo "On Hold" nunca
-# tinha sido confirmado contra dados reais da API. Esta tool mostra os
-# dados reais diretamente na conversa, sem precisar de abrir nenhum URL.
+# visivelmente em On Hold no Basecamp — diagnóstico ao vivo confirmou
+# que "On Hold" é uma coluna própria (ver tools.logistica.fase_encomenda),
+# não uma marca por card. Esta tool mostra os dados reais diretamente na
+# conversa, sem precisar de abrir nenhum URL.
 TOOL_DIAGNOSTICO_LOGISTICA = {
     "name": "diagnosticar_logistica_on_hold",
-    "description": "Mostra os campos brutos de cards do projeto Entregas nas colunas Lisboa/Porto/Outro, com o resultado atual da deteção de \"On Hold\" ao lado de cada um — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
+    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (na coluna \"On hold\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
@@ -99,31 +100,14 @@ usando o resultado devolvido pela tool.
 Se a sugestão semanal de logística vier vazia (sem cards prontos) mas a
 pessoa disser que vê cards em On Hold no Basecamp, ou pedirem para
 diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
-mostra os campos reais dos cards e o resultado atual da deteção de "On
-Hold" para cada um. Apresenta isto de forma legível (coluna, se foi
-detetado como "On Hold" ou não, e os campos com "hold" no nome), para se
-perceber se o nome do campo usado no código está certo ou precisa de
-ajuste — nunca despejes o JSON em bruto sem organizar, mas TAMBÉM nunca
-te limites a dizer "não encontrei nenhum campo relevante" sem mostrares
-os valores concretos que a tool devolve (o campo `status`, `position`,
-`parent` e `inherits_status` de cada exemplo) — esses valores exatos,
-tal como vêm, são o que permite identificar o campo certo; interpretar
-sem os mostrar não ajuda a corrigir nada. Os exemplos que a tool mostra
-podem calhar todos em cards que não estão mesmo em On Hold (isso já
-aconteceu) — o que não prova nada sobre o valor real de um card que
-esteja mesmo em On Hold. Por isso a tool também devolve dois testes
-diretos, que tens sempre de reportar com os valores exatos que vierem
-(nunca resumidos): `teste_sem_filtro_status_active` (mostra se pedir os
-cards sem o filtro status="active" traz cards a mais — sinal de que
-esse filtro está a excluir os cards em On Hold já do lado do Basecamp) e
-`teste_detalhe_completo_do_card` (mostra se o card, pedido em detalhe
-completo, tem campos extra que a lista resumida não mostra). Mostra
-também sempre `cards_numa_coluna_chamada_on_hold` — pode existir uma
-coluna própria chamada "On hold" (à parte de Lisboa/Porto/Outro), com os
-seus próprios cards; se existir, repara nos títulos/notas desses
-exemplos para perceber como fica identificada a região de cada um
-(pode estar no título, ex: um prefixo "LX"/"PO", já que a coluna deixa
-de ser Lisboa/Porto/Outro assim que o card lá está).
+mostra as colunas reais vistas no projeto e os cards já na coluna "On
+hold" (prontos a entregar), com título e notas. Apresenta isto de forma
+legível (quantos cards no total, que colunas existem, quantos estão
+prontos a entregar, e os exemplos com título/notas) — nunca despejes o
+JSON em bruto sem organizar. Se `colunas_vistas` não incluir nenhuma
+coluna parecida com "On hold", ou `total_pronto_a_entregar` vier a
+zero apesar de a pessoa ver cards lá, mostra exatamente que colunas
+foram vistas para se perceber se o nome mudou.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa

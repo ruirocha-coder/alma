@@ -508,17 +508,13 @@ def resumo_semanal_basecamp_agora():
 
 @app.get("/logistica/diagnostico")
 def diagnostico_logistica_entregas():
-    """Diagnóstico: mostra os campos brutos de cards do projeto "Entregas"
-    que estejam numa coluna de região (Lisboa/Porto/Outro) — usado para
-    confirmar, contra dados reais, o nome exato do campo que diz se um
-    card está "On Hold" (bug real, 2026-07-23: a sugestão semanal disse
-    que não havia nenhum card pronto, apesar de existirem vários em On
-    Hold nessas colunas, visíveis no Basecamp — sinal de que o campo
-    assumido em tools.logistica.esta_em_on_hold está errado), sem
-    precisar de ir aos logs do Railway. A mesma informação também está
-    disponível diretamente na conversa com a Alma (ver
-    agents.logistica_entregas.diagnostico_cards_regiao, a mesma função
-    usada aqui, para nunca haver duas versões desta lógica a divergir)."""
+    """Diagnóstico: mostra as colunas reais vistas no projeto "Entregas" e
+    os cards já na coluna "On hold" (prontos a entregar — ver
+    tools.logistica.fase_encomenda), sem precisar de ir aos logs do
+    Railway. A mesma informação também está disponível diretamente na
+    conversa com a Alma (ver agents.logistica_entregas.diagnostico_cards_regiao,
+    a mesma função usada aqui, para nunca haver duas versões desta lógica
+    a divergir)."""
     return logistica_entregas.diagnostico_cards_regiao()
 
 @app.get("/ecos-largos/diagnostico-manual")

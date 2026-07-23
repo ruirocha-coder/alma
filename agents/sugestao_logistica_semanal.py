@@ -4,10 +4,16 @@
 # uma sugestão de como organizar a semana de entregas, dirigida à
 # Conceição Costa (e só a ela).
 #
-# Os cards já em "On Hold" nas colunas Lisboa/Porto/Outro significam que
-# a encomenda já foi feita ao fornecedor e o produto já está em armazém,
-# pronto a ser entregue (ver tools.logistica.fase_encomenda) — é isso que
-# esta sugestão organiza: que dia visitar cada região, e por que ordem
+# Modelo CORRIGIDO em 2026-07-23, depois de um diagnóstico ao vivo com o
+# Rui: os cards prontos a entregar não ficam marcados dentro da coluna de
+# região (assunção original, errada) — passam antes para uma coluna
+# própria chamada "On hold" (ver tools.logistica.fase_encomenda). Como a
+# coluna deixa de indicar a região nesse momento, a região de cada
+# entrega passa a ser determinada a partir da MORADA extraída das notas
+# do card (ver _classificar_regiao) — os prefixos do título (ex: "LX",
+# "PR") revelaram-se inconsistentes para servir de critério fiável.
+#
+# Esta sugestão organiza: que dia visitar cada região, e por que ordem
 # dentro de cada dia. Nunca calcula uma rota otimizada real (sem API de
 # mapas configurada neste projeto, e sem necessidade pedida) — só agrupa
 # por dia/região e sugere uma ordem sensata dentro de cada dia.
@@ -25,11 +31,29 @@ MAX_CARDS_POR_CORRIDA = 40
 # a aplicação, para a menção ser sempre resolvida para a mesma pessoa.
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
-# nome real da 3ª coluna confirmado ao vivo no Basecamp (2026-07-23):
-# "Outro", no singular — "outros" também aceite ao ler a coluna (ver
-# _COLUNA_PARA_REGIAO), por tolerância a uma futura renomeação.
 _REGIOES = ("Lisboa", "Porto", "Outro")
-_COLUNA_PARA_REGIAO = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
+
+_MISSAO_CLASSIFICAR_REGIAO = """Classificas a morada de entrega abaixo
+numa destas três regiões: "Lisboa", "Porto", ou "Outro" (qualquer
+localização que não seja claramente da área de Lisboa ou do Porto,
+incluindo arredores/área metropolitana). Responde só com uma destas três
+palavras, nada mais."""
+
+def _classificar_regiao(morada: str) -> str:
+    """A coluna "On hold" (onde ficam os cards prontos a entregar) não
+    distingue a região — todas ficam na mesma coluna, independentemente
+    de onde vieram. A morada de entrega é o sinal mais fiável para saber
+    a região (o prefixo do título revelou-se inconsistente, ex: um card
+    com prefixo ambíguo tinha morada em Lisboa)."""
+    if not morada:
+        return "Outro"
+    resposta = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=10,
+        system=_MISSAO_CLASSIFICAR_REGIAO,
+        messages=[{"role": "user", "content": morada}]
+    )
+    escolha = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    return escolha if escolha in _REGIOES else "Outro"
 
 def _semana_atual() -> tuple:
     """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
@@ -60,9 +84,10 @@ organização das entregas — a publicar no Mural "Programação" do projeto
 Entregas no Basecamp. Semana de {inicio_semana.strftime('%d/%m/%Y')} a
 {fim_semana.strftime('%d/%m/%Y')}.
 
-Abaixo estão os cards já em "On Hold" nas colunas Lisboa, Porto e Outros —
-significa que a encomenda já foi feita ao fornecedor e o produto já está
-em armazém, pronto a ser entregue.
+Abaixo estão os cards já na coluna "On hold" — significa que a encomenda
+já foi feita ao fornecedor e o produto já está em armazém, pronto a ser
+entregue. Já vêm agrupados por região (Lisboa/Porto/Outro), determinada
+pela morada de entrega de cada um.
 
 {contexto}
 
@@ -96,10 +121,11 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards ativos do projeto "Entregas", filtra os que estão prontos a
-    entregar (On Hold nas colunas Lisboa/Porto/Outros), e publica uma
-    sugestão de organização no Mural "Programação", dirigida à Conceição
-    Costa. Pensado para correr às segundas de manhã (agendado), mas pode
-    ser disparado manualmente."""
+    entregar (na coluna "On hold" — ver tools.logistica.fase_encomenda),
+    classifica a região de cada um pela morada, e publica uma sugestão
+    de organização no Mural "Programação", dirigida à Conceição Costa.
+    Pensado para correr às segundas de manhã (agendado), mas pode ser
+    disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
@@ -118,11 +144,7 @@ def correr_sugestao_semanal_logistica() -> dict:
 
         for item in itens:
             estado = ((item.get("parent") or {}).get("title") or "").strip()
-            regiao = _COLUNA_PARA_REGIAO.get(estado.lower())
-            if regiao is None:
-                continue
-            on_hold = logistica.esta_em_on_hold(item)
-            if logistica.fase_encomenda(estado, on_hold) != "pronto_entrega":
+            if logistica.fase_encomenda(estado) != "pronto_entrega":
                 continue
 
             titulo = item.get("title") or item.get("content") or "(sem título)"
@@ -133,6 +155,7 @@ def correr_sugestao_semanal_logistica() -> dict:
                 print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
                 dados = {}
 
+            regiao = _classificar_regiao(dados.get("morada"))
             cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
 
         inicio_semana, fim_semana = _semana_atual()

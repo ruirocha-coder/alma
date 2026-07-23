@@ -5,12 +5,12 @@
 # publica comentários a propor o que fazer a seguir, sempre validados por
 # um humano antes de qualquer envio.
 #
-# NOTA IMPORTANTE (verificar ao vivo antes de confiar cegamente nisto):
-# - O nome exato do campo que diz se um card está "On Hold" nunca foi
-#   confirmado contra dados reais da API do Basecamp (nenhuma outra parte
-#   desta aplicação precisou disto até agora) — ver
-#   tools.logistica.esta_em_on_hold, que aceita as variantes mais
-#   prováveis, mas pode precisar de ajuste depois de uma verificação real.
+# NOTA (2026-07-23, confirmado ao vivo com o Rui — ver
+# tools.logistica.fase_encomenda): "On Hold" não é uma marca por card,
+# é uma coluna própria chamada "On hold" — um card muda de coluna
+# (Produção -> On hold -> Lisboa/Porto/Outro) em vez de ficar marcado
+# dentro da mesma coluna. A assunção original (um campo tipo
+# on_hold_at/on_hold) estava errada e foi removida.
 # - As duas datas críticas (entrada em armazém / entrega ao cliente) e os
 #   restantes dados (cliente, n.º de encomenda, fornecedor) vêm das notas
 #   do card em texto livre, por isso são extraídos por IA (não há um
@@ -168,15 +168,14 @@ def _ja_alertado_recente_por_condicao(recording_id: int) -> dict:
     return {c: db.logistica_ja_alertado_recente(recording_id, c, dias)
            for c, dias in logistica.JANELA_REPETICAO_DIAS.items()}
 
-_COLUNAS_REGIAO_CONHECIDAS = ("lisboa", "porto", "outro", "outros")
-
 def diagnostico_cards_regiao(limite: int = 5) -> dict:
-    """Mostra os campos brutos de cards do projeto Entregas que estejam
-    numa coluna de região (Lisboa/Porto/Outro), com o resultado atual de
-    esta_em_on_hold ao lado de cada um — para confirmar contra dados reais
-    o nome exato do campo que o Basecamp usa para "On Hold" (nunca
-    verificado ao vivo, ver a nota no topo deste ficheiro e
-    tools.logistica.esta_em_on_hold). Partilhado entre o endpoint
+    """Mostra os campos brutos de cards do projeto Entregas, agrupados
+    pela fase atual (ver tools.logistica.fase_encomenda) — útil para
+    confirmar ao vivo que a deteção de fase bate certo com o que se vê no
+    Basecamp (ex: um nome de coluna diferente do esperado). Diagnóstico
+    ao vivo com o Rui em 2026-07-23 confirmou o modelo atual: "On Hold" é
+    mesmo uma coluna própria (não uma marca dentro da coluna de região,
+    a assunção original, errada). Partilhado entre o endpoint
     /logistica/diagnostico (main.py) e a tool de chat do mesmo nome, para
     nunca haver duas versões desta lógica a divergir uma da outra."""
     try:
@@ -188,107 +187,18 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     if not itens:
         return {"aviso": "nenhum card ativo encontrado no projeto Entregas"}
 
-    itens_regiao = [i for i in itens
-                    if ((i.get("parent") or {}).get("title") or "").strip().lower() in _COLUNAS_REGIAO_CONHECIDAS]
-    if not itens_regiao:
-        return {"aviso": "nenhum card encontrado numa coluna de região (Lisboa/Porto/Outro) — "
-                         "confirma o nome exato das colunas no Basecamp",
-                "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens})}
-
-    exemplos = itens_regiao[:limite]
-    resultado = {
+    itens_prontos = [i for i in itens
+                    if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
+    return {
         "total_no_projeto": len(itens),
-        "total_em_coluna_de_regiao": len(itens_regiao),
-        "campos_disponiveis": sorted(exemplos[0].keys()),
-        "exemplos": [{
-            "titulo": i.get("title") or i.get("content"),
-            "coluna": (i.get("parent") or {}).get("title"),
-            "esta_em_on_hold_resultado_atual": logistica.esta_em_on_hold(i),
-            # bug real (2026-07-23): a lista de campos reais devolvida pelo
-            # Basecamp não tem NENHUM campo com "hold" no nome (nem
-            # on_hold_at nem on_hold, os dois assumidos em
-            # tools.logistica.esta_em_on_hold) — por isso mostram-se aqui
-            # os valores concretos dos campos mais prováveis de codificar
-            # esse estado (status costuma ser "active"/"archived"/
-            # "trashed" nos outros tipos de registo do Basecamp, mas pode
-            # estar a ser reaproveitado para cards de Kanban), e o item
-            # completo, para se poder inspecionar tudo sem adivinhar.
-            "campos_relacionados_com_hold": {k: v for k, v in i.items() if "hold" in k.lower()},
-            "status": i.get("status"),
-            "position": i.get("position"),
-            "inherits_status": i.get("inherits_status"),
-            "parent": i.get("parent"),
-            "item_completo": i,
-        } for i in exemplos],
-    }
-
-    # Duas hipóteses concretas, testadas diretamente em vez de continuar a
-    # adivinhar (2026-07-23) — os exemplos vistos até agora calharam sempre
-    # sem estar em On Hold (status="active" nos dois), o que não prova
-    # nada sobre o que um card REALMENTE em On Hold teria:
-    #
-    # (A) basecamp._itens_ativos() pede status="active" ao Basecamp — se
-    # cards em On Hold tiverem outro valor de status do lado do servidor,
-    # ficam excluídos antes sequer de chegarem aqui. Testa-se pedindo os
-    # Kanban::Card deste projeto sem esse filtro, e comparando.
-    try:
-        ids_ja_vistos = {i["id"] for i in itens}
-        sem_filtro_status = basecamp._get_paginado(
-            f"{basecamp._base_url()}/projects/recordings.json",
-            params={"type": "Kanban::Card", "completed": "false"})
-        sem_filtro_do_projeto = [i for i in sem_filtro_status
-                                 if logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
-        novos_sem_filtro = [i for i in sem_filtro_do_projeto if i["id"] not in ids_ja_vistos]
-        resultado["teste_sem_filtro_status_active"] = {
-            "total_com_filtro_active": len([i for i in itens if i.get("type") == "Kanban::Card"]),
-            "total_sem_filtro_de_status": len(sem_filtro_do_projeto),
-            "cards_que_só_aparecem_sem_o_filtro": [
-                {"titulo": i.get("title"), "coluna": (i.get("parent") or {}).get("title"), "status": i.get("status")}
-                for i in novos_sem_filtro[:10]
-            ],
-        }
-    except Exception as e:
-        resultado["teste_sem_filtro_status_active"] = {"erro": str(e)}
-
-    # (B) o endpoint genérico de listagem pode devolver uma versão
-    # resumida do card, sem campos específicos de Kanban Card Table (ex:
-    # on hold) — testa-se comparando com o detalhe completo do mesmo card,
-    # pedido diretamente pelo seu próprio url (ver basecamp.obter_recording).
-    try:
-        primeiro = exemplos[0]
-        detalhe = basecamp.obter_recording(primeiro["url"])
-        campos_extra = sorted(set(detalhe.keys()) - set(primeiro.keys()))
-        resultado["teste_detalhe_completo_do_card"] = {
-            "titulo": primeiro.get("title"),
-            "campos_extra_no_detalhe_completo": campos_extra,
-            "valores_dos_campos_extra": {k: detalhe[k] for k in campos_extra},
-        }
-    except Exception as e:
-        resultado["teste_detalhe_completo_do_card"] = {"erro": str(e)}
-
-    # (C) bug encontrado no próprio diagnóstico (2026-07-23): `itens_regiao`
-    # (acima) só aceita colunas chamadas Lisboa/Porto/Outro — um card cuja
-    # coluna se chame antes "On hold" fica sempre de fora deste
-    # diagnóstico, exatamente o oposto do que precisamos de inspecionar.
-    # Aqui procura-se em TODOS os cards do projeto (não só itens_regiao)
-    # por uma coluna cujo nome contenha "hold", com o título/notas
-    # completos de cada exemplo — para perceber se existe mesmo essa
-    # coluna à parte, e (se existir) como fica identificada a região do
-    # card quando lá está (ex: no título, tipo "LX | ...", já que a
-    # coluna deixa de ser Lisboa/Porto/Outro).
-    itens_coluna_on_hold = [i for i in itens
-                           if "hold" in ((i.get("parent") or {}).get("title") or "").strip().lower()]
-    resultado["cards_numa_coluna_chamada_on_hold"] = {
-        "total": len(itens_coluna_on_hold),
-        "nomes_de_coluna_vistos": sorted({(i.get("parent") or {}).get("title") for i in itens_coluna_on_hold}),
-        "exemplos": [{
+        "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens}),
+        "total_pronto_a_entregar": len(itens_prontos),
+        "exemplos_prontos_a_entregar": [{
             "titulo": i.get("title") or i.get("content"),
             "coluna": (i.get("parent") or {}).get("title"),
             "notas": basecamp._texto_simples(i.get("description", ""))[:300],
-        } for i in itens_coluna_on_hold[:8]],
+        } for i in itens_prontos[:limite]],
     }
-
-    return resultado
 
 def correr_monitorizacao_logistica() -> dict:
     """Um ciclo da monitorização de logística: lê as encomendas ativas no
@@ -322,7 +232,6 @@ def correr_monitorizacao_logistica() -> dict:
             titulo = item.get("title") or item.get("content") or "(sem título)"
             notas = basecamp._texto_simples(item.get("description", ""))
             estado = (item.get("parent") or {}).get("title") or ""
-            on_hold = logistica.esta_em_on_hold(item)
             projeto = (item.get("bucket") or {}).get("name")
             recording_id = item["id"]
 
@@ -358,7 +267,7 @@ def correr_monitorizacao_logistica() -> dict:
             pedido_email_atraso = _pediu_email_atraso(comentarios, desde_ultimo_bot)
 
             resultado = logistica.avaliar_condicao(
-                hoje=hoje, estado=estado, on_hold=on_hold, criado_em=_card_criado_em(item),
+                hoje=hoje, estado=estado, criado_em=_card_criado_em(item),
                 data_entrada_armazem=dados.get("data_entrada_armazem"),
                 data_entrega_cliente=dados.get("data_entrega_cliente"),
                 ja_alertado_recente=_ja_alertado_recente_por_condicao(recording_id),
