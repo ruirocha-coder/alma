@@ -15,7 +15,8 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
-                    resumo_anual_cargas_toros, logistica_entregas)
+                    resumo_anual_cargas_toros, logistica_entregas,
+                    sugestao_logistica_semanal)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, logistica, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
@@ -44,6 +45,13 @@ scheduler.add_job(resumo_anual_cargas_toros.correr_resumo_anual_cargas_toros, "c
                   month=12, day=31, hour=22, minute=0)
 # monitorização de logística (projeto Entregas): todos os dias antes das 9h
 scheduler.add_job(logistica_entregas.correr_monitorizacao_logistica, "cron", hour=7, minute=30)
+# sugestão semanal de logística (Mural "Programação", projeto Entregas),
+# dirigida à Conceição Costa — pedido explícito do Rui (2026-07-23):
+# segundas-feiras às 8h30, depois da monitorização diária das 7h30 (para
+# refletir o estado mais recente possível) e antes dos outros resumos
+# semanais das 9h/9h15, para nunca publicarem em simultâneo
+scheduler.add_job(sugestao_logistica_semanal.correr_sugestao_semanal_logistica, "cron",
+                  day_of_week="mon", hour=8, minute=30)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -560,6 +568,15 @@ def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
     segundo plano — os resultados/erros ficam nos logs do servidor."""
     threading.Thread(target=logistica_entregas.correr_monitorizacao_logistica, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/logistica/sugestao-semanal")
+def sugestao_semanal_logistica_agora():
+    """Dispara já a sugestão semanal de logística (Mural "Programação",
+    projeto Entregas, dirigida à Conceição Costa), em segundo plano — os
+    resultados/erros ficam nos logs do servidor. Útil para testar sem
+    esperar pela segunda-feira."""
+    threading.Thread(target=sugestao_logistica_semanal.correr_sugestao_semanal_logistica, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/ecos-largos/resumo-diario")
