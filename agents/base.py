@@ -34,6 +34,12 @@ def _disparar_sugestao_semanal_logistica():
     from agents import sugestao_logistica_semanal
     return sugestao_logistica_semanal.correr_sugestao_semanal_logistica()
 
+def _diagnosticar_logistica_on_hold():
+    # mesma razão do import adiado acima: agents/logistica_entregas.py
+    # também importa `client` deste ficheiro.
+    from agents import logistica_entregas
+    return logistica_entregas.diagnostico_cards_regiao()
+
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
     "procurar_paginas": bigcommerce.procurar_paginas,
@@ -54,6 +60,7 @@ FUNCOES = {
     "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
     "gerar_pdf": documentos_gerados.gerar_pdf,
     "disparar_sugestao_semanal_logistica": _disparar_sugestao_semanal_logistica,
+    "diagnosticar_logistica_on_hold": _diagnosticar_logistica_on_hold,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,
