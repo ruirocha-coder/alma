@@ -192,11 +192,19 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     (main.py) e a tool de chat do mesmo nome, para nunca haver duas
     versões desta lógica a divergir uma da outra.
 
-    Confirmado ao vivo (2026-07-23): o avô estrutural dos cards em "On
-    Hold" é sempre o quadro geral, nunca uma coluna de região — por isso
-    a região é classificada pela morada (ver
-    agents.sugestao_logistica_semanal._classificar_regiao), não lida da
-    estrutura do Kanban.
+    NOTA (2026-07-23): um diagnóstico anterior mostrou o avô estrutural
+    dos cards numa coluna "On hold" à parte como sendo o quadro geral
+    (não uma coluna de região) — mas o Rui viu ao vivo no Basecamp que
+    "On Hold" também aparece como uma DIVISÃO dentro de cada coluna de
+    região (Porto/Lisboa/Outro têm cada uma a sua própria secção "ON
+    HOLD" visível na página da própria coluna). As duas coisas podem
+    coexistir sem se contradizerem. Por isso esta função devolve também
+    `cards_por_coluna_regiao`: TODOS os cards de cada coluna de região
+    (Lisboa/Porto/Outro), com TODOS os campos brutos de cada um (não só
+    o título) — para comparar diretamente um card visivelmente em "On
+    Hold" dentro da coluna com um que não está, e encontrar o campo
+    exato que os distingue (a região, nestes casos, é sempre a própria
+    coluna — não precisa de classificação por morada).
 
     bug real (2026-07-23): a sugestão semanal publicada mostrou cliente/
     morada/produto/data "não identificado" em TODOS os 20 cards, apesar
@@ -219,6 +227,23 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     itens_prontos = [i for i in itens
                     if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
 
+    # pedido do Rui (2026-07-23), depois de ver ao vivo no Basecamp que
+    # "On Hold" aparece como uma divisão DENTRO de cada coluna de região
+    # (Porto/Lisboa/Outro têm cada uma a sua própria secção "ON HOLD",
+    # visível na própria página da coluna) — o que contradiz o diagnóstico
+    # anterior (avô = quadro geral, para uma coluna "On hold" à parte).
+    # Podem coexistir duas coisas distintas com o mesmo nome. Por isso
+    # esta função mostra também, para cada coluna de região, TODOS os
+    # cards lá dentro com TODOS os campos brutos (não só o título) — para
+    # comparar diretamente um card visivelmente em "On Hold" (ex: visto
+    # na imagem do Rui) com um que não está, e encontrar o campo que os
+    # distingue (pode ser `position`, ou outro campo ainda não veriificado).
+    cards_por_coluna_regiao = {}
+    for i in itens:
+        titulo_coluna = (i.get("parent") or {}).get("title")
+        if logistica.normalizar_coluna(titulo_coluna) in logistica.COLUNAS_REGIAO_ENTREGA:
+            cards_por_coluna_regiao.setdefault(titulo_coluna, []).append(i)
+
     def _extracao_debug(item: dict) -> dict:
         titulo = item.get("title") or item.get("content") or ""
         notas = basecamp._texto_simples(item.get("description", ""))
@@ -236,6 +261,12 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             return {"notas_enviadas_tamanho": len(notas), "erro": "resposta do modelo não é JSON válido",
                     "texto_bruto_modelo": texto_bruto[:300], "dados_extraidos": None}
 
+    def _card_bruto_resumido(item: dict) -> dict:
+        resumo = dict(item)
+        if resumo.get("description"):
+            resumo["description"] = basecamp._texto_simples(resumo["description"])[:200]
+        return resumo
+
     return {
         "total_no_projeto": len(itens),
         "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens}),
@@ -246,6 +277,10 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "notas": basecamp._texto_simples(i.get("description", ""))[:300],
             "extracao_debug": _extracao_debug(i),
         } for i in itens_prontos[:limite]],
+        "cards_por_coluna_regiao": {
+            coluna: [_card_bruto_resumido(i) for i in cards]
+            for coluna, cards in cards_por_coluna_regiao.items()
+        },
     }
 
 def correr_monitorizacao_logistica() -> dict:

@@ -103,17 +103,32 @@ usando o resultado devolvido pela tool.
 Se a sugestão semanal de logística vier vazia (sem cards prontos), ou
 disser que o cliente/morada/produto/data de todos os cards é "não
 identificado" mesmo havendo essa informação nas notas do Basecamp, ou
-pedirem para diagnosticar/perceber porquê, usa
-diagnosticar_logistica_on_hold — mostra as colunas reais vistas no
-projeto e os cards já em "On Hold" (prontos a entregar), com título e
-notas. Apresenta isto de forma legível (quantos cards no total, que
-colunas existem, quantos estão prontos a entregar, e os exemplos com
-título/notas) — nunca despejes o JSON em bruto sem organizar. Cada
-exemplo inclui também `extracao_debug` (o tamanho das notas realmente
+disser que uma região (ex: Porto) não tem nenhum card pronto quando a
+pessoa vê cards em "On Hold" nessa coluna no Basecamp, ou pedirem para
+diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
+mostra as colunas reais vistas no projeto e os cards já em "On Hold"
+(prontos a entregar), com título e notas. Apresenta isto de forma
+legível (quantos cards no total, que colunas existem, quantos estão
+prontos a entregar, e os exemplos com título/notas) — nunca despejes o
+JSON em bruto sem organizar.
+
+Cada exemplo inclui `extracao_debug` (o tamanho das notas realmente
 enviadas ao modelo, os dados extraídos se funcionou, ou a resposta em
 bruto do modelo/o erro exato se falhou) — mostra sempre estes valores
 exatos, tal como vêm (nunca resumidos), quando a extração não estiver a
-funcionar; é o que permite perceber exatamente onde está a falhar.
+funcionar.
+
+A tool também devolve `cards_por_coluna_regiao`: TODOS os cards de cada
+coluna de região (Lisboa/Porto/Outro), com TODOS os campos brutos de
+cada um — não só o título. Isto existe porque pode haver, dentro de
+cada coluna de região, uma divisão visual "On Hold" própria dessa
+coluna (distinta de uma eventual coluna "On hold" à parte) — se a
+pessoa disser que vê cards em On Hold dentro de Porto/Lisboa/Outro que
+a sugestão semanal não apanhou, mostra os campos brutos completos de
+2-3 cards dessa coluna lado a lado (um que a pessoa diga estar em On
+Hold, outro que não esteja), tal como vêm, para se identificar em
+conjunto qual o campo exato que os distingue — nunca resumas isto nem
+tentes adivinhar o campo sozinha.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
