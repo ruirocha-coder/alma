@@ -177,7 +177,18 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     Basecamp (ex: um nome de coluna diferente do esperado, ou nenhum card
     ainda em "On Hold"). Partilhado entre o endpoint /logistica/diagnostico
     (main.py) e a tool de chat do mesmo nome, para nunca haver duas
-    versões desta lógica a divergir uma da outra."""
+    versões desta lógica a divergir uma da outra.
+
+    bug real (2026-07-23): a sugestão semanal marcou TODOS os cards em
+    "On Hold" como região "Outro", mesmo cards visivelmente nas colunas
+    Lisboa/Porto no Basecamp — sinal de que
+    agents.sugestao_logistica_semanal._regiao_do_card_pronto não está a
+    conseguir subir ao parent real (falha uniforme em todos, não em
+    alguns, sugere um problema estrutural, não um card isolado). Por
+    isso esta função expõe também o objeto `parent` bruto de cada
+    exemplo (todos os campos, incluindo se `url` existe ou não) e o
+    resultado exato de tentar obter o parent desse parent — para se ver
+    com dados reais porque é que a resolução da região está a falhar."""
     try:
         itens = [i for i in basecamp._itens_ativos()
                 if i.get("type") == "Kanban::Card"
@@ -189,6 +200,18 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
 
     itens_prontos = [i for i in itens
                     if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
+
+    def _resolucao_regiao(item: dict) -> dict:
+        parent = item.get("parent") or {}
+        parent_url = parent.get("url")
+        if not parent_url:
+            return {"parent_bruto": parent, "avo": None, "erro": "parent não tem campo 'url'"}
+        try:
+            avo = basecamp.obter_recording(parent_url).get("parent")
+            return {"parent_bruto": parent, "avo": avo, "erro": None}
+        except Exception as e:
+            return {"parent_bruto": parent, "avo": None, "erro": str(e)}
+
     return {
         "total_no_projeto": len(itens),
         "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens}),
@@ -197,6 +220,7 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "titulo": i.get("title") or i.get("content"),
             "coluna": (i.get("parent") or {}).get("title"),
             "notas": basecamp._texto_simples(i.get("description", ""))[:300],
+            "resolucao_regiao": _resolucao_regiao(i),
         } for i in itens_prontos[:limite]],
     }
 
