@@ -266,6 +266,28 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     except Exception as e:
         resultado["teste_detalhe_completo_do_card"] = {"erro": str(e)}
 
+    # (C) bug encontrado no próprio diagnóstico (2026-07-23): `itens_regiao`
+    # (acima) só aceita colunas chamadas Lisboa/Porto/Outro — um card cuja
+    # coluna se chame antes "On hold" fica sempre de fora deste
+    # diagnóstico, exatamente o oposto do que precisamos de inspecionar.
+    # Aqui procura-se em TODOS os cards do projeto (não só itens_regiao)
+    # por uma coluna cujo nome contenha "hold", com o título/notas
+    # completos de cada exemplo — para perceber se existe mesmo essa
+    # coluna à parte, e (se existir) como fica identificada a região do
+    # card quando lá está (ex: no título, tipo "LX | ...", já que a
+    # coluna deixa de ser Lisboa/Porto/Outro).
+    itens_coluna_on_hold = [i for i in itens
+                           if "hold" in ((i.get("parent") or {}).get("title") or "").strip().lower()]
+    resultado["cards_numa_coluna_chamada_on_hold"] = {
+        "total": len(itens_coluna_on_hold),
+        "nomes_de_coluna_vistos": sorted({(i.get("parent") or {}).get("title") for i in itens_coluna_on_hold}),
+        "exemplos": [{
+            "titulo": i.get("title") or i.get("content"),
+            "coluna": (i.get("parent") or {}).get("title"),
+            "notas": basecamp._texto_simples(i.get("description", ""))[:300],
+        } for i in itens_coluna_on_hold[:8]],
+    }
+
     return resultado
 
 def correr_monitorizacao_logistica() -> dict:
