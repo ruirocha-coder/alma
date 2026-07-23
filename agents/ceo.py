@@ -2,7 +2,18 @@ from persona import PERSONA
 from tools.bigcommerce import TOOL_RESUMO_VENDAS
 from agents.base import correr_agente, correr_agente_stream, TOOLS_COMUNS
 
-TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS]
+# pedido explícito do Rui (2026-07-23): poder pedir, na conversa, para
+# correr já a sugestão semanal de logística de entregas (ver
+# agents/sugestao_logistica_semanal), em vez de só esperar pelo
+# agendamento de segunda-feira ou usar o endpoint técnico
+# /logistica/sugestao-semanal.
+TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
+    "name": "disparar_sugestao_semanal_logistica",
+    "description": "Corre já a sugestão semanal de organização das entregas do projeto Entregas (agrupa por dia/região os cards já prontos a entregar, com moradas e datas), e publica-a no Mural \"Programação\", dirigida à Conceição Costa — a mesma sugestão que corre automaticamente às segundas de manhã. Usa isto sempre que pedirem para gerar, testar ou disparar esta sugestão agora, sem esperar pela próxima segunda-feira.",
+    "input_schema": {"type": "object", "properties": {}, "required": []}
+}
+
+TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL]
 
 MISSAO_CEO = PERSONA + """
 
@@ -64,6 +75,15 @@ Para perguntas sobre o estado de um projeto (do Basecamp) — como está,
 quantos cards/tarefas há em cada coluna, o que está atrasado, o que está
 parado sem prazo — usa estado_projeto_basecamp em vez de tentares adivinhar
 ou responder de forma vaga.
+
+Se pedirem para gerar, testar ou disparar a sugestão semanal de logística
+de entregas agora (ex: "faz já a sugestão de logística", "testa a
+sugestão semanal de entregas com os cards de agora"), usa
+disparar_sugestao_semanal_logistica — isto publica mesmo, a sério, no
+Mural "Programação" do projeto Entregas, e notifica a Conceição Costa de
+verdade (não é uma simulação). Depois de a chamares, informa quantas
+entregas estavam prontas (por região) e que a publicação foi feita,
+usando o resultado devolvido pela tool.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
