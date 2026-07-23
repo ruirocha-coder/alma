@@ -4,7 +4,7 @@
 # uma sugestão de como organizar a semana de entregas, dirigida à
 # Conceição Costa (e só a ela).
 #
-# Os cards já em "On Hold" nas colunas Lisboa/Porto/Outros significam que
+# Os cards já em "On Hold" nas colunas Lisboa/Porto/Outro significam que
 # a encomenda já foi feita ao fornecedor e o produto já está em armazém,
 # pronto a ser entregue (ver tools.logistica.fase_encomenda) — é isso que
 # esta sugestão organiza: que dia visitar cada região, e por que ordem
@@ -25,7 +25,11 @@ MAX_CARDS_POR_CORRIDA = 40
 # a aplicação, para a menção ser sempre resolvida para a mesma pessoa.
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
-_REGIOES = ("Lisboa", "Porto", "Outros")
+# nome real da 3ª coluna confirmado ao vivo no Basecamp (2026-07-23):
+# "Outro", no singular — "outros" também aceite ao ler a coluna (ver
+# _COLUNA_PARA_REGIAO), por tolerância a uma futura renomeação.
+_REGIOES = ("Lisboa", "Porto", "Outro")
+_COLUNA_PARA_REGIAO = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
 def _semana_atual() -> tuple:
     """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
@@ -114,7 +118,7 @@ def correr_sugestao_semanal_logistica() -> dict:
 
         for item in itens:
             estado = ((item.get("parent") or {}).get("title") or "").strip()
-            regiao = next((r for r in _REGIOES if r.lower() == estado.lower()), None)
+            regiao = _COLUNA_PARA_REGIAO.get(estado.lower())
             if regiao is None:
                 continue
             on_hold = logistica.esta_em_on_hold(item)

@@ -15,7 +15,10 @@ PROJETO_ENTREGAS = "Entregas"
 # (2026-07-22): "quando os cards passam para On Hold [numa coluna de
 # região], significa que estão prontos a serem entregues"; assim que saem
 # de On Hold nessa coluna, já estão a ser entregues.
-COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outros"}
+# Nome real da 3ª coluna confirmado ao vivo no Basecamp (2026-07-23):
+# "Outro", no singular — inclui-se "outros" também, por tolerância, caso
+# seja renomeada no futuro.
+COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
 
 def esta_em_on_hold(item_bruto: dict) -> bool:
     """Se um card do Kanban está marcado como "On Hold" no Basecamp — este
