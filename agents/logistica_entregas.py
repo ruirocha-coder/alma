@@ -196,7 +196,7 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
                 "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens})}
 
     exemplos = itens_regiao[:limite]
-    return {
+    resultado = {
         "total_no_projeto": len(itens),
         "total_em_coluna_de_regiao": len(itens_regiao),
         "campos_disponiveis": sorted(exemplos[0].keys()),
@@ -221,6 +221,52 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "item_completo": i,
         } for i in exemplos],
     }
+
+    # Duas hipóteses concretas, testadas diretamente em vez de continuar a
+    # adivinhar (2026-07-23) — os exemplos vistos até agora calharam sempre
+    # sem estar em On Hold (status="active" nos dois), o que não prova
+    # nada sobre o que um card REALMENTE em On Hold teria:
+    #
+    # (A) basecamp._itens_ativos() pede status="active" ao Basecamp — se
+    # cards em On Hold tiverem outro valor de status do lado do servidor,
+    # ficam excluídos antes sequer de chegarem aqui. Testa-se pedindo os
+    # Kanban::Card deste projeto sem esse filtro, e comparando.
+    try:
+        ids_ja_vistos = {i["id"] for i in itens}
+        sem_filtro_status = basecamp._get_paginado(
+            f"{basecamp._base_url()}/projects/recordings.json",
+            params={"type": "Kanban::Card", "completed": "false"})
+        sem_filtro_do_projeto = [i for i in sem_filtro_status
+                                 if logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
+        novos_sem_filtro = [i for i in sem_filtro_do_projeto if i["id"] not in ids_ja_vistos]
+        resultado["teste_sem_filtro_status_active"] = {
+            "total_com_filtro_active": len([i for i in itens if i.get("type") == "Kanban::Card"]),
+            "total_sem_filtro_de_status": len(sem_filtro_do_projeto),
+            "cards_que_só_aparecem_sem_o_filtro": [
+                {"titulo": i.get("title"), "coluna": (i.get("parent") or {}).get("title"), "status": i.get("status")}
+                for i in novos_sem_filtro[:10]
+            ],
+        }
+    except Exception as e:
+        resultado["teste_sem_filtro_status_active"] = {"erro": str(e)}
+
+    # (B) o endpoint genérico de listagem pode devolver uma versão
+    # resumida do card, sem campos específicos de Kanban Card Table (ex:
+    # on hold) — testa-se comparando com o detalhe completo do mesmo card,
+    # pedido diretamente pelo seu próprio url (ver basecamp.obter_recording).
+    try:
+        primeiro = exemplos[0]
+        detalhe = basecamp.obter_recording(primeiro["url"])
+        campos_extra = sorted(set(detalhe.keys()) - set(primeiro.keys()))
+        resultado["teste_detalhe_completo_do_card"] = {
+            "titulo": primeiro.get("title"),
+            "campos_extra_no_detalhe_completo": campos_extra,
+            "valores_dos_campos_extra": {k: detalhe[k] for k in campos_extra},
+        }
+    except Exception as e:
+        resultado["teste_detalhe_completo_do_card"] = {"erro": str(e)}
+
+    return resultado
 
 def correr_monitorizacao_logistica() -> dict:
     """Um ciclo da monitorização de logística: lê as encomendas ativas no
