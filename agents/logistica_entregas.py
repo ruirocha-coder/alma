@@ -10,10 +10,10 @@
 # coluna, do tipo "Kanban::OnHold" — não uma coluna irmã. Um card em "On
 # Hold" está pronto a entregar INDEPENDENTEMENTE da coluna onde estiver;
 # a coluna real (Lisboa/Porto/Outro) por trás dessa secção é lida
-# diretamente do `url` do parent (ver
-# agents.sugestao_logistica_semanal._regiao_estrutural). A assunção
-# original (um campo tipo on_hold_at/on_hold no próprio card) estava
-# errada e foi removida.
+# diretamente do `url` do parent (ver _regiao_estrutural, aqui mesmo,
+# para ser partilhada entre a sugestão semanal e o diagnóstico — nunca
+# duas versões desta lógica a divergir). A assunção original (um campo
+# tipo on_hold_at/on_hold no próprio card) estava errada e foi removida.
 # - As duas datas críticas (entrada em armazém / entrega ao cliente) e os
 #   restantes dados (cliente, n.º de encomenda, fornecedor) vêm das notas
 #   do card em texto livre, por isso são extraídos por IA (não há um
@@ -28,6 +28,26 @@ import db
 _a_correr = threading.Lock()
 
 MAX_CARDS_POR_CORRIDA = 40  # limite defensivo, tal como monitor_basecamp.py
+
+_REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
+
+def _regiao_estrutural(item: dict):
+    """Tenta ler a região diretamente da coluna real por trás da secção
+    "On Hold" do card — devolve None (não Lisboa/Porto/Outro) se não
+    conseguir, ou se essa coluna real não for uma coluna de região (ex:
+    ainda "Produção"), para o chamador cair na morada nesse caso.
+    Partilhada entre agents.sugestao_logistica_semanal (a sugestão
+    semanal) e diagnostico_cards_regiao (aqui mesmo), para nunca haver
+    duas versões desta lógica a divergir uma da outra."""
+    parent_url = (item.get("parent") or {}).get("url")
+    if not parent_url:
+        return None
+    try:
+        coluna_real = basecamp.obter_recording(parent_url)
+    except Exception as e:
+        print(f"[logistica_entregas] não consegui obter a coluna real de {item.get('id')}: {e!r}")
+        return None
+    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(coluna_real.get("title")))
 
 _MISSAO_EXTRACAO = """Extrais dados estruturados do título e das notas de um
 card do Basecamp sobre uma encomenda de mobiliário, para a equipa de
@@ -197,13 +217,14 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     um card em "On Hold" é um objeto do tipo "Kanban::OnHold" — o `url`
     desse objeto aponta diretamente para a coluna de região REAL por
     trás dessa secção (ex: confirmado ao vivo, uma secção "On Hold" com
-    url para a coluna "Porto"). Um diagnóstico anterior tinha ido um
-    nível a mais na hierarquia (o parent DESSE objeto é sim o quadro
-    geral "Logística", mas o objeto obtido a partir do próprio `url` já
-    É a coluna de região) — daí a conclusão errada de que a região não
-    era recuperável. Esta função devolve também `cards_por_coluna_regiao`
-    (todos os cards de Lisboa/Porto/Outro, com todos os campos brutos)
-    para continuar a confirmar isto ao vivo sempre que necessário.
+    url para a coluna "Porto"). `cards_por_coluna_regiao` devolve, para
+    cada região (Lisboa/Porto/Outro), TODOS os cards que lá pertencem —
+    tanto os diretamente na coluna (`estado_fluxo: "em_entrega"`) como os
+    em "On Hold" cuja coluna real é essa região (`estado_fluxo:
+    "pronto_a_entregar"`, via _regiao_estrutural) — bug real (2026-07-23):
+    pedir "lista os cards da coluna Porto" só mostrava o primeiro grupo,
+    faltavam os prontos a entregar visíveis na própria página da coluna
+    no Basecamp.
 
     bug real (2026-07-23): a sugestão semanal publicada mostrou cliente/
     morada/produto/data "não identificado" em TODOS os 20 cards, apesar
@@ -226,22 +247,23 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     itens_prontos = [i for i in itens
                     if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
 
-    # pedido do Rui (2026-07-23), depois de ver ao vivo no Basecamp que
-    # "On Hold" aparece como uma divisão DENTRO de cada coluna de região
-    # (Porto/Lisboa/Outro têm cada uma a sua própria secção "ON HOLD",
-    # visível na própria página da coluna) — o que contradiz o diagnóstico
-    # anterior (avô = quadro geral, para uma coluna "On hold" à parte).
-    # Podem coexistir duas coisas distintas com o mesmo nome. Por isso
-    # esta função mostra também, para cada coluna de região, TODOS os
-    # cards lá dentro com TODOS os campos brutos (não só o título) — para
-    # comparar diretamente um card visivelmente em "On Hold" (ex: visto
-    # na imagem do Rui) com um que não está, e encontrar o campo que os
-    # distingue (pode ser `position`, ou outro campo ainda não veriificado).
-    cards_por_coluna_regiao = {}
+    # pedido do Rui (2026-07-23): quando alguém pede a lista de cards de
+    # uma região (ex: "lista os cards da coluna Porto"), tem de incluir
+    # tanto os cards diretamente nessa coluna (em entrega a sério) como
+    # os cards em "On Hold" cuja coluna real (ver _regiao_estrutural) é
+    # essa mesma região — senão fica incompleta (bug real: só mostrava o
+    # card em entrega, faltavam os prontos a entregar em On Hold que se
+    # veem na própria página da coluna no Basecamp).
+    cards_por_coluna_regiao_bruto = {regiao: [] for regiao in _REGIAO_POR_COLUNA.values()}
     for i in itens:
         titulo_coluna = (i.get("parent") or {}).get("title")
-        if logistica.normalizar_coluna(titulo_coluna) in logistica.COLUNAS_REGIAO_ENTREGA:
-            cards_por_coluna_regiao.setdefault(titulo_coluna, []).append(i)
+        regiao = _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(titulo_coluna))
+        if regiao:
+            cards_por_coluna_regiao_bruto[regiao].append((i, "em_entrega"))
+    for i in itens_prontos:
+        regiao = _regiao_estrutural(i)
+        if regiao:
+            cards_por_coluna_regiao_bruto[regiao].append((i, "pronto_a_entregar"))
 
     def _extracao_debug(item: dict) -> dict:
         titulo = item.get("title") or item.get("content") or ""
@@ -277,8 +299,8 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "extracao_debug": _extracao_debug(i),
         } for i in itens_prontos[:limite]],
         "cards_por_coluna_regiao": {
-            coluna: [_card_bruto_resumido(i) for i in cards]
-            for coluna, cards in cards_por_coluna_regiao.items()
+            regiao: [{"estado_fluxo": estado, **_card_bruto_resumido(i)} for i, estado in cards]
+            for regiao, cards in cards_por_coluna_regiao_bruto.items()
         },
     }
 

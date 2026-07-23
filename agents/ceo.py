@@ -100,33 +100,32 @@ verdade (não é uma simulação). Depois de a chamares, informa quantas
 entregas estavam prontas (por região) e que a publicação foi feita,
 usando o resultado devolvido pela tool.
 
-Se a sugestão semanal de logística vier vazia (sem cards prontos), ou
-disser que o cliente/morada/produto/data de todos os cards é "não
-identificado" mesmo havendo essa informação nas notas do Basecamp, ou
-disser que uma região (ex: Porto) não tem nenhum card pronto quando a
-pessoa vê cards em "On Hold" nessa coluna no Basecamp, ou pedirem para
-diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
-mostra as colunas reais vistas no projeto e os cards já em "On Hold"
-(prontos a entregar), com título e notas. Apresenta isto de forma
-legível (quantos cards no total, que colunas existem, quantos estão
-prontos a entregar, e os exemplos com título/notas) — nunca despejes o
-JSON em bruto sem organizar.
+Se pedirem para listar os cards de uma região/coluna (ex: "lista os
+cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão
+semanal de logística vier vazia (sem cards prontos), ou disser que o
+cliente/morada/produto/data de todos os cards é "não identificado"
+mesmo havendo essa informação nas notas do Basecamp, ou disser que uma
+região não tem nenhum card pronto quando a pessoa vê cards em "On Hold"
+nessa coluna no Basecamp, ou pedirem para diagnosticar/perceber
+porquê, usa diagnosticar_logistica_on_hold.
 
-Cada exemplo inclui `extracao_debug` (o tamanho das notas realmente
-enviadas ao modelo, os dados extraídos se funcionou, ou a resposta em
-bruto do modelo/o erro exato se falhou) — mostra sempre estes valores
-exatos, tal como vêm (nunca resumidos), quando a extração não estiver a
-funcionar.
+A tool devolve `cards_por_coluna_regiao`: para cada região (Lisboa/
+Porto/Outro), TODOS os cards que lhe pertencem — os que estão
+diretamente na coluna (`estado_fluxo: "em_entrega"`, já em entrega a
+sério) E os que estão em "On Hold" mas cuja coluna real é essa região
+(`estado_fluxo: "pronto_a_entregar"`, ainda por agendar). Ao listar os
+cards de uma região, mostra sempre AMBOS os grupos, nunca só um — um
+bug real já aconteceu por só mostrar o grupo "em_entrega" e faltarem os
+"pronto_a_entregar" que se veem na própria página da coluna no
+Basecamp. Apresenta cada card de forma legível (título, estado_fluxo,
+e o que conseguires ler das notas — cliente, morada, data prevista),
+nunca despejes o JSON em bruto sem organizar.
 
-A tool também devolve `cards_por_coluna_regiao`: TODOS os cards de cada
-coluna de região (Lisboa/Porto/Outro), com TODOS os campos brutos de
-cada um — não só o título (nota: cards em "On Hold" dentro dessa região
-não aparecem aqui, porque estruturalmente pertencem à secção "On Hold",
-não à coluna em si — isso é esperado, não é um bug). Se a pessoa disser
-que vê cards em On Hold dentro de Porto/Lisboa/Outro que a sugestão
-semanal não apanhou, mostra os campos brutos completos de 2-3 cards
-dessa coluna lado a lado, tal como vêm, para se confirmar a estrutura —
-nunca resumas isto nem tentes adivinhar sozinha.
+Cada exemplo em `exemplos_prontos_a_entregar` inclui `extracao_debug`
+(o tamanho das notas realmente enviadas ao modelo, os dados extraídos
+se funcionou, ou a resposta em bruto do modelo/o erro exato se falhou)
+— mostra sempre estes valores exatos, tal como vêm (nunca resumidos),
+quando a extração não estiver a funcionar.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
