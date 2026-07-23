@@ -109,6 +109,20 @@ coluna parecida com "On hold", ou `total_pronto_a_entregar` vier a
 zero apesar de a pessoa ver cards lá, mostra exatamente que colunas
 foram vistas para se perceber se o nome mudou.
 
+Ainda não está confirmado se "On Hold" é mesmo uma coluna irmã de
+Lisboa/Porto/Outro, ou antes uma DIVISÃO dentro de cada uma dessas
+colunas (o Card Table do Basecamp suporta isso, e o Rui pôs isto em
+causa depois de ver o board). Por isso a tool devolve também
+`parent_bruto_por_coluna` (o objeto parent — id/type/title/url — de um
+card exemplo de cada coluna vista) e `avo_do_parent_on_hold` (o parent
+do parent de um card em "On hold"). Reporta sempre estes dois valores
+tal como vêm, nunca resumidos: se o `type` do parent de um card em "On
+hold" for igual ao de um card em Lisboa/Porto/Outro, é uma coluna irmã;
+se `avo_do_parent_on_hold` apontar para o título de uma dessas colunas
+de região, é antes uma divisão dentro dela — o que significaria que a
+região de um card em "On hold" pode vir a ser lida diretamente dos
+dados (avô do parent), sem precisar de classificar pela morada.
+
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
 resumo_pessoa_basecamp com o nome da pessoa (só considera cards do Kanban,

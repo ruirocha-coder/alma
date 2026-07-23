@@ -173,11 +173,21 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     pela fase atual (ver tools.logistica.fase_encomenda) — útil para
     confirmar ao vivo que a deteção de fase bate certo com o que se vê no
     Basecamp (ex: um nome de coluna diferente do esperado). Diagnóstico
-    ao vivo com o Rui em 2026-07-23 confirmou o modelo atual: "On Hold" é
-    mesmo uma coluna própria (não uma marca dentro da coluna de região,
-    a assunção original, errada). Partilhado entre o endpoint
-    /logistica/diagnostico (main.py) e a tool de chat do mesmo nome, para
-    nunca haver duas versões desta lógica a divergir uma da outra."""
+    ao vivo com o Rui em 2026-07-23 sugeriu o modelo atual: "On Hold" é
+    o que aparece em `parent.title` de 31 cards reais — mas o Rui pôs em
+    causa (2026-07-23, depois de rever a imagem do board) se isto é
+    mesmo uma coluna irmã de Lisboa/Porto/Outro, ou antes uma DIVISÃO
+    dentro de cada uma dessas colunas (o Card Table do Basecamp suporta
+    isso). Por isso esta função devolve também o objeto `parent` bruto
+    (incluindo `type`) de um exemplo de cada coluna vista — se o `type`
+    do parent de um card em "On hold" for igual ao de um card em
+    Lisboa/Porto/Outro, é mesmo uma coluna irmã; se for diferente, ou se
+    o parent do card em "On hold" tiver ele próprio um "parent" a apontar
+    para Lisboa/Porto/Outro, é antes uma divisão dentro da coluna de
+    região — o que muda por completo como se deve extrair a região.
+    Partilhado entre o endpoint /logistica/diagnostico (main.py) e a
+    tool de chat do mesmo nome, para nunca haver duas versões desta
+    lógica a divergir uma da outra."""
     try:
         itens = [i for i in basecamp._itens_ativos()
                 if i.get("type") == "Kanban::Card"
@@ -189,10 +199,36 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
 
     itens_prontos = [i for i in itens
                     if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
+
+    # um exemplo de card por cada coluna vista, com o objeto parent bruto
+    # (id/type/title/url tal como vêm da API) — para comparar diretamente
+    # o parent de um card em "On hold" com o de um card em Lisboa/Porto/
+    # Outro, sem interpretar nada.
+    parent_por_coluna = {}
+    for i in itens:
+        titulo_coluna = (i.get("parent") or {}).get("title")
+        if titulo_coluna not in parent_por_coluna:
+            parent_por_coluna[titulo_coluna] = i.get("parent")
+
+    # para um card em "On hold": tenta subir mais um nível (o parent do
+    # parent), para ver se o "On hold" é uma divisão dentro de Lisboa/
+    # Porto/Outro (nesse caso, o avô seria a coluna de região) ou uma
+    # coluna irmã (nesse caso, o avô seria o quadro/card table, igual ao
+    # avô de Lisboa/Porto/Outro).
+    avo_do_on_hold = None
+    exemplo_on_hold_parent_url = (parent_por_coluna.get("On hold") or {}).get("url")
+    if exemplo_on_hold_parent_url:
+        try:
+            avo_do_on_hold = basecamp.obter_recording(exemplo_on_hold_parent_url).get("parent")
+        except Exception as e:
+            avo_do_on_hold = {"erro_ao_obter": str(e)}
+
     return {
         "total_no_projeto": len(itens),
         "colunas_vistas": sorted({(i.get("parent") or {}).get("title") for i in itens}),
         "total_pronto_a_entregar": len(itens_prontos),
+        "parent_bruto_por_coluna": parent_por_coluna,
+        "avo_do_parent_on_hold": avo_do_on_hold,
         "exemplos_prontos_a_entregar": [{
             "titulo": i.get("title") or i.get("content"),
             "coluna": (i.get("parent") or {}).get("title"),
