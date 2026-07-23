@@ -13,15 +13,16 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
-# pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia
-# ("não há nenhum card pronto a entregar"), apesar de existirem cards
-# visivelmente em On Hold no Basecamp — diagnóstico ao vivo confirmou
-# que "On Hold" é uma coluna própria (ver tools.logistica.fase_encomenda),
-# não uma marca por card. Esta tool mostra os dados reais diretamente na
-# conversa, sem precisar de abrir nenhum URL.
+# pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia ("não
+# há nenhum card pronto a entregar"). Em vez de tentar decidir se "On
+# Hold" era uma coluna irmã de Lisboa/Porto/Outro ou uma divisão dentro
+# delas (ambíguo, nunca confirmado com certeza), o Rui optou por criar
+# uma coluna nova e simples chamada "Armazém" — ver
+# tools.logistica.fase_encomenda. Esta tool mostra os dados reais
+# diretamente na conversa, sem precisar de abrir nenhum URL.
 TOOL_DIAGNOSTICO_LOGISTICA = {
     "name": "diagnosticar_logistica_on_hold",
-    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (na coluna \"On hold\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
+    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (na coluna \"Armazém\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
@@ -98,30 +99,17 @@ entregas estavam prontas (por região) e que a publicação foi feita,
 usando o resultado devolvido pela tool.
 
 Se a sugestão semanal de logística vier vazia (sem cards prontos) mas a
-pessoa disser que vê cards em On Hold no Basecamp, ou pedirem para
-diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
-mostra as colunas reais vistas no projeto e os cards já na coluna "On
-hold" (prontos a entregar), com título e notas. Apresenta isto de forma
-legível (quantos cards no total, que colunas existem, quantos estão
-prontos a entregar, e os exemplos com título/notas) — nunca despejes o
-JSON em bruto sem organizar. Se `colunas_vistas` não incluir nenhuma
-coluna parecida com "On hold", ou `total_pronto_a_entregar` vier a
-zero apesar de a pessoa ver cards lá, mostra exatamente que colunas
-foram vistas para se perceber se o nome mudou.
-
-Ainda não está confirmado se "On Hold" é mesmo uma coluna irmã de
-Lisboa/Porto/Outro, ou antes uma DIVISÃO dentro de cada uma dessas
-colunas (o Card Table do Basecamp suporta isso, e o Rui pôs isto em
-causa depois de ver o board). Por isso a tool devolve também
-`parent_bruto_por_coluna` (o objeto parent — id/type/title/url — de um
-card exemplo de cada coluna vista) e `avo_do_parent_on_hold` (o parent
-do parent de um card em "On hold"). Reporta sempre estes dois valores
-tal como vêm, nunca resumidos: se o `type` do parent de um card em "On
-hold" for igual ao de um card em Lisboa/Porto/Outro, é uma coluna irmã;
-se `avo_do_parent_on_hold` apontar para o título de uma dessas colunas
-de região, é antes uma divisão dentro dela — o que significaria que a
-região de um card em "On hold" pode vir a ser lida diretamente dos
-dados (avô do parent), sem precisar de classificar pela morada.
+pessoa disser que vê cards prontos a entregar no Basecamp, ou pedirem
+para diagnosticar/perceber porquê, usa diagnosticar_logistica_on_hold —
+mostra as colunas reais vistas no projeto e os cards já na coluna
+"Armazém" (prontos a entregar), com título e notas. Apresenta isto de
+forma legível (quantos cards no total, que colunas existem, quantos
+estão prontos a entregar, e os exemplos com título/notas) — nunca
+despejes o JSON em bruto sem organizar. Se `colunas_vistas` não incluir
+nenhuma coluna parecida com "Armazém", ou `total_pronto_a_entregar` vier
+a zero apesar de a pessoa ver cards lá, mostra exatamente que colunas
+foram vistas para se perceber se o nome mudou ou se a coluna ainda não
+foi criada.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa

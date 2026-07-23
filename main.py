@@ -509,7 +509,7 @@ def resumo_semanal_basecamp_agora():
 @app.get("/logistica/diagnostico")
 def diagnostico_logistica_entregas():
     """Diagnóstico: mostra as colunas reais vistas no projeto "Entregas" e
-    os cards já na coluna "On hold" (prontos a entregar — ver
+    os cards já na coluna "Armazém" (prontos a entregar — ver
     tools.logistica.fase_encomenda), sem precisar de ir aos logs do
     Railway. A mesma informação também está disponível diretamente na
     conversa com a Alma (ver agents.logistica_entregas.diagnostico_cards_regiao,

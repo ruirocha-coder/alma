@@ -5,37 +5,44 @@
 # testadas isoladamente. A orquestração (ler cards, extrair dados via IA,
 # publicar comentários) vive em agents/logistica_entregas.py, tal como
 # agents/monitor_basecamp.py já faz para os atrasos gerais.
+import unicodedata
 from datetime import date, timedelta
 
 PROJETO_ENTREGAS = "Entregas"
 
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
 # ainda está no fornecedor; as colunas por região são onde a encomenda é
-# entregue ao cliente. Modelo CORRIGIDO em 2026-07-23, depois de um
-# diagnóstico ao vivo com o Rui: "On Hold" não é uma marca dentro da
-# coluna de região (assunção original, nunca confirmada) — é uma coluna
-# própria e à parte, chamada mesmo "On hold". Um card passa para lá
-# quando a encomenda chega ao armazém e fica pronta a entregar; quando a
-# entrega começa a sério, volta para a coluna da região (Lisboa/Porto/
-# Outro) — confirmado pelo Rui: "quando está na coluna [de região] mas
-# não está em On Hold significa que está a ser entregue". O significado
-# de cada fase não mudou desde o pedido original, só o mecanismo: antes
-# assumia-se um campo por card (esta_em_on_hold, nunca confirmado e
-# entretanto removido), agora é o NOME da coluna que decide tudo.
+# entregue ao cliente. MODELO SIMPLIFICADO em 2026-07-23, a pedido
+# explícito do Rui: em vez de tentar decidir se "On Hold" era uma coluna
+# irmã das colunas de região ou uma divisão dentro delas (ambíguo, nunca
+# confirmado com certeza), o Rui vai criar uma coluna nova e simples,
+# chamada "Armazém" — qualquer card lá dentro está pronto a entregar
+# (chegou ao armazém, à espera de ser agendado). Quando a entrega começa
+# a sério, o card volta para a coluna da região (Lisboa/Porto/Outro). A
+# região de um card em "Armazém" não vem da coluna (é uma só, para todas
+# as regiões) — vem da morada extraída das notas do card (ver
+# agents.sugestao_logistica_semanal._classificar_regiao).
 COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
-COLUNA_PRONTO_ENTREGA = "on hold"
+COLUNA_PRONTO_ENTREGA = "armazem"
+
+def _normalizar_coluna(nome: str) -> str:
+    """Minúsculas e sem acentos — para "Armazém"/"armazem"/"ARMAZÉM"
+    serem sempre reconhecidos como a mesma coluna, sem depender de a
+    equipa escrever sempre exatamente da mesma forma."""
+    sem_acentos = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode()
+    return sem_acentos.strip().lower()
 
 def fase_encomenda(estado: str) -> str:
     """Em que fase do fluxo de entrega está uma encomenda, a partir do
     nome da coluna do Kanban ("estado") onde o card está agora:
     - "producao": ainda no fornecedor, à espera de chegar ao armazém.
-    - "pronto_entrega": na coluna "On hold" — chegou ao armazém, pronta a
+    - "pronto_entrega": na coluna "Armazém" — chegou ao armazém, pronta a
       ser entregue, ainda por agendar.
     - "em_entrega": já numa coluna de região (Lisboa/Porto/Outro) — a
       entrega está em curso, não precisa de mais sugestões de logística.
     - "outro": nenhuma das anteriores (ex: já concluído, ou outra coluna
       fora deste fluxo)."""
-    coluna = (estado or "").strip().lower()
+    coluna = _normalizar_coluna(estado)
     if "produ" in coluna:  # "Produção"/"Producao", tolera acentuação/maiúsculas
         return "producao"
     if coluna == COLUNA_PRONTO_ENTREGA:
@@ -110,7 +117,7 @@ def avaliar_condicao(*, hoje: date, estado: str, criado_em: date,
             return "C", {}
 
         # D — data de entrada em armazém já passada (ainda em "produção" —
-        # se já tivesse chegado, o card já teria mudado de coluna/on hold)
+        # se já tivesse chegado, o card já teria mudado para a coluna "Armazém")
         if dias_para_entrada < 0 and not ja_alertado_recente.get("D"):
             return "D", {}
 

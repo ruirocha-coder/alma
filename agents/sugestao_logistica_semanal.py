@@ -4,14 +4,14 @@
 # uma sugestão de como organizar a semana de entregas, dirigida à
 # Conceição Costa (e só a ela).
 #
-# Modelo CORRIGIDO em 2026-07-23, depois de um diagnóstico ao vivo com o
-# Rui: os cards prontos a entregar não ficam marcados dentro da coluna de
-# região (assunção original, errada) — passam antes para uma coluna
-# própria chamada "On hold" (ver tools.logistica.fase_encomenda). Como a
-# coluna deixa de indicar a região nesse momento, a região de cada
-# entrega passa a ser determinada a partir da MORADA extraída das notas
-# do card (ver _classificar_regiao) — os prefixos do título (ex: "LX",
-# "PR") revelaram-se inconsistentes para servir de critério fiável.
+# Modelo SIMPLIFICADO em 2026-07-23, a pedido explícito do Rui: os cards
+# prontos a entregar não ficam marcados dentro da coluna de região — o
+# Rui criou uma coluna nova e própria chamada "Armazém" (ver
+# tools.logistica.fase_encomenda). Como essa coluna é uma só para todas
+# as regiões, a região de cada entrega é determinada a partir da MORADA
+# extraída das notas do card (ver _classificar_regiao) — os prefixos do
+# título (ex: "LX", "PR") revelaram-se inconsistentes para servir de
+# critério fiável.
 #
 # Esta sugestão organiza: que dia visitar cada região, e por que ordem
 # dentro de cada dia. Nunca calcula uma rota otimizada real (sem API de
@@ -40,7 +40,7 @@ incluindo arredores/área metropolitana). Responde só com uma destas três
 palavras, nada mais."""
 
 def _classificar_regiao(morada: str) -> str:
-    """A coluna "On hold" (onde ficam os cards prontos a entregar) não
+    """A coluna "Armazém" (onde ficam os cards prontos a entregar) não
     distingue a região — todas ficam na mesma coluna, independentemente
     de onde vieram. A morada de entrega é o sinal mais fiável para saber
     a região (o prefixo do título revelou-se inconsistente, ex: um card
@@ -84,7 +84,7 @@ organização das entregas — a publicar no Mural "Programação" do projeto
 Entregas no Basecamp. Semana de {inicio_semana.strftime('%d/%m/%Y')} a
 {fim_semana.strftime('%d/%m/%Y')}.
 
-Abaixo estão os cards já na coluna "On hold" — significa que a encomenda
+Abaixo estão os cards já na coluna "Armazém" — significa que a encomenda
 já foi feita ao fornecedor e o produto já está em armazém, pronto a ser
 entregue. Já vêm agrupados por região (Lisboa/Porto/Outro), determinada
 pela morada de entrega de cada um.
@@ -121,7 +121,7 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards ativos do projeto "Entregas", filtra os que estão prontos a
-    entregar (na coluna "On hold" — ver tools.logistica.fase_encomenda),
+    entregar (na coluna "Armazém" — ver tools.logistica.fase_encomenda),
     classifica a região de cada um pela morada, e publica uma sugestão
     de organização no Mural "Programação", dirigida à Conceição Costa.
     Pensado para correr às segundas de manhã (agendado), mas pode ser
