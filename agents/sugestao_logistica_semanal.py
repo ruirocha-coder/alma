@@ -4,15 +4,17 @@
 # uma sugestão de como organizar a semana de entregas, dirigida à
 # Conceição Costa (e só a ela).
 #
-# Modelo CONFIRMADO em 2026-07-23, diretamente pelo Rui: um card em "On
-# Hold" está pronto a entregar INDEPENDENTEMENTE da coluna onde estiver —
-# a coluna (Lisboa/Porto/Outro) indica sempre a rota/região, quer o card
-# esteja em "On Hold" quer já esteja a ser entregue a sério (ver
-# tools.logistica.fase_encomenda). Quando um card está na secção "On
-# Hold" de uma coluna, o `parent` que a API devolve é a própria secção,
-# não a coluna real — por isso a região vem de subir mais um nível (ver
-# _regiao_do_card_pronto), nunca de classificar a morada por IA (essa
-# abordagem foi tentada e abandonada antes de se confirmar este modelo).
+# Modelo CONFIRMADO em 2026-07-23, com diagnóstico ao vivo: os 31 cards
+# prontos a entregar estão todos na MESMA coluna "On Hold" — o avô do seu
+# parent é o quadro geral "Logística", não uma coluna de região. Ou seja,
+# a estrutura do Kanban NÃO preserva a região quando um card entra em
+# "On Hold" (ao contrário do que se pensou antes) — não há nenhuma
+# camada estrutural de onde ler Lisboa/Porto/Outro para estes cards. A
+# única fonte fiável é a morada nas notas do card (confirmado ao vivo:
+# "Av. Visconde de Valmor, 77 - Lisboa", "Travessa de Casais lote 6, São
+# Félix da Marinha") — por isso a região volta a ser classificada por
+# IA a partir da morada extraída (ver _classificar_regiao). O Rui
+# confirmou esta opção em vez de reestruturar o quadro no Basecamp.
 #
 # Esta sugestão organiza: que dia visitar cada região, e por que ordem
 # dentro de cada dia. Nunca calcula uma rota otimizada real (sem API de
@@ -33,23 +35,27 @@ MAX_CARDS_POR_CORRIDA = 40
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
 _REGIOES = ("Lisboa", "Porto", "Outro")
-_REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
-def _regiao_do_card_pronto(item: dict) -> str:
-    """Um card pronto a entregar está na secção "On Hold" de uma coluna —
-    o `parent` que vem no item é essa secção (título genérico "On hold"),
-    não a coluna real. A coluna real (Lisboa/Porto/Outro, que é sempre a
-    rota/região, com ou sem "On Hold") é o parent DESSA secção — por isso
-    é preciso ir buscar o detalhe completo da secção para saber a região."""
-    parent_url = (item.get("parent") or {}).get("url")
-    if not parent_url:
+_MISSAO_CLASSIFICAR_REGIAO = """Classificas a morada de entrega abaixo
+numa destas três regiões: "Lisboa", "Porto", ou "Outro" (qualquer
+localização que não seja claramente da área de Lisboa ou do Porto,
+incluindo arredores/área metropolitana). Responde só com uma destas três
+palavras, nada mais."""
+
+def _classificar_regiao(morada: str) -> str:
+    """A coluna "On Hold" (onde ficam os cards prontos a entregar) não
+    distingue a região — confirmado ao vivo que o avô estrutural destes
+    cards é o quadro geral, não uma coluna de região. A morada de entrega
+    é a única fonte fiável para saber a região."""
+    if not morada:
         return "Outro"
-    try:
-        coluna_real = basecamp.obter_recording(parent_url).get("parent") or {}
-    except Exception as e:
-        print(f"[sugestao_logistica_semanal] não consegui obter a coluna real de {item.get('id')}: {e!r}")
-        return "Outro"
-    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(coluna_real.get("title")), "Outro")
+    resposta = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=10,
+        system=_MISSAO_CLASSIFICAR_REGIAO,
+        messages=[{"role": "user", "content": morada}]
+    )
+    escolha = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    return escolha if escolha in _REGIOES else "Outro"
 
 def _semana_atual() -> tuple:
     """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
@@ -82,8 +88,8 @@ Entregas no Basecamp. Semana de {inicio_semana.strftime('%d/%m/%Y')} a
 
 Abaixo estão os cards já em "On Hold" — significa que a encomenda já foi
 feita ao fornecedor e o produto já está em armazém, pronto a ser
-entregue. Já vêm agrupados pela região/rota de entrega (Lisboa/Porto/
-Outro).
+entregue. Já vêm agrupados por região (Lisboa/Porto/Outro), determinada
+pela morada de entrega de cada um.
 
 {contexto}
 
@@ -117,11 +123,11 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards ativos do projeto "Entregas", filtra os que estão prontos a
-    entregar (em "On Hold" — ver tools.logistica.fase_encomenda), lê a
-    região/rota real de cada um, e publica uma sugestão de organização
-    no Mural "Programação", dirigida à Conceição Costa. Pensado para
-    correr às segundas de manhã (agendado), mas pode ser disparado
-    manualmente."""
+    entregar (em "On Hold" — ver tools.logistica.fase_encomenda),
+    classifica a região de cada um pela morada, e publica uma sugestão
+    de organização no Mural "Programação", dirigida à Conceição Costa.
+    Pensado para correr às segundas de manhã (agendado), mas pode ser
+    disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
@@ -151,7 +157,7 @@ def correr_sugestao_semanal_logistica() -> dict:
                 print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
                 dados = {}
 
-            regiao = _regiao_do_card_pronto(item)
+            regiao = _classificar_regiao(dados.get("morada"))
             cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
 
         inicio_semana, fim_semana = _semana_atual()

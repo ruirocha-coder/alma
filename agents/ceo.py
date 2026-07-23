@@ -14,16 +14,17 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
 }
 
 # pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia ("não
-# há nenhum card pronto a entregar"). Confirmado diretamente pelo Rui, e
-# pela documentação oficial da API do Basecamp: "On Hold" é uma secção
-# dentro de uma coluna, não uma coluna irmã — um card em "On Hold" está
-# pronto a entregar independentemente da coluna onde estiver, e a coluna
-# (Lisboa/Porto/Outro) indica sempre a rota/região (ver
-# tools.logistica.fase_encomenda). Esta tool mostra os dados reais
-# diretamente na conversa, sem precisar de abrir nenhum URL.
+# há nenhum card pronto a entregar"), e depois marcou toda a gente como
+# "Outro". Confirmado ao vivo: os 31 cards em "On Hold" estão todos numa
+# única coluna, cujo avô estrutural é o quadro geral — a região não é
+# lida da estrutura, é classificada pela morada (ver
+# tools.logistica.fase_encomenda e
+# agents.sugestao_logistica_semanal._classificar_regiao). Esta tool
+# mostra os dados reais diretamente na conversa, sem precisar de abrir
+# nenhum URL.
 TOOL_DIAGNOSTICO_LOGISTICA = {
     "name": "diagnosticar_logistica_on_hold",
-    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (em \"On Hold\"), com título e notas — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos.",
+    "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (em \"On Hold\"), com título, notas, e o resultado de tentar extrair os dados de cada um — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos ou não está a extrair os dados corretamente.",
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
@@ -100,20 +101,19 @@ entregas estavam prontas (por região) e que a publicação foi feita,
 usando o resultado devolvido pela tool.
 
 Se a sugestão semanal de logística vier vazia (sem cards prontos), ou
-disser que a região de todos os cards é sempre "Outro" mesmo havendo
-cards em Lisboa/Porto no Basecamp, ou pedirem para diagnosticar/
-perceber porquê, usa diagnosticar_logistica_on_hold — mostra as colunas
-reais vistas no projeto e os cards já em "On Hold" (prontos a entregar,
-independentemente da coluna onde estiverem), com título e notas.
-Apresenta isto de forma legível (quantos cards no total, que colunas
-existem, quantos estão prontos a entregar, e os exemplos com título/
-notas) — nunca despejes o JSON em bruto sem organizar. Cada exemplo
-inclui também `resolucao_regiao` (o objeto `parent` bruto do card, e o
-resultado exato de tentar subir mais um nível para encontrar a coluna
-real) — mostra sempre os valores exatos deste campo, tal como vêm
-(nunca resumidos), quando a região resolvida não bater certo com o que
-se vê no Basecamp; é o que permite perceber exatamente onde a resolução
-da região está a falhar.
+disser que o cliente/morada/produto/data de todos os cards é "não
+identificado" mesmo havendo essa informação nas notas do Basecamp, ou
+pedirem para diagnosticar/perceber porquê, usa
+diagnosticar_logistica_on_hold — mostra as colunas reais vistas no
+projeto e os cards já em "On Hold" (prontos a entregar), com título e
+notas. Apresenta isto de forma legível (quantos cards no total, que
+colunas existem, quantos estão prontos a entregar, e os exemplos com
+título/notas) — nunca despejes o JSON em bruto sem organizar. Cada
+exemplo inclui também `extracao_debug` (o tamanho das notas realmente
+enviadas ao modelo, os dados extraídos se funcionou, ou a resposta em
+bruto do modelo/o erro exato se falhou) — mostra sempre estes valores
+exatos, tal como vêm (nunca resumidos), quando a extração não estiver a
+funcionar; é o que permite perceber exatamente onde está a falhar.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa

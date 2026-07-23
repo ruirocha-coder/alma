@@ -12,18 +12,13 @@ PROJETO_ENTREGAS = "Entregas"
 
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
 # ainda está no fornecedor; as colunas por região são onde a encomenda é
-# entregue ao cliente. MODELO CONFIRMADO em 2026-07-23, diretamente pelo
-# Rui: "On Hold" é uma secção dentro de uma coluna (confirmado também na
-# documentação oficial da API do Basecamp — POST/DELETE
-# .../card_tables/columns/{id}/on_hold.json cria/remove essa secção), não
-# uma coluna irmã. Um card em "On Hold" está pronto a entregar (já chegou
-# ao armazém) INDEPENDENTEMENTE da coluna onde estiver — a coluna
-# (Lisboa/Porto/Outro) indica sempre a rota/região de entrega, quer o
-# card esteja em "On Hold" quer já esteja a ser entregue a sério. Quando
-# um card está na secção "On Hold" de uma coluna, o `parent` que a API
-# devolve para esse card é a própria secção (título genérico "On hold"),
-# não a coluna real — por isso a região desses cards é lida subindo mais
-# um nível (ver agents.sugestao_logistica_semanal._regiao_do_card_pronto).
+# entregue ao cliente. MODELO CONFIRMADO em 2026-07-23 por diagnóstico ao
+# vivo: os 31 cards prontos a entregar estão todos numa única coluna
+# "On Hold" — o avô estrutural desses cards é o quadro geral "Logística",
+# não uma coluna de região. Ou seja, a estrutura do Kanban NÃO preserva a
+# região quando um card entra em "On Hold" (isto foi tentado ler dos
+# dados e não funciona) — a região só existe na morada nas notas do card
+# (ver agents.sugestao_logistica_semanal._classificar_regiao).
 COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
 COLUNA_PRONTO_ENTREGA = "on hold"
 
@@ -39,12 +34,12 @@ def fase_encomenda(estado: str) -> str:
     nome do container do Kanban ("estado", o `parent.title` devolvido
     pela API) onde o card está agora:
     - "producao": ainda no fornecedor, à espera de chegar ao armazém.
-    - "pronto_entrega": na secção "On Hold" — chegou ao armazém, pronta a
+    - "pronto_entrega": na coluna "On Hold" — chegou ao armazém, pronta a
       ser entregue, ainda por agendar. A região não vem daqui (ver
-      agents.sugestao_logistica_semanal._regiao_do_card_pronto).
+      agents.sugestao_logistica_semanal._classificar_regiao).
     - "em_entrega": diretamente numa coluna de região (Lisboa/Porto/
-      Outro), fora da secção "On Hold" — a entrega está em curso, não
-      precisa de mais sugestões de logística.
+      Outro) — a entrega está em curso, não precisa de mais sugestões de
+      logística.
     - "outro": nenhuma das anteriores (ex: já concluído, ou outra coluna
       fora deste fluxo)."""
     coluna = normalizar_coluna(estado)

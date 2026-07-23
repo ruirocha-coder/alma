@@ -44,13 +44,26 @@ resume, em poucas palavras, o que foi encomendado. As datas podem aparecer
 em qualquer formato (ex: 25/07/2026, 25-07-2026, 2026-07-25) — converte
 sempre para AAAA-MM-DD."""
 
-def _extrair_dados_encomenda(titulo: str, notas: str) -> dict:
+def _chamar_extracao_llm(titulo: str, notas: str) -> str:
     resposta = client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=300,
         system=_MISSAO_EXTRACAO,
         messages=[{"role": "user", "content": f"Título: {titulo}\n\nNotas:\n{notas or '(sem notas)'}"}]
     )
-    texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    return "".join(b.text for b in resposta.content if b.type == "text").strip()
+
+def _limpar_bloco_codigo(texto: str) -> str:
+    """Alguns modelos embrulham o JSON num bloco de código markdown apesar
+    da instrução em contrário — remove esse invólucro antes de tentar o
+    parse, em vez de rebentar/devolver vazio por causa disso."""
+    if texto.startswith("```"):
+        texto = texto.split("\n", 1)[1] if "\n" in texto else texto[3:]
+        if texto.endswith("```"):
+            texto = texto[:-3]
+    return texto.strip()
+
+def _extrair_dados_encomenda(titulo: str, notas: str) -> dict:
+    texto = _limpar_bloco_codigo(_chamar_extracao_llm(titulo, notas))
     try:
         dados = json.loads(texto)
     except ValueError:
@@ -179,16 +192,21 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     (main.py) e a tool de chat do mesmo nome, para nunca haver duas
     versões desta lógica a divergir uma da outra.
 
-    bug real (2026-07-23): a sugestão semanal marcou TODOS os cards em
-    "On Hold" como região "Outro", mesmo cards visivelmente nas colunas
-    Lisboa/Porto no Basecamp — sinal de que
-    agents.sugestao_logistica_semanal._regiao_do_card_pronto não está a
-    conseguir subir ao parent real (falha uniforme em todos, não em
-    alguns, sugere um problema estrutural, não um card isolado). Por
-    isso esta função expõe também o objeto `parent` bruto de cada
-    exemplo (todos os campos, incluindo se `url` existe ou não) e o
-    resultado exato de tentar obter o parent desse parent — para se ver
-    com dados reais porque é que a resolução da região está a falhar."""
+    Confirmado ao vivo (2026-07-23): o avô estrutural dos cards em "On
+    Hold" é sempre o quadro geral, nunca uma coluna de região — por isso
+    a região é classificada pela morada (ver
+    agents.sugestao_logistica_semanal._classificar_regiao), não lida da
+    estrutura do Kanban.
+
+    bug real (2026-07-23): a sugestão semanal publicada mostrou cliente/
+    morada/produto/data "não identificado" em TODOS os 20 cards, apesar
+    de as notas conterem moradas reais visíveis (confirmado neste próprio
+    diagnóstico) — sinal de que _extrair_dados_encomenda está a falhar
+    de forma sistemática, não isolada. Por isso esta função expõe também
+    o resultado exato de tentar extrair os dados de cada exemplo
+    (`extracao_debug`): o tamanho das notas realmente enviadas, os dados
+    extraídos se a extração funcionar, ou a resposta em bruto do modelo
+    (ou o erro) se falhar — para se ver com dados reais qual é a causa."""
     try:
         itens = [i for i in basecamp._itens_ativos()
                 if i.get("type") == "Kanban::Card"
@@ -201,16 +219,22 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     itens_prontos = [i for i in itens
                     if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
 
-    def _resolucao_regiao(item: dict) -> dict:
-        parent = item.get("parent") or {}
-        parent_url = parent.get("url")
-        if not parent_url:
-            return {"parent_bruto": parent, "avo": None, "erro": "parent não tem campo 'url'"}
+    def _extracao_debug(item: dict) -> dict:
+        titulo = item.get("title") or item.get("content") or ""
+        notas = basecamp._texto_simples(item.get("description", ""))
         try:
-            avo = basecamp.obter_recording(parent_url).get("parent")
-            return {"parent_bruto": parent, "avo": avo, "erro": None}
+            texto_bruto = _chamar_extracao_llm(titulo, notas)
         except Exception as e:
-            return {"parent_bruto": parent, "avo": None, "erro": str(e)}
+            return {"notas_enviadas_tamanho": len(notas), "erro": f"falha ao chamar o modelo: {e!r}",
+                    "texto_bruto_modelo": None, "dados_extraidos": None}
+        texto_limpo = _limpar_bloco_codigo(texto_bruto)
+        try:
+            dados = json.loads(texto_limpo)
+            return {"notas_enviadas_tamanho": len(notas), "erro": None,
+                    "texto_bruto_modelo": None, "dados_extraidos": dados}
+        except ValueError:
+            return {"notas_enviadas_tamanho": len(notas), "erro": "resposta do modelo não é JSON válido",
+                    "texto_bruto_modelo": texto_bruto[:300], "dados_extraidos": None}
 
     return {
         "total_no_projeto": len(itens),
@@ -220,7 +244,7 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
             "titulo": i.get("title") or i.get("content"),
             "coluna": (i.get("parent") or {}).get("title"),
             "notas": basecamp._texto_simples(i.get("description", ""))[:300],
-            "resolucao_regiao": _resolucao_regiao(i),
+            "extracao_debug": _extracao_debug(i),
         } for i in itens_prontos[:limite]],
     }
 
