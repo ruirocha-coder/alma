@@ -15,13 +15,13 @@ TOOL_SUGESTAO_LOGISTICA_SEMANAL = {
 
 # pedido do Rui (2026-07-23): a sugestão semanal veio sempre vazia ("não
 # há nenhum card pronto a entregar"), e depois marcou toda a gente como
-# "Outro". Confirmado ao vivo: os 31 cards em "On Hold" estão todos numa
-# única coluna, cujo avô estrutural é o quadro geral — a região não é
-# lida da estrutura, é classificada pela morada (ver
-# tools.logistica.fase_encomenda e
-# agents.sugestao_logistica_semanal._classificar_regiao). Esta tool
-# mostra os dados reais diretamente na conversa, sem precisar de abrir
-# nenhum URL.
+# "Outro". Confirmado contra a API real do Basecamp: o parent de um card
+# em "On Hold" é um objeto "Kanban::OnHold" cujo url aponta diretamente
+# para a coluna de região real por trás dessa secção — é assim que a
+# região é lida (ver tools.logistica.fase_encomenda e
+# agents.sugestao_logistica_semanal._regiao_estrutural), com a morada só
+# como rede de segurança. Esta tool mostra os dados reais diretamente na
+# conversa, sem precisar de abrir nenhum URL.
 TOOL_DIAGNOSTICO_LOGISTICA = {
     "name": "diagnosticar_logistica_on_hold",
     "description": "Mostra as colunas reais vistas no projeto Entregas e os cards já prontos a entregar (em \"On Hold\"), com título, notas, e o resultado de tentar extrair os dados de cada um — usa isto quando pedirem para diagnosticar, verificar ou perceber porque é que a sugestão semanal de logística não está a encontrar os cards certos ou não está a extrair os dados corretamente.",
@@ -120,15 +120,13 @@ funcionar.
 
 A tool também devolve `cards_por_coluna_regiao`: TODOS os cards de cada
 coluna de região (Lisboa/Porto/Outro), com TODOS os campos brutos de
-cada um — não só o título. Isto existe porque pode haver, dentro de
-cada coluna de região, uma divisão visual "On Hold" própria dessa
-coluna (distinta de uma eventual coluna "On hold" à parte) — se a
-pessoa disser que vê cards em On Hold dentro de Porto/Lisboa/Outro que
-a sugestão semanal não apanhou, mostra os campos brutos completos de
-2-3 cards dessa coluna lado a lado (um que a pessoa diga estar em On
-Hold, outro que não esteja), tal como vêm, para se identificar em
-conjunto qual o campo exato que os distingue — nunca resumas isto nem
-tentes adivinhar o campo sozinha.
+cada um — não só o título (nota: cards em "On Hold" dentro dessa região
+não aparecem aqui, porque estruturalmente pertencem à secção "On Hold",
+não à coluna em si — isso é esperado, não é um bug). Se a pessoa disser
+que vê cards em On Hold dentro de Porto/Lisboa/Outro que a sugestão
+semanal não apanhou, mostra os campos brutos completos de 2-3 cards
+dessa coluna lado a lado, tal como vêm, para se confirmar a estrutura —
+nunca resumas isto nem tentes adivinhar sozinha.
 
 Para preparar uma reunião individual (1:1) com alguém da equipa — o que tem
 em mão agora, se a carga de trabalho está ajustada — usa
