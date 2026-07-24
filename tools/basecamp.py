@@ -125,6 +125,12 @@ def _formatar_item(item: dict) -> dict:
         "projeto": (item.get("bucket") or {}).get("name"),
         "prazo": item.get("due_on"),
         "url": item.get("app_url"),
+        # url da própria API deste registo (distinto do "url" acima, que é
+        # o link para abrir no browser) — pedido do Rui (2026-07-24): sem
+        # isto, ler_anexos_registo_basecamp não tinha forma de saber que
+        # url pedir para ler os PDFs (fatura/orçamento) anexados a um card
+        # encontrado por procurar_cards_basecamp.
+        "url_api": item.get("url"),
         "comments_count": item.get("comments_count", 0),
         "comments_url": item.get("comments_url"),
     }
@@ -709,7 +715,7 @@ TOOLS_ESTADO_PROJETO = [
     },
     {
         "name": "procurar_cards_basecamp",
-        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é.",
+        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é. Se precisares de ler um PDF anexado ao card (ex: a fatura ou o orçamento, para identificar os produtos), usa depois ler_anexos_registo_basecamp com o campo \"url_api\" do card encontrado (nunca o campo \"url\", que é só o link para abrir no browser).",
         "input_schema": {
             "type": "object",
             "properties": {

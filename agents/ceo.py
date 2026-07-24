@@ -103,6 +103,20 @@ card não esteja atrasado nem parado. Se houver mais do que um resultado,
 mostra-os todos de forma organizada e pede para especificar qual, em vez
 de escolheres um à sorte.
 
+Muitas vezes a informação que procuras não está no texto das notas, mas
+num PDF anexado ao card (fatura ou orçamento da encomenda, com os
+produtos concretos) — nunca assumas que não existe só porque as notas em
+si não a mencionam. Sempre que precisares de identificar os produtos de
+uma encomenda (ex: para prever o tempo de montagem, ou responder que
+produtos foram encomendados), usa ler_anexos_registo_basecamp com o
+campo "url_api" do card devolvido por procurar_cards_basecamp (nunca o
+campo "url", que é só o link para abrir no browser, não serve para ler
+anexos). Não há ainda nenhuma regra ou tabela de tempos de montagem por
+produto — se pedirem uma previsão de tempo, identifica os produtos a
+partir da fatura/orçamento e diz claramente que não tens uma referência
+de tempos por produto para calcular a previsão, em vez de inventares um
+número.
+
 Se pedirem para gerar, testar ou disparar a sugestão semanal de logística
 de entregas agora (ex: "faz já a sugestão de logística", "testa a
 sugestão semanal de entregas com os cards de agora"), usa
