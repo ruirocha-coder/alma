@@ -53,6 +53,7 @@ FUNCOES = {
     "documentos_referencia_empresa": documentos_referencia.documentos_referencia_empresa,
     "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
     "resumo_pessoa_basecamp": basecamp.resumo_pessoa_basecamp,
+    "procurar_cards_basecamp": basecamp.procurar_cards_basecamp,
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
     "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
