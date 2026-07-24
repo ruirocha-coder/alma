@@ -28,12 +28,19 @@ Regras permanentes para apresentar dados deste dashboard (pedidas
 explicitamente pelo Rui, depois de o takt ter sido lido ao contrário):
 - Takt: usa sempre os campos já convertidos "takt_real_min_seg_por_m3" e
   "takt_objetivo_min_seg_por_m3" (formato min:seg por m³, ex: "06:47") —
-  nunca apresentes os campos brutos taktrealm3h/taktneededm3h (estão em
-  horas por m³), e nunca tentes converter tu mesma horas para min:seg, usa
-  sempre o campo já convertido. Real maior que o objetivo = mais lento =
-  motivo de alerta.
+  nunca apresentes os campos brutos takt_real_m3_h/takt_needed_m3_h (estão
+  em horas por m³), e nunca tentes converter tu mesma horas para min:seg,
+  usa sempre o campo já convertido. Real maior que o objetivo = mais
+  lento = motivo de alerta.
 - Rácio de entrada/saída: apresenta sempre com exatamente duas casas
-  decimais (ex: 2,70 — nunca 2,6961 nem 2,7)."""
+  decimais (ex: 2,70 — nunca 2,6961 nem 2,7).
+- Charriots (carrinhos/lotes de troncos que percorrem a linha de
+  produção): usa sempre o campo já resumido "charriots_resumo", nunca
+  navegues sozinha a estrutura bruta em production_details.charriotRows.
+  ATENÇÃO: dentro de charriots_resumo, "numero_de_charriots" é quantos
+  charriots passaram (o comprimento da lista "por_charriot"), e
+  "total_de_troncos_no_dia" é a SOMA de troncos de todos eles — são
+  números diferentes, nunca os confundas nem apresentes um pelo outro."""
 
 def _horas_para_min_seg(horas) -> str:
     """Converte um valor em horas por m³ para minutos:segundos por m³ (ex:
@@ -54,9 +61,16 @@ def _horas_para_min_seg(horas) -> str:
         segundos = 0
     return f"{minutos:02d}:{segundos:02d}"
 
+# nomes de campo CONFIRMADOS contra uma resposta real da API (2026-07-24,
+# JSON partilhado pelo Rui) — a versão anterior destes nomes
+# ("taktrealm3h"/"taktneededm3h", sem underscore) nunca bateu certo com a
+# API real (que usa snake_case em todo o payload, ex: input_m3,
+# stop_total_sec, oee_pct), por isso esta conversão nunca disparava e o
+# modelo só via sempre os campos brutos em horas — exatamente o problema
+# que esta função existe para evitar (ver nota do takt lido ao contrário).
 _CAMPOS_TAKT = {
-    "taktrealm3h": "takt_real_min_seg_por_m3",
-    "taktneededm3h": "takt_objetivo_min_seg_por_m3",
+    "takt_real_m3_h": "takt_real_min_seg_por_m3",
+    "takt_needed_m3_h": "takt_objetivo_min_seg_por_m3",
 }
 
 def _com_takt_formatado(conteudo):
@@ -73,12 +87,52 @@ def _com_takt_formatado(conteudo):
             formatado = _horas_para_min_seg(conteudo[campo_bruto])
             if formatado:
                 conteudo[campo_formatado] = formatado
-    if "taktrealm3h" in conteudo and "taktneededm3h" in conteudo:
+    if "takt_real_m3_h" in conteudo and "takt_needed_m3_h" in conteudo:
         try:
             conteudo["takt_alerta_mais_lento_que_objetivo"] = (
-                float(conteudo["taktrealm3h"]) > float(conteudo["taktneededm3h"]))
+                float(conteudo["takt_real_m3_h"]) > float(conteudo["takt_needed_m3_h"]))
         except (TypeError, ValueError):
             pass
+    return conteudo
+
+def _com_charriots_resumido(conteudo):
+    """Resume os dados de "charriots" (cada carrinho/lote de troncos que
+    passa pela linha de produção) num formato direto, em vez de obrigar o
+    modelo a navegar sozinho a estrutura aninhada de production_details
+    (confirmada ao vivo, 2026-07-24 — production_details.charriotRows).
+
+    ATENÇÃO ao nome enganador do campo bruto `charriotTotalCount`: é a
+    SOMA de troncos de todos os charriots do dia, não o número de
+    charriots em si (esse é o comprimento de charriotRows) — confirmado
+    ao vivo comparando os dois: charriotTotalCount bateu certo com a soma
+    dos "troncos" de cada linha, não com a contagem de linhas. Esta
+    função já separa os dois em campos com nomes inequívocos, para nunca
+    se repetir a confusão (o mesmo tipo de erro que já aconteceu com o
+    takt lido ao contrário)."""
+    if not isinstance(conteudo, dict):
+        return conteudo
+    detalhes = conteudo.get("production_details")
+    if not isinstance(detalhes, dict):
+        return conteudo
+    linhas = detalhes.get("charriotRows")
+    if not isinstance(linhas, list):
+        return conteudo
+    conteudo = dict(conteudo)
+    conteudo["charriots_resumo"] = {
+        "numero_de_charriots": len(linhas),
+        "total_de_troncos_no_dia": detalhes.get("charriotTotalCount"),
+        "volume_total_m3": detalhes.get("charriotTotalVolume"),
+        "paragens_total_contagem": detalhes.get("charriotTotalStopCount"),
+        "paragens_total_segundos": detalhes.get("charriotTotalStopSec"),
+        "por_charriot": [{
+            "id": linha.get("id"),
+            "troncos": linha.get("troncos"),
+            "volume_m3": linha.get("volume"),
+            "paragens_contagem": linha.get("stopCount"),
+            "paragens_segundos": linha.get("stopTotalSec"),
+            "motivos_paragem": [m.get("reason") for m in (linha.get("stopByReason") or [])],
+        } for linha in linhas],
+    }
     return conteudo
 
 def _resolver_data(data: str) -> str:
@@ -123,7 +177,7 @@ def ler_dashboard_producao(data: str = None) -> dict:
         # assim devolve o texto em bruto, para não perder informação
         return {"conteudo": r.text.strip()} if r.text.strip() else {
             "erro": "a API de dados de produção respondeu, mas sem conteúdo legível"}
-    return {"conteudo": _com_takt_formatado(dados)}
+    return {"conteudo": _com_charriots_resumido(_com_takt_formatado(dados))}
 
 def _semana_de(referencia: date) -> tuple:
     """Segunda a sexta da semana que contém `referencia`."""
@@ -181,7 +235,7 @@ def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = Non
 TOOLS_DASHBOARD_PRODUCAO = [
     {
         "name": "dashboard_producao_ecos_largos",
-        "description": "Lê os dados de produção da Ecos Largos, da API oficial do dashboard (servida por um servidor próprio da equipa, fora do Basecamp). Sem argumentos devolve os dados mais recentes (agora); passa `data` para consultar um dia específico. Usa isto sempre que perguntarem pelo estado da produção, números de produção, entrada/receção de madeira, m3 (metros cúbicos) de madeira, quantidade recebida ou processada, linhas de produção, ou pedirem uma análise/resumo — de hoje ou de outro dia. Qualquer pergunta sobre estes números, mesmo em linguagem informal (ex: \"quanto entrou hoje\", \"quantos m3 tivemos\"), refere-se a este dashboard — usa sempre esta ferramenta antes de responder, nunca digas que não tens essa informação sem primeiro tentares. Mesmo que perguntem por algo mais específico que este dashboard não distinga (ex: um produto ou referência em concreto), tenta sempre primeiro consultar os dados gerais disponíveis e partilha-os — nunca respondas que não tens informação nenhuma sem teres consultado o dashboard.",
+        "description": "Lê os dados de produção da Ecos Largos, da API oficial do dashboard (servida por um servidor próprio da equipa, fora do Basecamp). Sem argumentos devolve os dados mais recentes (agora); passa `data` para consultar um dia específico. Usa isto sempre que perguntarem pelo estado da produção, números de produção, entrada/receção de madeira, m3 (metros cúbicos) de madeira, quantidade recebida ou processada, linhas de produção, charriots (carrinhos/lotes de troncos que percorrem a linha), troncos, ou pedirem uma análise/resumo — de hoje ou de outro dia. Qualquer pergunta sobre estes números, mesmo em linguagem informal (ex: \"quanto entrou hoje\", \"quantos m3 tivemos\", \"quantos charriots hoje\"), refere-se a este dashboard — usa sempre esta ferramenta antes de responder, nunca digas que não tens essa informação sem primeiro tentares. Mesmo que perguntem por algo mais específico que este dashboard não distinga (ex: um produto ou referência em concreto), tenta sempre primeiro consultar os dados gerais disponíveis e partilha-os — nunca respondas que não tens informação nenhuma sem teres consultado o dashboard.",
         "input_schema": {
             "type": "object",
             "properties": {
