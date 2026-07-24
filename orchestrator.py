@@ -18,6 +18,24 @@ AGENTES = {**AGENTES_INTERIOR_GUIDER, "ecos_largos": ecos_largos.responder,
 AGENTES_STREAM = {**AGENTES_INTERIOR_GUIDER_STREAM, "ecos_largos": ecos_largos.responder_stream,
                   "qualidade_toros_ecos_largos": qualidade_toros_ecos_largos.responder_stream}
 
+# jargão específico do dashboard de produção da Ecos Largos — termos que
+# um classificador genérico (Haiku, ver _escolher_entre_empresas) pode
+# não reconhecer como sinal de produção industrial, e por omissão
+# manda para a Interior Guider (a regra de "se não estiver claro, escolhe
+# interior_guider"). Bug real (Rui, 2026-07-24): perguntar sobre
+# "charriots" (carrinhos/lotes que percorrem a linha de produção, ver
+# tools.ecos_largos._resumo_charriots) foi parar ao CEO, que não tem
+# nenhuma ferramenta da Ecos Largos — mesmo com o perfil em "ambas".
+_PALAVRAS_PRODUCAO_ECOS_LARGOS = ("charriot", "carriot", "chariot", "tronco", "cubicador", "patela", "oee", "takt")
+
+def _pergunta_sobre_producao_ecos_largos(pergunta: str) -> bool:
+    """Deteta perguntas sobre o dashboard de produção da Ecos Largos que
+    usam jargão específico deste dashboard, difícil de reconhecer por um
+    classificador genérico sem o contexto todo — ver
+    _PALAVRAS_PRODUCAO_ECOS_LARGOS."""
+    termo = pergunta.lower()
+    return any(p in termo for p in _PALAVRAS_PRODUCAO_ECOS_LARGOS)
+
 # cobre não só "avalia..." mas qualquer forma natural de pedir o histórico
 # já guardado — "regista o registo", "histórico", "resumo" — a Beatriz
 # pediu "dá-me o registo das cargas de toros hoje", sem a palavra
@@ -132,8 +150,15 @@ def encaminhar(pergunta: str, utilizador: str, tem_anexos: bool = False) -> str:
     escolher_agente_ecos_largos, tarde demais). Pedido explícito do Rui:
     qualquer utilizador, a qualquer momento, tem de conseguir consultar
     isto — por isso esta deteção acontece aqui, antes de qualquer decisão
-    por empresa."""
-    if _pergunta_sobre_avaliacoes_cargas(pergunta):
+    por empresa.
+
+    Bug real (Rui, 2026-07-24), mesmo padrão: mesmo com o perfil em
+    "ambas" (que já decide pelo conteúdo da pergunta, ver
+    _escolher_entre_empresas), o classificador genérico não reconheceu
+    "charriots" como termo de produção e, por omissão, escolheu Interior
+    Guider — por isso _pergunta_sobre_producao_ecos_largos intercepta
+    aqui também, antes de qualquer classificação por IA."""
+    if _pergunta_sobre_avaliacoes_cargas(pergunta) or _pergunta_sobre_producao_ecos_largos(pergunta):
         return escolher_agente_ecos_largos(pergunta, tem_anexos=tem_anexos)
 
     empresa = None
