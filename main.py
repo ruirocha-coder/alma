@@ -610,5 +610,17 @@ async def receber_webhook_basecamp(request: Request, chave: str = ""):
     threading.Thread(target=responder_basecamp.processar_evento_webhook, args=(payload,), daemon=True).start()
     return {"ok": True}
 
+@app.middleware("http")
+async def sem_cache_para_html(request: Request, call_next):
+    """StaticFiles não define Cache-Control, e os browsers guardam o
+    index.html com cache heurística — já aconteceu um deploy com correção
+    de um bug (exportação Excel) parecer não ter tido efeito nenhum,
+    porque a pessoa continuava a receber a versão antiga em cache. Força
+    sempre revalidação do HTML, para cada deploy ter efeito imediato."""
+    response = await call_next(request)
+    if request.url.path in ("/", "/index.html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 # consola de chat de teste, servida em "/"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
