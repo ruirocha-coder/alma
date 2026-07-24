@@ -49,7 +49,10 @@ clarificar:
   informação importante — fornecedor, datas, observações), mesmo que o
   card não esteja atrasado nem parado, usa procurar_cards_basecamp com um
   termo de pesquisa, em vez de dizeres que não tens essa informação sem
-  teres tentado.
+  teres tentado. Se a informação estiver num PDF anexado ao card (não no
+  texto das notas), usa ler_anexos_registo_basecamp com o campo "url_api"
+  do card encontrado (nunca o campo "url", que é só o link para abrir no
+  browser).
 - Para documentos do projeto usa procurar_documentos_empresa e
   ler_documento_empresa, pesquisando por "Ecos Largos" ou pelo termo certo.
 
