@@ -183,6 +183,30 @@ def cards_parados_sem_prazo(dias_sem_atividade: int = 14) -> list[dict]:
         parados.append(formatado)
     return parados
 
+def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
+    """Procura tarefas/cards (de todos os projetos, ou só de um em
+    concreto) cujo título ou notas contenham `termo` — pedido explícito
+    do Rui (2026-07-24): as notas de um card guardam frequentemente
+    informação crítica (morada de entrega, dados do cliente, datas
+    acordadas) que só aparecia noutras ferramentas quando o card estava
+    atrasado ou parado; isto permite consultar as notas de QUALQUER card
+    em aberto, a qualquer momento, mesmo dentro do prazo. Só considera
+    itens ativos e não concluídos (ver _itens_ativos) — não encontra
+    cards já arquivados/na lixeira. `termo` procura tanto no título como
+    no texto das notas, tolerante a acentos."""
+    alvo = _normalizar(termo)
+    projeto_normalizado = _normalizar(projeto) if projeto else None
+    encontrados = []
+    for item in _itens_ativos():
+        if projeto_normalizado and projeto_normalizado not in _normalizar((item.get("bucket") or {}).get("name") or ""):
+            continue
+        titulo = item.get("title") or item.get("content") or ""
+        notas = _texto_simples(item.get("description", ""))
+        if alvo not in _normalizar(titulo) and alvo not in _normalizar(notas):
+            continue
+        encontrados.append(_formatar_item(item))
+    return encontrados
+
 def estado_projeto_basecamp(projeto: str) -> dict:
     """Panorama de um projeto do Basecamp: tarefas/cards genuinamente em
     aberto agrupados por estado/coluna, com contagens de atraso e cards
@@ -681,6 +705,18 @@ TOOLS_ESTADO_PROJETO = [
                 "nome": {"type": "string"}
             },
             "required": ["nome"]
+        }
+    },
+    {
+        "name": "procurar_cards_basecamp",
+        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "termo": {"type": "string", "description": "termo a procurar no título ou nas notas do card (ex: nome do cliente, número de encomenda, morada)"},
+                "projeto": {"type": "string", "description": "opcional — filtra por um projeto específico"}
+            },
+            "required": ["termo"]
         }
     }
 ]
