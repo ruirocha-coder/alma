@@ -1036,19 +1036,51 @@
     return html;
   }
 
+  // número em formato português: milhares com "." opcional, decimal com
+  // "," opcional (ex: "191,06", "6009,36", "1.234,56", "103") — nunca
+  // datas (têm "/") nem texto livre.
+  const RE_NUMERO_PT = /^-?\d+(\.\d{3})*(,\d+)?$/;
+
+  function valorDeCelulaExcel(texto) {
+    const t = (texto || "").trim();
+    if (t === "" || !RE_NUMERO_PT.test(t)) return t;
+    const temDecimal = t.includes(",");
+    const semSinal = t.replace("-", "");
+    // um inteiro com zero à esquerda (ex: "0500") é provavelmente um
+    // código/talão, não uma quantidade — não converter, para não perder
+    // o zero à esquerda.
+    if (!temDecimal && semSinal.length > 1 && semSinal[0] === "0") return t;
+    const numero = parseFloat(t.replace(/\./g, "").replace(",", "."));
+    return isNaN(numero) ? t : numero;
+  }
+
   function descarregarTabelaExcel(tabela) {
     if (typeof XLSX === "undefined") {
       alert("Não foi possível carregar a biblioteca de Excel — verifica a ligação à internet e tenta outra vez.");
       return;
     }
-    // raw: true impede o SheetJS de tentar adivinhar o tipo de cada célula
-    // a partir do texto (heurística de locale EN-US) — sem isto, números
-    // em formato português como "191,06" eram lidos como se a vírgula
-    // fosse separador de milhares (virava 19106), e texto como "01/06"
-    // era às vezes interpretado como data e convertido para um número de
-    // série do Excel errado. Com raw:true cada célula fica exatamente com
-    // o texto que a tabela mostra.
-    const livro = XLSX.utils.table_to_book(tabela, { sheet: "Tabela", raw: true });
+    // Construída célula a célula, em vez de deixar o SheetJS ler a tabela
+    // sozinho (XLSX.utils.table_to_book): a leitura automática tenta
+    // adivinhar o tipo de cada célula com uma heurística EN-US, e ou
+    // corrompe números/datas em formato português (ex: "191,06" virava
+    // 19106, "01/06" virava uma data errada — bug relatado pela Beatriz)
+    // ou, com raw:true, guarda tudo como texto, o que impede fórmulas
+    // como "=SOMA(...)" de funcionarem no Excel (outro bug relatado a
+    // seguir: a soma dava sempre zero). Aqui cada célula fica como NÚMERO
+    // real quando o texto é claramente um número em formato português, e
+    // como texto exatamente igual ao mostrado em todos os outros casos
+    // (datas, observações, etc.) — nunca adivinhado pela biblioteca.
+    const linhas = [];
+    tabela.querySelectorAll("tr").forEach(tr => {
+      const linha = [];
+      tr.querySelectorAll("th,td").forEach(celula => {
+        linha.push(valorDeCelulaExcel(celula.textContent));
+      });
+      linhas.push(linha);
+    });
+    const folha = XLSX.utils.aoa_to_sheet(linhas);
+    const livro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(livro, folha, "Tabela");
     XLSX.writeFile(livro, `alma-tabela-${Date.now()}.xlsx`);
   }
 
