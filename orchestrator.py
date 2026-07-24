@@ -115,10 +115,16 @@ def _escolher_entre_empresas(pergunta: str, tem_anexos: bool = False) -> str:
         model="claude-haiku-4-5-20251001", max_tokens=10,
         system=("Esta pessoa trabalha tanto com a Interior Guider como com a Ecos Largos "
                 "(duas equipas geridas no mesmo Basecamp, sem relação entre si). Classifica "
-                "esta mensagem como 'ecos_largos' (produção, dashboard de produção, o "
-                "projeto Ecos Largos) ou 'interior_guider' (vendas, produtos, site, "
-                "projetos da Interior Guider). Se não estiver claro, escolhe "
-                "'interior_guider'. Responde só com uma das duas palavras."),
+                "esta mensagem como 'ecos_largos' (produção industrial — entrada/receção "
+                "de madeira, m3, troncos, charriots, takt, OEE, linhas de produção — ou o "
+                "projeto Ecos Largos em geral) ou 'interior_guider' (vendas de mobiliário, "
+                "produtos, site, encomendas de clientes, projetos da Interior Guider). "
+                "Bug real já visto: \"entradas\" sozinho é ambíguo entre as duas — só "
+                "escolhe 'interior_guider' se for claramente sobre receita/vendas em "
+                "euros; uma pergunta sobre quantidade, m3, ou sem unidade monetária "
+                "explícita é 'ecos_largos' (entrada de madeira). Se mesmo assim não "
+                "estiver claro, escolhe 'interior_guider'. Responde só com uma das duas "
+                "palavras."),
         messages=[{"role": "user", "content": pergunta}]
     )
     escolha = r.content[0].text.strip().lower()

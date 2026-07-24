@@ -1,7 +1,7 @@
 # tools/ecos_largos.py — recursos próprios da equipa Ecos Largos, uma
 # equipa industrial parceira gerida no mesmo Basecamp mas com o seu próprio
 # projeto, à parte da Interior Guider.
-import os, re, time, unicodedata
+import calendar, os, re, time, unicodedata
 from datetime import date, timedelta
 import httpx
 from tools import documentos_empresa
@@ -184,33 +184,61 @@ def _semana_de(referencia: date) -> tuple:
     inicio = referencia - timedelta(days=referencia.weekday())
     return inicio, inicio + timedelta(days=4)
 
+_MESES_PT = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "março": 3, "abril": 4, "maio": 5,
+    "junho": 6, "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10,
+    "novembro": 11, "dezembro": 12,
+}
+
+def _mes_de(ano: int, mes: int) -> tuple:
+    """Primeiro e último dia de um mês — usa calendar.monthrange para o
+    último dia (28/29/30/31), nunca calculado à mão, pela mesma razão de
+    sempre: aritmética de datas não se confia ao modelo nem a atalhos."""
+    inicio = date(ano, mes, 1)
+    return inicio, date(ano, mes, calendar.monthrange(ano, mes)[1])
+
 def _resolver_intervalo(periodo: str):
     """Resolve expressões relativas de período ("esta semana", "semana
-    passada") para datas reais — tal como _resolver_data para um único dia,
-    isto corre em Python porque o modelo não tem forma fiável de saber a
-    data de hoje, e muito menos calcular semanas a partir dela (era isto que
-    fazia pedidos por "a semana passada" virem com a semana errada).
+    passada", "este mês", "mês passado", ou o nome de um mês como "junho"
+    ou "junho de 2026") para datas reais — tal como _resolver_data para
+    um único dia, isto corre em Python porque o modelo não tem forma
+    fiável de saber a data de hoje, e muito menos calcular semanas/meses a
+    partir dela (era isto que fazia pedidos por "a semana passada" virem
+    com a semana errada). Um nome de mês sem ano assume o ano corrente.
     Devolve (None, None) se não reconhecer o período."""
-    termo = periodo.strip().lower().replace(" ", "_")
+    termo = periodo.strip().lower().replace(" de ", " ").replace(" ", "_")
     hoje = date.today()
     if termo == "esta_semana":
         return _semana_de(hoje)
     if termo == "semana_passada":
         return _semana_de(hoje - timedelta(days=7))
+    if termo in ("este_mes", "este_mês", "mes_atual", "mês_atual"):
+        return _mes_de(hoje.year, hoje.month)
+    if termo in ("mes_passado", "mês_passado"):
+        ano, mes = (hoje.year, hoje.month - 1) if hoje.month > 1 else (hoje.year - 1, 12)
+        return _mes_de(ano, mes)
+    partes = termo.split("_")
+    nome_mes = partes[0] if partes else ""
+    if nome_mes in _MESES_PT:
+        mes = _MESES_PT[nome_mes]
+        ano = int(partes[1]) if len(partes) > 1 and partes[1].isdigit() else hoje.year
+        return _mes_de(ano, mes)
     return None, None
 
 _LIMITE_DIAS_INTERVALO = 31
 
 def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = None, data_fim: str = None) -> dict:
     """Lê os dados de produção dia a dia num intervalo — usa `periodo`
-    ("esta_semana" ou "semana_passada", resolvido aqui para as datas reais)
-    ou `data_inicio`/`data_fim` explícitos (YYYY-MM-DD) para outro
-    intervalo qualquer."""
+    ("esta_semana", "semana_passada", "este_mes", "mes_passado", ou o nome
+    de um mês como "junho" ou "junho de 2026" — tudo resolvido aqui para
+    as datas reais, nunca calculado pelo modelo) ou `data_inicio`/
+    `data_fim` explícitos (YYYY-MM-DD) para outro intervalo qualquer."""
     if periodo:
         inicio, fim = _resolver_intervalo(periodo)
         if inicio is None:
-            return {"erro": f"não percebi o período {periodo!r} — usa \"esta_semana\", "
-                            "\"semana_passada\", ou indica data_inicio e data_fim (YYYY-MM-DD)"}
+            return {"erro": f"não percebi o período {periodo!r} — usa \"esta_semana\", \"semana_passada\", "
+                            "\"este_mes\", \"mes_passado\", o nome de um mês (ex: \"junho\"), "
+                            "ou indica data_inicio e data_fim (YYYY-MM-DD)"}
     elif data_inicio and data_fim:
         try:
             inicio = date.fromisoformat(data_inicio.strip())
@@ -245,11 +273,11 @@ TOOLS_DASHBOARD_PRODUCAO = [
     },
     {
         "name": "dashboard_producao_ecos_largos_intervalo",
-        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\" ou \"a semana passada\": passa `periodo` com exatamente \"esta_semana\" ou \"semana_passada\" e as datas certas são calculadas aqui, nunca por ti — tu não sabes a data de hoje com fiabilidade. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`.",
+        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\", \"a semana passada\", \"este mês\", \"o mês passado\", ou um mês pelo nome (ex: \"junho\", \"em maio\", \"quanto entrou em março\"): passa `periodo` com exatamente \"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome do mês (ex: \"junho\" ou \"junho de 2026\" se um ano diferente do atual for mencionado) — as datas certas são sempre calculadas aqui, nunca por ti, tu não sabes a data de hoje com fiabilidade nem quantos dias tem cada mês. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "periodo": {"type": "string", "description": "\"esta_semana\" ou \"semana_passada\" — omite se usares data_inicio/data_fim"},
+                "periodo": {"type": "string", "description": "\"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome de um mês (ex: \"junho\", \"junho de 2026\") — omite se usares data_inicio/data_fim"},
                 "data_inicio": {"type": "string", "description": "YYYY-MM-DD — só se não usares periodo"},
                 "data_fim": {"type": "string", "description": "YYYY-MM-DD — só se não usares periodo"}
             }
