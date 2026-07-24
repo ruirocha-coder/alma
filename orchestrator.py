@@ -132,6 +132,27 @@ def _escolher_entre_empresas(pergunta: str, tem_anexos: bool = False) -> str:
         return escolher_agente_ecos_largos(pergunta)
     return _escolher_agente_interior_guider(pergunta)
 
+def contexto_para_encaminhar(mensagens: list, max_chars: int = 800) -> str:
+    """Junta as últimas trocas da conversa (a mensagem atual já vem incluída
+    no fim de `mensagens`, ver main.py) num único texto para o encaminhamento
+    — deteção de palavras-chave e classificação por Haiku — em vez de olhar
+    só para a mensagem isolada.
+
+    Bug real (Rui, 2026-07-24): uma conversa sobre as avaliações de
+    qualidade de cargas de toros (guardadas na memória da Alma, não no
+    Basecamp) foi parar a meio a um agente sem essa ferramenta nenhuma —
+    a mensagem seguinte ("Não esta guardado no basecamp, está na memoria
+    da alma após a receção do talão e foto da carga") já não tinha
+    nenhuma palavra-chave de toros/avaliação nem de produção, por isso
+    foi reclassificada do zero, sem saber do que a conversa já estava a
+    falar, e a Alma acabou por negar ter qualquer memória persistente.
+    `encaminhar` decide de novo a cada mensagem (não há agente "preso" à
+    sessão) — juntar o contexto recente é a forma mais simples de dar à
+    deteção/classificação a mesma informação que um humano teria lendo a
+    conversa toda, sem mudar essa decisão a cada vez."""
+    recentes = [m["content"] for m in mensagens[-4:] if isinstance(m.get("content"), str) and m["content"]]
+    return " ".join(recentes)[-max_chars:]
+
 def encaminhar(pergunta: str, utilizador: str, tem_anexos: bool = False) -> str:
     """Decide primeiro a EMPRESA (quem é a pessoa, não do que fala) — é o que
     faz a mesma consola e o mesmo link adaptarem-se sozinhos.
