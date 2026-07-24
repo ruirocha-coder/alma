@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
-from orchestrator import encaminhar, AGENTES, AGENTES_STREAM
+from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano)
@@ -77,7 +77,7 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
             resposta = acolhimento.responder(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500], utilizador, tem_anexos=tem_anexos)
+            agente = encaminhar(contexto_para_encaminhar(mensagens), utilizador, tem_anexos=tem_anexos)
             log_routing(mensagem_agente[:500], agente)
             resposta = AGENTES[agente](utilizador, mensagens)
     except Exception as e:
@@ -111,7 +111,7 @@ def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, m
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500], utilizador, tem_anexos=tem_anexos)
+            agente = encaminhar(contexto_para_encaminhar(mensagens), utilizador, tem_anexos=tem_anexos)
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
@@ -188,7 +188,7 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
             gerador = acolhimento.responder_stream(utilizador, mensagens)
             agente = "acolhimento"
         else:
-            agente = encaminhar(mensagem_agente[:500], utilizador)
+            agente = encaminhar(contexto_para_encaminhar(mensagens), utilizador)
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
