@@ -1041,7 +1041,14 @@
       alert("Não foi possível carregar a biblioteca de Excel — verifica a ligação à internet e tenta outra vez.");
       return;
     }
-    const livro = XLSX.utils.table_to_book(tabela, { sheet: "Tabela" });
+    // raw: true impede o SheetJS de tentar adivinhar o tipo de cada célula
+    // a partir do texto (heurística de locale EN-US) — sem isto, números
+    // em formato português como "191,06" eram lidos como se a vírgula
+    // fosse separador de milhares (virava 19106), e texto como "01/06"
+    // era às vezes interpretado como data e convertido para um número de
+    // série do Excel errado. Com raw:true cada célula fica exatamente com
+    // o texto que a tabela mostra.
+    const livro = XLSX.utils.table_to_book(tabela, { sheet: "Tabela", raw: true });
     XLSX.writeFile(livro, `alma-tabela-${Date.now()}.xlsx`);
   }
 

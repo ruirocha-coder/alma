@@ -40,7 +40,16 @@ explicitamente pelo Rui, depois de o takt ter sido lido ao contrário):
   ATENÇÃO: dentro de charriots_resumo, "numero_de_charriots" é quantos
   charriots passaram (o comprimento da lista "por_charriot"), e
   "total_de_troncos_no_dia" é a SOMA de troncos de todos eles — são
-  números diferentes, nunca os confundas nem apresentes um pelo outro."""
+  números diferentes, nunca os confundas nem apresentes um pelo outro.
+- Totais de um período (ex: "quanto entrou em junho", "total de saída
+  esta semana): dashboard_producao_ecos_largos_intervalo já devolve, em
+  "totais", a soma de input_m3 e output_m3 do intervalo inteiro, calculada
+  em Python — usa sempre esse valor pronto. NUNCA somes tu mesma os
+  valores diários um a um: já aconteceu somares errado (25 valores de
+  input_m3 de junho deviam somar 6009,36 m³ e a soma feita à mão veio
+  4.521,79 m³) — é aritmética fácil de errar com muitas parcelas
+  decimais, exatamente como as datas, e por isso passou a ser calculada
+  aqui e não pelo modelo."""
 
 def _horas_para_min_seg(horas) -> str:
     """Converte um valor em horas por m³ para minutos:segundos por m³ (ex:
@@ -227,12 +236,45 @@ def _resolver_intervalo(periodo: str):
 
 _LIMITE_DIAS_INTERVALO = 31
 
+# campos que fazem sentido somar ao longo de um intervalo — nunca deixar
+# o modelo somar isto sozinho (pedido real da Beatriz, 2026-07-24: pediu o
+# total de entradas de junho, a Alma somou os 25 valores diários de
+# input_m3 à mão e errou o total — 4.521,79 m³ em vez do correto 6009,36
+# m³. A mesma razão de sempre para nunca confiar aritmética ao modelo,
+# desta vez para somas em vez de datas.)
+_CAMPOS_SOMAVEIS = ("input_m3", "output_m3")
+
+def _totais_intervalo(dias: list) -> dict:
+    """Soma, em Python, os campos de _CAMPOS_SOMAVEIS ao longo de todos os
+    dias com dados válidos do intervalo. Dias sem o campo, ou com erro
+    (ex: API offline nesse dia), são simplesmente ignorados na soma — não
+    fazem o total falhar nem entram como zero."""
+    totais = {}
+    for campo in _CAMPOS_SOMAVEIS:
+        soma = 0.0
+        algum = False
+        for dia in dias:
+            conteudo = dia.get("conteudo")
+            valor = conteudo.get(campo) if isinstance(conteudo, dict) else None
+            if valor is None:
+                continue
+            try:
+                soma += float(valor)
+                algum = True
+            except (TypeError, ValueError):
+                continue
+        if algum:
+            totais[campo] = round(soma, 2)
+    return totais
+
 def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = None, data_fim: str = None) -> dict:
     """Lê os dados de produção dia a dia num intervalo — usa `periodo`
     ("esta_semana", "semana_passada", "este_mes", "mes_passado", ou o nome
     de um mês como "junho" ou "junho de 2026" — tudo resolvido aqui para
     as datas reais, nunca calculado pelo modelo) ou `data_inicio`/
-    `data_fim` explícitos (YYYY-MM-DD) para outro intervalo qualquer."""
+    `data_fim` explícitos (YYYY-MM-DD) para outro intervalo qualquer.
+    Devolve também, em "totais", a soma já calculada em Python (nunca pelo
+    modelo) de input_m3 e output_m3 ao longo do intervalo."""
     if periodo:
         inicio, fim = _resolver_intervalo(periodo)
         if inicio is None:
@@ -258,7 +300,8 @@ def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = Non
     while d <= fim:
         dias.append({"data": d.isoformat(), **ler_dashboard_producao(d.isoformat())})
         d += timedelta(days=1)
-    return {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "dias": dias}
+    return {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "dias": dias,
+            "totais": _totais_intervalo(dias)}
 
 TOOLS_DASHBOARD_PRODUCAO = [
     {
@@ -273,7 +316,7 @@ TOOLS_DASHBOARD_PRODUCAO = [
     },
     {
         "name": "dashboard_producao_ecos_largos_intervalo",
-        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\", \"a semana passada\", \"este mês\", \"o mês passado\", ou um mês pelo nome (ex: \"junho\", \"em maio\", \"quanto entrou em março\"): passa `periodo` com exatamente \"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome do mês (ex: \"junho\" ou \"junho de 2026\" se um ano diferente do atual for mencionado) — as datas certas são sempre calculadas aqui, nunca por ti, tu não sabes a data de hoje com fiabilidade nem quantos dias tem cada mês. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`.",
+        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\", \"a semana passada\", \"este mês\", \"o mês passado\", ou um mês pelo nome (ex: \"junho\", \"em maio\", \"quanto entrou em março\"): passa `periodo` com exatamente \"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome do mês (ex: \"junho\" ou \"junho de 2026\" se um ano diferente do atual for mencionado) — as datas certas são sempre calculadas aqui, nunca por ti, tu não sabes a data de hoje com fiabilidade nem quantos dias tem cada mês. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`. A resposta inclui um campo \"totais\" já com a soma de input_m3 e output_m3 do intervalo inteiro, calculada aqui — usa sempre esse total pronto quando perguntarem pelo total/soma do período, NUNCA somes tu mesma os valores diários (é aritmética decimal com muitas parcelas, fácil de errar).",
         "input_schema": {
             "type": "object",
             "properties": {
