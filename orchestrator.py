@@ -84,7 +84,13 @@ def escolher_agente_ecos_largos(pergunta: str, tem_anexos: bool = False) -> str:
                "de qualidade de cargas de toros (o documento \"Manual "
                "Qualidade de Cargas - Toros\"), ou 'geral' para qualquer "
                "outra coisa (produção, dashboard, tarefas/cards do "
-               "Basecamp). Responde só com uma das duas palavras.",
+               "Basecamp). Só escolhe 'qualidade_toros' se houver um sinal "
+               "explícito disso (palavras como \"carga\", \"toros\", "
+               "\"qualidade\", \"fornecedor\", \"talão\", ou um pedido "
+               "claro de avaliação) — um nome de pessoa e um número "
+               "sozinhos, sem mais nenhum contexto, NÃO chegam para "
+               "escolher 'qualidade_toros'; nesse caso escolhe 'geral'. "
+               "Responde só com uma das duas palavras.",
         messages=[{"role": "user", "content": pergunta}]
     )
     escolha = r.content[0].text.strip().lower()
@@ -118,13 +124,20 @@ def _escolher_entre_empresas(pergunta: str, tem_anexos: bool = False) -> str:
                 "esta mensagem como 'ecos_largos' (produção industrial — entrada/receção "
                 "de madeira, m3, troncos, charriots, takt, OEE, linhas de produção — ou o "
                 "projeto Ecos Largos em geral) ou 'interior_guider' (vendas de mobiliário, "
-                "produtos, site, encomendas de clientes, projetos da Interior Guider). "
+                "produtos, site, encomendas de clientes, entregas, projetos da Interior "
+                "Guider). "
                 "Bug real já visto: \"entradas\" sozinho é ambíguo entre as duas — só "
                 "escolhe 'interior_guider' se for claramente sobre receita/vendas em "
                 "euros; uma pergunta sobre quantidade, m3, ou sem unidade monetária "
-                "explícita é 'ecos_largos' (entrada de madeira). Se mesmo assim não "
-                "estiver claro, escolhe 'interior_guider'. Responde só com uma das duas "
-                "palavras."),
+                "explícita é 'ecos_largos' (entrada de madeira). "
+                "Outro bug real já visto: uma mensagem só com um NOME DE PESSOA e um "
+                "número (ex: \"Ana Fraião 10112025\"), sem qualquer palavra do domínio "
+                "de nenhuma das duas equipas (nem \"toros\"/\"carga\"/\"fornecedor\"/"
+                "\"talão\", nem \"produção\"/\"m3\"/\"vendas\") NÃO É prova nenhuma de "
+                "que seja sobre cargas de toros — é tão provavelmente o nome de um "
+                "cliente e o número de uma encomenda/entrega da Interior Guider. Nestes "
+                "casos sem qualquer sinal de nenhum dos dois domínios, escolhe sempre "
+                "'interior_guider'. Responde só com uma das duas palavras."),
         messages=[{"role": "user", "content": pergunta}]
     )
     escolha = r.content[0].text.strip().lower()
