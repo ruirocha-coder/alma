@@ -5,9 +5,10 @@
 # testadas isoladamente. A orquestração (ler cards, extrair dados via IA,
 # publicar comentários) vive em agents/logistica_entregas.py, tal como
 # agents/monitor_basecamp.py já faz para os atrasos gerais.
-import unicodedata
+import os, unicodedata
 from datetime import date, timedelta
 from urllib.parse import quote
+import httpx
 
 PROJETO_ENTREGAS = "Entregas"
 
@@ -265,12 +266,12 @@ Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche 
 
 # morada do armazém Boa Safra (Rui, 2026-07-27) — ponto de partida (e de
 # regresso) de qualquer trajeto de entregas gerado para o Google Maps.
-# Importante: manter só a morada postal (rua, código postal, localidade,
-# país), sem nenhum texto descritivo a mais (ex.: nome do armazém) — texto
-# extra confunde o geocoder do Google Maps, que pode acabar a encontrar um
-# local completamente diferente e próximo em vez da morada real (bug
-# reportado em produção: o link resolvia para "Topsofás, R. do Navega").
-MORADA_ARMAZEM = "Rua da Serração, nº50, 3885-143 Arada, Ovar, Portugal"
+# A morada postal completa não é reconhecida pelo geocoder do Google Maps
+# (bug reportado em produção). O Rui confirmou que o armazém funciona nas
+# instalações da Ecos Largos, e que pesquisar "Ecos Largos" no Google Maps
+# encontra o local certo — por isso usa-se este nome, tal como testado,
+# em vez da morada postal.
+MORADA_ARMAZEM = "Ecos Largos"
 
 # limite generoso mas defensivo — o Google Maps (sem chave de API, só o
 # link público) aceita bem menos de 25 paragens antes de começar a
@@ -278,15 +279,52 @@ MORADA_ARMAZEM = "Rua da Serração, nº50, 3885-143 Arada, Ovar, Portugal"
 # única região numa semana, mas evita gerar um link que o Maps rejeite.
 LIMITE_PARAGENS_GOOGLE_MAPS = 23
 
+# chave da Google Directions API (Google Cloud, faturação ativa) — usada só
+# para CALCULAR a ordem ótima das paragens antes de publicar o trajeto
+# (pedido do Rui, 2026-07-27: a rota publicada já deve vir otimizada, sem a
+# pessoa ter de clicar "Otimizar ordem" manualmente no Maps). Se não
+# estiver configurada, ou se a chamada falhar por qualquer razão, a Alma
+# não rebenta — publica o trajeto na ordem original, tal como antes.
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
+
+def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
+    """Chama a Google Directions API para calcular a ordem ótima das
+    `moradas` (ida e volta a partir de `origem`). Devolve `moradas` na
+    ordem ótima, ou inalterada (mesma ordem de entrada) se não houver
+    chave configurada, se houver menos de 2 paragens (nada a otimizar),
+    ou se a chamada falhar por qualquer razão — nunca deixa a rota por
+    publicar só por causa disto."""
+    if not GOOGLE_MAPS_API_KEY or len(moradas) < 2:
+        return moradas
+    try:
+        resposta = httpx.get(
+            "https://maps.googleapis.com/maps/api/directions/json",
+            params={
+                "origin": origem,
+                "destination": origem,
+                "waypoints": "optimize:true|" + "|".join(moradas),
+                "key": GOOGLE_MAPS_API_KEY,
+            },
+            timeout=10,
+        )
+        dados = resposta.json()
+        if dados.get("status") != "OK":
+            return moradas
+        ordem = dados["routes"][0]["waypoint_order"]
+        return [moradas[i] for i in ordem]
+    except Exception:
+        return moradas
+
 def gerar_link_google_maps(moradas: list[str], origem: str = MORADA_ARMAZEM) -> str:
     """Constrói um link do Google Maps com um trajeto de ida e volta a
-    partir de `origem` (por omissão o armazém Boa Safra), passando por
-    todas as `moradas` dadas (por esta ordem) — pedido explícito do Rui
-    (2026-07-27): a Alma não tem dados reais de distância/tempo entre
-    moradas para calcular ela mesma a ordem ótima, por isso constrói só o
-    link com todas as paragens; o próprio Google Maps, ao abrir o link,
-    permite otimizar a ordem das paragens e editar o trajeto antes de
-    seguir viagem — não tenta replicar isso aqui.
+    partir de `origem` (por omissão o armazém Boa Safra/Ecos Largos),
+    passando por todas as `moradas` dadas. Antes de construir o link, tenta
+    otimizar a ordem das paragens via `_otimizar_ordem_paragens` (Google
+    Directions API) — se essa otimização não for possível (sem chave
+    configurada, ou falha da chamada), usa a ordem original das moradas tal
+    como recebidas, e o próprio Google Maps, ao abrir o link, continua a
+    permitir otimizar a ordem manualmente e editar o trajeto antes de
+    seguir viagem.
 
     Devolve None se `moradas` estiver vazia (não há trajeto nenhum a
     fazer). Trunca defensivamente a LIMITE_PARAGENS_GOOGLE_MAPS moradas
@@ -297,8 +335,9 @@ def gerar_link_google_maps(moradas: list[str], origem: str = MORADA_ARMAZEM) -> 
     moradas_validas = [m for m in moradas if m and m.strip()][:LIMITE_PARAGENS_GOOGLE_MAPS]
     if not moradas_validas:
         return None
+    moradas_otimizadas = _otimizar_ordem_paragens(origem, moradas_validas)
     origem_codificada = quote(origem)
-    paragens_codificadas = "|".join(quote(m) for m in moradas_validas)
+    paragens_codificadas = "|".join(quote(m) for m in moradas_otimizadas)
     return (f"https://www.google.com/maps/dir/?api=1&travelmode=driving"
             f"&origin={origem_codificada}&destination={origem_codificada}"
             f"&waypoints={paragens_codificadas}")
