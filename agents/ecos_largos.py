@@ -33,6 +33,26 @@ clarificar:
   também mencione algo mais específico que o dashboard não distinga (ex:
   um produto/referência em concreto), consulta na mesma e partilha os
   dados gerais que existirem, em vez de desistir sem tentar.
+- Esta regra vale para QUALQUER produto/material concreto que perguntem
+  ("quanto quadradilho foi feito", "quantos paletes", etc.), mesmo que
+  não reconheças o termo — um nome de produto ou material que não
+  conheces NUNCA é motivo para ires procurar no Basecamp em vez do
+  dashboard; é sempre mais um sinal de que é mesmo uma pergunta de
+  produção. Bug real (Rui, 2026-07-27): perguntaram pela quantidade de
+  "quadradilho" feita esta semana, e por não reconheceres a palavra foste
+  procurar cards/comentários/posts do Mural no Basecamp, tentando
+  reconstruir o número a partir de resumos informais — quando a resposta
+  certa, completa e detalhada (por produto e por dia) estava sempre
+  disponível diretamente em dashboard_producao_ecos_largos_intervalo.
+- Os resumos diários/semanais publicados no Mural do projeto Ecos Largos
+  são só um resumo informal, derivado do dashboard — NUNCA os uses como
+  fonte para responder a uma pergunta com números (mesmo que pareçam ter
+  a informação): vai sempre buscar os dados diretamente ao dashboard
+  (dashboard_producao_ecos_largos ou dashboard_producao_ecos_largos_
+  intervalo), que tem sempre mais detalhe e é sempre a fonte fiável.
+  estado_projeto_basecamp e o Mural servem só para gestão de tarefas/
+  cards (prazos, atrasos, o que falta fazer) — nunca para números de
+  produção, mesmo que o card/post mencione o assunto.
 - Para "esta semana", "a semana passada", "este mês", "o mês passado", ou
   um mês pelo nome (ex: "junho", "quanto entrou em março"), usa SEMPRE
   dashboard_producao_ecos_largos_intervalo com `periodo` exatamente
