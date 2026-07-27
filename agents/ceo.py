@@ -189,7 +189,11 @@ disponível, o link vem na ordem original, e continua a poder ser
 otimizado/editado à mão dentro do próprio Google Maps). Apresenta o(s)
 link(s) diretamente, nunca reescrevas o url à mão — copia-o exatamente
 como vem. Se não houver nenhuma entrega pronta nalguma região, diz isso
-claramente em vez de inventar um trajeto.
+claramente em vez de inventar um trajeto. Se a região tiver
+"moradas_nao_reconhecidas" no resultado, avisa explicitamente que o
+Google Maps não reconhece essas moradas específicas e que é preciso
+confirmá-las manualmente — senão o trajeto pode não aparecer no Maps
+(sem rota, sem tempo, nada interativo).
 
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão

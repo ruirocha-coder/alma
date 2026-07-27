@@ -315,6 +315,42 @@ def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
     except Exception:
         return moradas
 
+def _morada_reconhecida(morada: str) -> bool:
+    """Verifica, via Google Geocoding API, se `morada` é reconhecida pelo
+    Google Maps. Devolve True se não houver chave configurada ou se a
+    chamada falhar por qualquer razão (não verificado — não deve ser
+    tratado como morada errada, só como "não foi possível confirmar");
+    só devolve False quando a Google respondeu claramente que não
+    encontrou a morada (ex: ZERO_RESULTS)."""
+    if not GOOGLE_MAPS_API_KEY:
+        return True
+    try:
+        resposta = httpx.get(
+            "https://maps.googleapis.com/maps/api/geocode/json",
+            params={"address": morada, "key": GOOGLE_MAPS_API_KEY},
+            timeout=10,
+        )
+        dados = resposta.json()
+        if dados.get("status") == "ZERO_RESULTS":
+            return False
+        return True
+    except Exception:
+        return True
+
+def moradas_nao_reconhecidas(moradas: list[str]) -> list[str]:
+    """Devolve, de entre `moradas`, só as que o Google Maps confirma não
+    conseguir encontrar (bug real reportado em produção: um card com uma
+    morada mal escrita/incompleta faz o Google Maps falhar a
+    geocodificação dessa paragem, o que impede o trajeto todo de ser
+    calculado — sem mostrar rota, tempo, nem nada interativo, sem
+    nenhum aviso claro do motivo). Verificar isto antes de publicar
+    permite avisar logo no texto, em vez de a pessoa só descobrir ao
+    abrir um link partido. Devolve sempre [] se não houver chave
+    configurada (sem forma de verificar)."""
+    if not GOOGLE_MAPS_API_KEY:
+        return []
+    return [m for m in moradas if m and m.strip() and not _morada_reconhecida(m)]
+
 def gerar_link_google_maps(moradas: list[str], origem: str = MORADA_ARMAZEM) -> str:
     """Constrói um link do Google Maps com um trajeto de ida e volta a
     partir de `origem` (por omissão o armazém Boa Safra/Ecos Largos),
