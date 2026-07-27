@@ -152,11 +152,11 @@ TOOLS_MURAL = [
 
 # pedido explícito do Rui (2026-07-27): corrigir a empresa registada no
 # perfil de OUTRA pessoa (não o de quem está a falar) afeta o routing dela
-# em toda a aplicação — só o Rui pode fazer isto, em qualquer canal
-# (consola ou Basecamp), ao contrário de publicar_mural (que só restringe
-# vindo do Basecamp). Ajustar esta lista se mais alguém precisar de poder
-# fazer isto.
-_AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA = ("rui",)
+# em toda a aplicação — só o Rui e a Beatriz podem fazer isto, em qualquer
+# canal (consola ou Basecamp), ao contrário de publicar_mural (que só
+# restringe vindo do Basecamp). Ajustar esta lista se mais alguém precisar
+# de poder fazer isto.
+_AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA = ("rui", "beatriz")
 
 def _atualizar_empresa_pessoa_restrito(utilizador: str, nome: str, empresa: str) -> dict:
     if not any(autorizado in utilizador.lower() for autorizado in _AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA):
