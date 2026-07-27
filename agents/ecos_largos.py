@@ -56,7 +56,11 @@ clarificar:
   ler_anexos_registo_basecamp não encontrar nada anexado ao card, o
   ficheiro pode estar anexado a um COMENTÁRIO em vez da descrição — usa
   procurar_anexo_em_comentarios com o campo "comments_url" do card e o
-  nome do ficheiro, em vez de percorreres os comentários um a um.
+  nome do ficheiro, em vez de percorreres os comentários um a um. Se já
+  tentaste isto antes nesta mesma conversa e falhou, volta a chamar
+  procurar_cards_basecamp AGORA para obter um "url_api"/"comments_url"
+  frescos — nunca reutilizes um valor de mais cedo na conversa, e um
+  erro anterior nunca significa que vai falhar sempre.
 - Para documentos do projeto usa procurar_documentos_empresa e
   ler_documento_empresa, pesquisando por "Ecos Largos" ou pelo termo certo.
 
