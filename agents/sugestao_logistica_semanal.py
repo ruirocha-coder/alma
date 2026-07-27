@@ -33,10 +33,11 @@
 # que ordem dentro de cada dia. Além disso (pedido do Rui, 2026-07-27),
 # gera um link de Google Maps por região, com todas as paragens prontas
 # a entregar essa semana, para a Conceição validar/editar diretamente no
-# Maps antes de sair — ver tools.logistica.gerar_link_google_maps. Não
-# tenta replicar a otimização de rota do Google Maps (nunca temos dados
-# reais de distância/tempo entre moradas), só constrói o link com as
-# paragens certas; a otimização em si faz-se dentro do próprio Maps.
+# Maps antes de sair — ver tools.logistica.gerar_link_google_maps. A
+# ordem das paragens já vem otimizada (via Google Directions API, pedido
+# do Rui 2026-07-27); se essa otimização não estiver disponível, o link
+# vem na ordem original e continua a poder ser otimizado/editado à mão
+# dentro do próprio Maps.
 import threading
 from datetime import date, timedelta
 from agents.base import client
@@ -243,8 +244,8 @@ def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
         return ""
     return ("\n\n---\n\n### Trajetos no Google Maps (partida e regresso ao armazém)\n"
             + "\n".join(linhas)
-            + "\n\nAbre o link e usa a opção de otimizar a ordem das paragens no Google Maps "
-              "para validar/editar o trajeto antes de sair.")
+            + "\n\nA ordem das paragens já vem otimizada — abre o link para validar/editar "
+              "o trajeto antes de sair.")
 
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os

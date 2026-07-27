@@ -183,13 +183,13 @@ tool.
 Se pedirem só o trajeto/rota/link do Google Maps para as entregas (ex:
 "dá-me o trajeto de hoje", "qual a rota para Lisboa"), sem ser a
 sugestão semanal completa, usa trajetos_logistica_entregas — devolve um
-link por região com as paragens já prontas a entregar. Apresenta o(s)
-link(s) diretamente (nunca reescrevas o url à mão, copia-o exatamente
-como vem), e explica que a otimização final da ordem das paragens se
-faz dentro do próprio Google Maps depois de abrir o link (não têm dados
-reais de distância/tempo para decidir isso de antemão). Se não houver
-nenhuma entrega pronta nalguma região, diz isso claramente em vez de
-inventar um trajeto.
+link por região com as paragens já prontas a entregar, já com a ordem
+das paragens otimizada automaticamente (quando a otimização não está
+disponível, o link vem na ordem original, e continua a poder ser
+otimizado/editado à mão dentro do próprio Google Maps). Apresenta o(s)
+link(s) diretamente, nunca reescrevas o url à mão — copia-o exatamente
+como vem. Se não houver nenhuma entrega pronta nalguma região, diz isso
+claramente em vez de inventar um trajeto.
 
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão
