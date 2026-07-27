@@ -315,29 +315,35 @@ def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
     except Exception:
         return moradas
 
-def _morada_reconhecida(morada: str) -> bool:
-    """Verifica, via Google Geocoding API, se `morada` é reconhecida pelo
-    Google Maps. Devolve True se não houver chave configurada ou se a
-    chamada falhar por qualquer razão (não verificado — não deve ser
-    tratado como morada errada, só como "não foi possível confirmar");
-    só devolve False quando a Google respondeu claramente que não
-    encontrou a morada (ex: ZERO_RESULTS)."""
+def _morada_reconhecida(morada: str, origem: str = MORADA_ARMAZEM) -> bool:
+    """Verifica se `morada` é reconhecida pelo Google Maps — usando a
+    própria Directions API (não a Geocoding API, que é uma API separada
+    e a chave configurada só tem a Directions API autorizada, por pedido
+    explícito de restringi-la assim). Pede um trajeto trivial de
+    `origem` até `morada`; se a Google responder que não conseguiu
+    geocodificar ou não encontrou rota nenhuma (NOT_FOUND/ZERO_RESULTS),
+    é sinal de que esta morada específica é o problema.
+
+    Devolve True se não houver chave configurada, ou se a chamada falhar
+    por qualquer razão que não seja claramente sobre a morada em si (ex:
+    limite de pedidos, chave inválida) — nunca trata isso como "morada
+    errada", só como "não foi possível confirmar"."""
     if not GOOGLE_MAPS_API_KEY:
         return True
     try:
         resposta = httpx.get(
-            "https://maps.googleapis.com/maps/api/geocode/json",
-            params={"address": morada, "key": GOOGLE_MAPS_API_KEY},
+            "https://maps.googleapis.com/maps/api/directions/json",
+            params={"origin": origem, "destination": morada, "key": GOOGLE_MAPS_API_KEY},
             timeout=10,
         )
         dados = resposta.json()
-        if dados.get("status") == "ZERO_RESULTS":
+        if dados.get("status") in ("NOT_FOUND", "ZERO_RESULTS"):
             return False
         return True
     except Exception:
         return True
 
-def moradas_nao_reconhecidas(moradas: list[str]) -> list[str]:
+def moradas_nao_reconhecidas(moradas: list[str], origem: str = MORADA_ARMAZEM) -> list[str]:
     """Devolve, de entre `moradas`, só as que o Google Maps confirma não
     conseguir encontrar (bug real reportado em produção: um card com uma
     morada mal escrita/incompleta faz o Google Maps falhar a
