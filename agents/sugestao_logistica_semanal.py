@@ -234,12 +234,22 @@ def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
     """Constrói, em Python (nunca pedido ao modelo — um url é demasiado
     fácil de corromper se reescrito por um LLM), a secção com os links do
     Google Maps de cada região que tenha entregas prontas esta semana.
-    Devolve "" se não houver nenhuma morada disponível em região nenhuma."""
+    Devolve "" se não houver nenhuma morada disponível em região nenhuma.
+
+    Antes de cada link, avisa se alguma das moradas dessa região não for
+    reconhecida pelo Google Maps (ver logistica.moradas_nao_reconhecidas)
+    — bug real reportado em produção: uma morada mal geocodificada
+    impede o Google Maps de calcular o trajeto todo (sem rota, sem
+    tempo, nada interativo), sem nenhum aviso claro do motivo."""
     linhas = []
     for regiao, moradas in moradas_por_regiao.items():
         link = logistica.gerar_link_google_maps(moradas)
-        if link:
-            linhas.append(f"- **{regiao}** ({len(moradas)} paragem/paragens): {link}")
+        if not link:
+            continue
+        linhas.append(f"- **{regiao}** ({len(moradas)} paragem/paragens): {link}")
+        for morada_errada in logistica.moradas_nao_reconhecidas(moradas):
+            linhas.append(f"  - ⚠️ o Google Maps não reconhece esta morada: \"{morada_errada}\" "
+                          "— confirma-a manualmente, senão o trajeto pode não aparecer no Maps")
     if not linhas:
         return ""
     return ("\n\n---\n\n### Trajetos no Google Maps (partida e regresso ao armazém)\n"
@@ -297,5 +307,8 @@ def trajetos_logistica_entregas() -> dict:
         link = logistica.gerar_link_google_maps(moradas)
         if link:
             trajetos[regiao] = {"paragens": len(moradas), "link": link}
+            moradas_erradas = logistica.moradas_nao_reconhecidas(moradas)
+            if moradas_erradas:
+                trajetos[regiao]["moradas_nao_reconhecidas"] = moradas_erradas
     contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
     return {"por_regiao": contagens, "trajetos_google_maps": trajetos}
