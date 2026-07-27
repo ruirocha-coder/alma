@@ -95,6 +95,18 @@ TOOLS_MEMORIA = [
             "properties": {"empresa": {"type": "string", "enum": ["interior_guider", "ecos_largos", "ambas"]}},
             "required": ["empresa"]
         }
+    },
+    {
+        "name": "atualizar_empresa_pessoa",
+        "description": "Corrige a equipa/empresa registada no perfil de OUTRA pessoa (não o de quem está a falar contigo agora — para isso usa definir_empresa) — usa isto só quando um administrador pedir explicitamente para corrigir ou registar a empresa de alguém (ex: \"a empresa da Beatriz passou a ser só Ecos Largos\", \"regista a Maria como Interior Guider\"). `nome` tem de ser o nome exato da pessoa, tal como já está registado no perfil dela — só quem está autorizado consegue usar esta ferramenta, e ela recusa se não encontrar já um perfil guardado com esse nome exato (para nunca criar por engano um perfil novo/duplicado por causa de um nome mal escrito) — nesse caso, confirma o nome exato com quem pediu antes de tentares outra vez.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nome": {"type": "string", "description": "nome exato da pessoa cujo perfil vai ser corrigido, tal como já está registado"},
+                "empresa": {"type": "string", "enum": ["interior_guider", "ecos_largos", "ambas"]}
+            },
+            "required": ["nome", "empresa"]
+        }
     }
 ]
 
@@ -137,6 +149,22 @@ TOOLS_MURAL = [
         }
     }
 ]
+
+# pedido explícito do Rui (2026-07-27): corrigir a empresa registada no
+# perfil de OUTRA pessoa (não o de quem está a falar) afeta o routing dela
+# em toda a aplicação — só o Rui pode fazer isto, em qualquer canal
+# (consola ou Basecamp), ao contrário de publicar_mural (que só restringe
+# vindo do Basecamp). Ajustar esta lista se mais alguém precisar de poder
+# fazer isto.
+_AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA = ("rui",)
+
+def _atualizar_empresa_pessoa_restrito(utilizador: str, nome: str, empresa: str) -> dict:
+    if not any(autorizado in utilizador.lower() for autorizado in _AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA):
+        return {"erro": f"{utilizador} não tem autorização para alterar a empresa registada de outra pessoa"}
+    if not db.perfil_existe(nome):
+        return {"erro": f"não encontrei nenhum perfil guardado exatamente com o nome {nome!r} — "
+                        "confirma o nome exato (como está registado) antes de tentar outra vez"}
+    return db.atualizar_empresa(nome, empresa)
 
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
@@ -206,6 +234,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
         "definir_empresa": lambda empresa: db.atualizar_empresa(utilizador, empresa),
+        "atualizar_empresa_pessoa": lambda nome, empresa: _atualizar_empresa_pessoa_restrito(
+            utilizador, nome, empresa),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
