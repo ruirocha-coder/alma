@@ -238,7 +238,7 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     try:
         itens = [i for i in basecamp._itens_ativos()
                 if i.get("type") == "Kanban::Card"
-                and logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()]
+                and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
     except Exception as e:
         return {"erro": str(e)}
     if not itens:
@@ -319,7 +319,7 @@ def correr_monitorizacao_logistica() -> dict:
         try:
             itens = [i for i in basecamp._itens_ativos()
                     if i.get("type") == "Kanban::Card"
-                    and logistica.PROJETO_ENTREGAS.lower() in ((i.get("bucket") or {}).get("name") or "").lower()
+                    and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()
                     and not basecamp._em_coluna_terminal(i)]
         except Exception as e:
             print(f"[logistica_entregas] não foi possível obter os cards do Basecamp: {e!r}")

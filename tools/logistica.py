@@ -10,6 +10,13 @@ from datetime import date, timedelta
 
 PROJETO_ENTREGAS = "Entregas"
 
+# pedido explícito do Rui (2026-07-24): este agente só pode ler cards do
+# projeto "Entregas", nunca de nenhum outro — em agents/logistica_entregas.py
+# e agents/sugestao_logistica_semanal.py, o filtro pelo bucket é sempre uma
+# comparação EXATA (case-insensitive) a PROJETO_ENTREGAS, nunca "in"/substring,
+# para nunca incluir por engano um projeto diferente cujo nome só contenha
+# "Entregas" (ex: um projeto futuro "Pré-Entregas" ou "Entregas 2025").
+
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
 # ainda está no fornecedor; as colunas por região são onde a encomenda é
 # entregue ao cliente. MODELO CONFIRMADO em 2026-07-23 contra a API real
