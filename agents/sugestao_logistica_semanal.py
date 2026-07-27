@@ -16,11 +16,17 @@
 # é sim o quadro geral "Logística", mas o PRÓPRIO objeto obtido a partir
 # do `url` já É a coluna de região, sem precisar de mais nenhum passo).
 # Por isso a região volta a ser lida da estrutura (ver
-# _regiao_estrutural) — SÓ quando isso não resolver para Lisboa/Porto/
-# Outro (ex: um card cuja secção "On Hold" ainda aponta para "Produção",
-# porque nunca chegou a ser movido para a coluna de região certa) é que
-# se cai na classificação por morada (ver _classificar_regiao), como
-# rede de segurança.
+# _coluna_real_on_hold, em agents/logistica_entregas.py) — só cai na
+# classificação por morada (ver _classificar_regiao) quando essa
+# resolução falhar de verdade (ex: API indisponível), como rede de
+# segurança.
+#
+# Regras de significado do "On Hold" CONFIRMADAS pelo Rui (2026-07-27) —
+# ver tools/logistica.py para o detalhe: por trás de "Produção" significa
+# data confirmada com o fornecedor mas ainda não chegou ao armazém (NUNCA
+# entra nesta sugestão); por trás de "Assistências" aguarda ser agendada
+# (também não é uma entrega, fica de fora); só por trás de uma região
+# (Lisboa/Porto/Outro) é que está mesmo pronta a ser entregue.
 #
 # Esta sugestão organiza: que dia visitar cada região, e por que ordem
 # dentro de cada dia. Nunca calcula uma rota otimizada real (sem API de
@@ -29,7 +35,8 @@
 import threading
 from datetime import date, timedelta
 from agents.base import client
-from agents.logistica_entregas import _extrair_dados_encomenda, _regiao_estrutural, _formatar_documentos_referencia
+from agents.logistica_entregas import (_extrair_dados_encomenda, _coluna_real_on_hold,
+                                       _REGIAO_POR_COLUNA, _formatar_documentos_referencia)
 from tools import basecamp, logistica, documentos_referencia
 
 _a_correr = threading.Lock()
@@ -151,13 +158,15 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
-    cards ativos do projeto "Entregas", filtra os que estão prontos a
-    entregar (em "On Hold" — ver tools.logistica.fase_encomenda), lê a
-    região de cada um a partir da coluna real por trás da secção "On
-    Hold" (com a morada como rede de segurança — ver _regiao_estrutural
-    e _classificar_regiao), e publica uma sugestão de organização no
-    Mural "Programação", dirigida à Conceição Costa. Pensado para correr
-    às segundas de manhã (agendado), mas pode ser disparado manualmente."""
+    cards ativos do projeto "Entregas", filtra os que estão mesmo prontos
+    a entregar (em "On Hold" por trás de uma região — nunca por trás de
+    "Produção" ou "Assistências", ver tools.logistica.fase_encomenda), lê
+    a região de cada um a partir da coluna real por trás da secção "On
+    Hold" (com a morada como rede de segurança só quando essa resolução
+    falhar — ver _coluna_real_on_hold e _classificar_regiao), e publica
+    uma sugestão de organização no Mural "Programação", dirigida à
+    Conceição Costa. Pensado para correr às segundas de manhã (agendado),
+    mas pode ser disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
@@ -176,7 +185,24 @@ def correr_sugestao_semanal_logistica() -> dict:
 
         for item in itens:
             estado = ((item.get("parent") or {}).get("title") or "").strip()
-            if logistica.fase_encomenda(estado) != "pronto_entrega":
+            if logistica.normalizar_coluna(estado) != logistica.COLUNA_PRONTO_ENTREGA:
+                continue  # só cards em "On Hold" interessam a esta sugestão
+
+            coluna_real = _coluna_real_on_hold(item)
+            fase = logistica.fase_encomenda(estado, coluna_real)
+
+            # pedido do Rui (2026-07-27): "On Hold" por trás de "Produção"
+            # significa data confirmada com o fornecedor mas AINDA NÃO
+            # chegou ao armazém — nunca incluir isto na sugestão de
+            # entregas (bug real: entrava como se já estivesse pronto).
+            # Por trás de "Assistências" também não é uma entrega. Só cai
+            # na morada como rede de segurança quando a resolução da
+            # coluna real falhar de verdade (ex: API indisponível) —
+            # nunca quando ela resolveu com sucesso para algo que
+            # confirmadamente não é uma região.
+            if fase in ("producao", "assistencia_aguarda_agendamento"):
+                continue
+            if fase == "outro" and coluna_real is not None:
                 continue
 
             titulo = item.get("title") or item.get("content") or "(sem título)"
@@ -187,7 +213,10 @@ def correr_sugestao_semanal_logistica() -> dict:
                 print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
                 dados = {}
 
-            regiao = _regiao_estrutural(item) or _classificar_regiao(dados.get("morada"))
+            if fase == "pronto_entrega":
+                regiao = _REGIAO_POR_COLUNA[logistica.normalizar_coluna(coluna_real)]
+            else:
+                regiao = _classificar_regiao(dados.get("morada"))
             cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
 
         try:

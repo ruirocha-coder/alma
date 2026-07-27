@@ -20,17 +20,34 @@ PROJETO_ENTREGAS = "Entregas"
 # a coluna "Produção" (e variantes de escrita) significa que a encomenda
 # ainda está no fornecedor; as colunas por região são onde a encomenda é
 # entregue ao cliente. MODELO CONFIRMADO em 2026-07-23 contra a API real
-# do Basecamp: um card pronto a entregar tem como `parent` um objeto do
-# tipo "Kanban::OnHold" (título sempre genérico "On hold") — mas o `url`
-# desse objeto aponta diretamente para a coluna de região REAL por trás
-# dessa secção (ex: confirmado ao vivo, uma secção "On Hold" com url para
-# a coluna "Porto"). A região lê-se buscando esse url (ver
-# agents.sugestao_logistica_semanal._regiao_estrutural) — a morada nas
-# notas do card só é usada como rede de segurança, para os casos raros
-# em que essa coluna real ainda é "Produção" (card marcado pronto antes
-# de ser movido para a coluna de região certa).
+# do Basecamp: um card em "On Hold" tem como `parent` um objeto do tipo
+# "Kanban::OnHold" (título sempre genérico "On hold") — mas o `url` desse
+# objeto aponta diretamente para a coluna real por trás dessa secção (ex:
+# confirmado ao vivo, uma secção "On Hold" com url para a coluna "Porto").
+# Essa coluna real lê-se buscando esse url (ver
+# agents.logistica_entregas._coluna_real_on_hold) — a morada nas notas do
+# card só é usada como rede de segurança quando a coluna real for uma
+# região mas não corresponder a nenhuma das conhecidas.
+#
+# Regras de significado do "On Hold" CONFIRMADAS pelo Rui (2026-07-27) —
+# o significado muda consoante a coluna real por trás da secção:
+# - On Hold por trás de "Produção": a encomenda AINDA está no fornecedor,
+#   mas já tem data de entrega confirmada com ele (à espera de chegar ao
+#   armazém) — NÃO significa que já chegou. Bug real corrigido: antes
+#   disto, qualquer "On Hold" (mesmo por trás de "Produção") era tratado
+#   como se já tivesse chegado ao armazém, pronto a agendar — o que
+#   fazia a sugestão semanal de entregas incluir encomendas que ainda
+#   nem tinham saído do fornecedor, e o alerta diário disparar "chegada
+#   confirmada" para encomendas que ainda não chegaram.
+# - On Hold por trás de "Lisboa"/"Porto"/"Outro": a encomenda já chegou
+#   ao armazém, pronta a ser agendada para entrega (comportamento já
+#   correto, mantido).
+# - On Hold por trás de "Assistências": aguarda ser agendada (uma visita
+#   de assistência, não uma entrega) — fase própria, distinta das
+#   entregas; ainda sem condições de alerta próprias definidas.
 COLUNAS_REGIAO_ENTREGA = {"lisboa", "porto", "outro", "outros"}
 COLUNA_PRONTO_ENTREGA = "on hold"
+COLUNA_ASSISTENCIAS = "assistencias"
 
 def normalizar_coluna(nome: str) -> str:
     """Minúsculas e sem acentos — para "On Hold"/"on hold"/"Lisboa" serem
@@ -39,24 +56,40 @@ def normalizar_coluna(nome: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode()
     return sem_acentos.strip().lower()
 
-def fase_encomenda(estado: str) -> str:
+def fase_encomenda(estado: str, coluna_real_on_hold: str = None) -> str:
     """Em que fase do fluxo de entrega está uma encomenda, a partir do
-    nome do container do Kanban ("estado", o `parent.title` devolvido
-    pela API) onde o card está agora:
-    - "producao": ainda no fornecedor, à espera de chegar ao armazém.
-    - "pronto_entrega": na coluna "On Hold" — chegou ao armazém, pronta a
-      ser entregue, ainda por agendar. A região vem do url do parent
-      (ver agents.sugestao_logistica_semanal._regiao_estrutural).
+    nome do container do Kanban ("estado", o `parent.title` devolvido pela
+    API) onde o card está agora, e — só quando `estado` for "On Hold" — a
+    coluna REAL por trás dessa secção (`coluna_real_on_hold`, resolvida
+    via agents.logistica_entregas._coluna_real_on_hold; None se ainda não
+    tiver sido resolvida, ou se a resolução falhar).
+
+    - "producao": ainda no fornecedor, à espera de chegar ao armazém —
+      quer esteja diretamente na coluna "Produção", quer esteja em "On
+      Hold" por trás de "Produção" (já com data confirmada, mas ainda não
+      chegou — ver nota no topo do ficheiro).
+    - "pronto_entrega": em "On Hold" por trás de uma coluna de região
+      (Lisboa/Porto/Outro) — chegou ao armazém, pronta a ser entregue,
+      ainda por agendar.
     - "em_entrega": diretamente numa coluna de região (Lisboa/Porto/
-      Outro) — a entrega está em curso, não precisa de mais sugestões de
-      logística.
-    - "outro": nenhuma das anteriores (ex: já concluído, ou outra coluna
-      fora deste fluxo)."""
+      Outro, fora de "On Hold") — a entrega está em curso, não precisa de
+      mais sugestões de logística.
+    - "assistencia_aguarda_agendamento": em "On Hold" por trás de
+      "Assistências" — aguarda ser agendada.
+    - "outro": nenhuma das anteriores (ex: já concluído, uma coluna fora
+      deste fluxo, ou "On Hold" cuja coluna real ainda não foi resolvida)."""
     coluna = normalizar_coluna(estado)
+    if coluna == COLUNA_PRONTO_ENTREGA:
+        coluna_real = normalizar_coluna(coluna_real_on_hold) if coluna_real_on_hold else ""
+        if "produ" in coluna_real:
+            return "producao"
+        if coluna_real in COLUNAS_REGIAO_ENTREGA:
+            return "pronto_entrega"
+        if COLUNA_ASSISTENCIAS in coluna_real:
+            return "assistencia_aguarda_agendamento"
+        return "outro"
     if "produ" in coluna:  # "Produção"/"Producao", tolera acentuação/maiúsculas
         return "producao"
-    if coluna == COLUNA_PRONTO_ENTREGA:
-        return "pronto_entrega"
     if coluna in COLUNAS_REGIAO_ENTREGA:
         return "em_entrega"
     return "outro"
@@ -95,6 +128,7 @@ JANELA_REPETICAO_DIAS = {"A": 7, "B": 7, "C": 999999, "D": 3, "E": 999999,
                         "F": 999999, "G": 999999, "H": 999999, "I": 7}
 
 def avaliar_condicao(*, hoje: date, estado: str, criado_em: date,
+                     coluna_real_on_hold: str = None,
                      data_entrada_armazem: date = None, data_entrega_cliente: date = None,
                      ja_alertado_recente: dict, horas_desde_alerta_b: float = None,
                      pedido_email_atraso: bool = False):
@@ -103,8 +137,11 @@ def avaliar_condicao(*, hoje: date, estado: str, criado_em: date,
     None se nenhuma se aplicar. `ja_alertado_recente` é um dict
     {"A": bool, "B": bool, ...} já calculado pelo chamador (consultando a
     janela de repetição própria de cada condição em db.py) —
-    esta função em si não sabe nada de base de dados, só de regras."""
-    fase = fase_encomenda(estado)
+    esta função em si não sabe nada de base de dados, só de regras.
+    `coluna_real_on_hold`: quando `estado` for "On Hold", a coluna real
+    por trás dessa secção (ver fase_encomenda) — sem isto, um "On Hold"
+    por trás de "Produção" seria tratado como já chegado ao armazém."""
+    fase = fase_encomenda(estado, coluna_real_on_hold)
 
     # A — campos críticos em falta, encomenda já em curso há mais de 3 dias úteis
     if ((data_entrada_armazem is None or data_entrega_cliente is None)

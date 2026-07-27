@@ -95,7 +95,20 @@ usa sempre diagnosticar_logistica_on_hold em vez de estado_projeto_basecamp
 isso significa; diagnosticar_logistica_on_hold já resolve corretamente cada
 card "On Hold" para a região real por trás dele (Lisboa/Porto/Outro) e
 explica que esses cards já chegaram ao armazém, prontos a ser entregues —
-informação central para quem trabalha com este projeto. Nunca leias cards de
+informação central para quem trabalha com este projeto.
+
+O significado de "On Hold" no projeto "Entregas" depende da coluna REAL
+por trás dessa secção (confirmado pelo Rui, 2026-07-27) — nunca assumas
+sempre o mesmo significado:
+- Por trás de "Produção": a encomenda AINDA está no fornecedor, já com
+  data de entrega confirmada, mas ainda não chegou ao armazém — NUNCA
+  digas que já chegou/está pronta a entregar.
+- Por trás de "Lisboa"/"Porto"/"Outro": já chegou ao armazém, pronta a
+  ser agendada para entrega.
+- Por trás de "Assistências": aguarda ser agendada (uma visita de
+  assistência, não uma entrega).
+
+Nunca leias cards de
 nenhum outro projeto ao responderes sobre "Entregas" — só os deste projeto.
 
 As notas de um card do Basecamp guardam muitas vezes informação crítica

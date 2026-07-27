@@ -31,14 +31,14 @@ MAX_CARDS_POR_CORRIDA = 40  # limite defensivo, tal como monitor_basecamp.py
 
 _REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
-def _regiao_estrutural(item: dict):
-    """Tenta ler a região diretamente da coluna real por trás da secção
-    "On Hold" do card — devolve None (não Lisboa/Porto/Outro) se não
-    conseguir, ou se essa coluna real não for uma coluna de região (ex:
-    ainda "Produção"), para o chamador cair na morada nesse caso.
-    Partilhada entre agents.sugestao_logistica_semanal (a sugestão
-    semanal) e diagnostico_cards_regiao (aqui mesmo), para nunca haver
-    duas versões desta lógica a divergir uma da outra."""
+def _coluna_real_on_hold(item: dict):
+    """Lê o título da coluna REAL por trás da secção "On Hold" de um card
+    (ex: "Produção", "Porto", "Assistências") — devolve None se o card não
+    estiver em "On Hold" (sem url de parent) ou se a resolução falhar.
+    Partilhada entre agents.sugestao_logistica_semanal, diagnostico_cards_
+    regiao e correr_monitorizacao_logistica (aqui mesmo), e por
+    logistica.fase_encomenda (que decide a fase a partir deste título),
+    para nunca haver duas versões desta lógica a divergir uma da outra."""
     parent_url = (item.get("parent") or {}).get("url")
     if not parent_url:
         return None
@@ -47,7 +47,18 @@ def _regiao_estrutural(item: dict):
     except Exception as e:
         print(f"[logistica_entregas] não consegui obter a coluna real de {item.get('id')}: {e!r}")
         return None
-    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(coluna_real.get("title")))
+    return coluna_real.get("title")
+
+def _regiao_estrutural(item: dict):
+    """Como _coluna_real_on_hold, mas já convertido para Lisboa/Porto/Outro
+    — devolve None se a coluna real não for uma dessas regiões (ex: ainda
+    "Produção" ou "Assistências"), para o chamador cair na morada nesse
+    caso (só quando genuinamente for uma região, ver
+    tools.logistica.fase_encomenda para os outros casos)."""
+    titulo = _coluna_real_on_hold(item)
+    if titulo is None:
+        return None
+    return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(titulo))
 
 _MISSAO_EXTRACAO = """Extrais dados estruturados do título e das notas de um
 card do Basecamp sobre uma encomenda de mobiliário, para a equipa de
@@ -244,16 +255,28 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     if not itens:
         return {"aviso": "nenhum card ativo encontrado no projeto Entregas"}
 
-    itens_prontos = [i for i in itens
-                    if logistica.fase_encomenda((i.get("parent") or {}).get("title")) == "pronto_entrega"]
+    # resolve a coluna real por trás de cada "On Hold" uma única vez (uma
+    # chamada à API por card), reaproveitada para determinar a fase E a
+    # região — em vez de resolver duas vezes. Bug real corrigido
+    # (Rui, 2026-07-27): antes disto, fase_encomenda decidia "pronto a
+    # entregar" só pelo título "On Hold" em si, sem saber qual é a coluna
+    # real por trás — por isso um card em "On Hold" ainda por trás de
+    # "Produção" (data confirmada com o fornecedor, mas ainda não chegou
+    # ao armazém) era tratado como se já tivesse chegado.
+    itens_on_hold = [i for i in itens
+                    if logistica.normalizar_coluna((i.get("parent") or {}).get("title")) == logistica.COLUNA_PRONTO_ENTREGA]
+    colunas_reais_on_hold = {i["id"]: _coluna_real_on_hold(i) for i in itens_on_hold}
+
+    itens_prontos = [i for i in itens_on_hold
+                    if logistica.fase_encomenda("On Hold", colunas_reais_on_hold[i["id"]]) == "pronto_entrega"]
 
     # pedido do Rui (2026-07-23): quando alguém pede a lista de cards de
     # uma região (ex: "lista os cards da coluna Porto"), tem de incluir
     # tanto os cards diretamente nessa coluna (em entrega a sério) como
-    # os cards em "On Hold" cuja coluna real (ver _regiao_estrutural) é
-    # essa mesma região — senão fica incompleta (bug real: só mostrava o
-    # card em entrega, faltavam os prontos a entregar em On Hold que se
-    # veem na própria página da coluna no Basecamp).
+    # os cards em "On Hold" cuja coluna real é essa mesma região — senão
+    # fica incompleta (bug real: só mostrava o card em entrega, faltavam
+    # os prontos a entregar em On Hold que se veem na própria página da
+    # coluna no Basecamp).
     cards_por_coluna_regiao_bruto = {regiao: [] for regiao in _REGIAO_POR_COLUNA.values()}
     for i in itens:
         titulo_coluna = (i.get("parent") or {}).get("title")
@@ -261,7 +284,7 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
         if regiao:
             cards_por_coluna_regiao_bruto[regiao].append((i, "em_entrega"))
     for i in itens_prontos:
-        regiao = _regiao_estrutural(i)
+        regiao = _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(colunas_reais_on_hold[i["id"]] or ""))
         if regiao:
             cards_por_coluna_regiao_bruto[regiao].append((i, "pronto_a_entregar"))
 
@@ -339,6 +362,16 @@ def correr_monitorizacao_logistica() -> dict:
             projeto = (item.get("bucket") or {}).get("name")
             recording_id = item["id"]
 
+            # pedido do Rui (2026-07-27): um card em "On Hold" pode estar
+            # ainda por trás de "Produção" (data confirmada com o
+            # fornecedor, mas ainda não chegou ao armazém) — sem resolver
+            # a coluna real, avaliar_condicao tratava isto sempre como já
+            # chegado (disparava F: "chegada ao armazém confirmada",
+            # errado para uma encomenda que ainda está no fornecedor).
+            coluna_real_on_hold = None
+            if logistica.normalizar_coluna(estado) == logistica.COLUNA_PRONTO_ENTREGA:
+                coluna_real_on_hold = _coluna_real_on_hold(item)
+
             try:
                 dados = _extrair_dados_encomenda(titulo, notas)
             except Exception as e:
@@ -372,6 +405,7 @@ def correr_monitorizacao_logistica() -> dict:
 
             resultado = logistica.avaliar_condicao(
                 hoje=hoje, estado=estado, criado_em=_card_criado_em(item),
+                coluna_real_on_hold=coluna_real_on_hold,
                 data_entrada_armazem=dados.get("data_entrada_armazem"),
                 data_entrega_cliente=dados.get("data_entrega_cliente"),
                 ja_alertado_recente=_ja_alertado_recente_por_condicao(recording_id),
