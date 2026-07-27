@@ -9,7 +9,7 @@ import threading
 from datetime import date, timedelta
 from persona import PERSONA
 from agents.base import client
-from tools import basecamp
+from tools import basecamp, ecos_largos
 
 _a_correr_interior_guider = threading.Lock()
 _a_correr_ecos_largos = threading.Lock()
@@ -31,11 +31,37 @@ def _semana_atual() -> tuple:
 def _e_projeto_ecos_largos(nome_projeto: str) -> bool:
     return "ecos largos" in (nome_projeto or "").lower()
 
+# pedido explícito do Rui (2026-07-27): o resumo semanal da Ecos Largos
+# tinha só dados do Basecamp (tarefas/cards em atraso) — nunca incluía
+# nada do dashboard de produção, apesar de ser a mesma equipa e o mesmo
+# Mural. Junta-se aqui o total de produção da semana passada (input/
+# output, já calculado em Python — nunca deixar o modelo somar isto, ver
+# tools/ecos_largos._totais_intervalo) como mais uma secção do mesmo
+# resumo, em vez de ficar espalhado por dois posts sem ligação entre si.
+def _texto_producao_semana_passada() -> str:
+    resultado = ecos_largos.ler_dashboard_producao_intervalo(periodo="semana_passada")
+    if "erro" in resultado:
+        return f"(não foi possível obter os dados de produção da semana passada: {resultado['erro']})"
+    totais = resultado.get("totais") or {}
+    if not totais:
+        return "(sem dados de produção disponíveis para a semana passada)"
+    linhas = [f"Semana de {resultado['inicio']} a {resultado['fim']}:"]
+    if "input_m3" in totais:
+        linhas.append(f"- Entrada de madeira: {totais['input_m3']:.2f} m³".replace(".", ","))
+    if "output_m3" in totais:
+        linhas.append(f"- Saída/produção: {totais['output_m3']:.2f} m³".replace(".", ","))
+    return "\n".join(linhas)
+
 MISSAO_RESUMO_SEMANAL = PERSONA + """
 
 Modo atual: resumo semanal de atividade para toda a equipa, publicado no
 Mural do Basecamp. Vais escrever UMA mensagem com base no estado atual das
-tarefas e cards em atraso (dados abaixo).
+tarefas e cards em atraso (dados abaixo) — e, quando o contexto também
+incluir uma secção "Produção da semana passada", com esses dados também,
+como mais uma parte do MESMO resumo (nunca um post à parte). Usa sempre os
+valores exatos dados no contexto para a produção — nunca inventes nem
+recalcules estes números, foram já calculados corretamente antes de
+chegarem até ti.
 
 Regras desta mensagem:
 - Começa sempre com um cabeçalho "Semana de {data_inicio} a {data_fim}",
@@ -47,14 +73,17 @@ Regras desta mensagem:
   a equipa.
 - Resume o panorama geral (quantos itens em atraso, quais os projetos mais
   afetados) sem listar cada um exaustivamente.
+- Se houver dados de produção no contexto, inclui uma secção própria com
+  esses números (entrada/saída de madeira da semana passada), antes das
+  sugestões finais.
 - Termina com 2 a 3 sugestões concretas de melhoria, baseadas em padrões que
   vires nos dados (ex: um projeto acumula muitos atrasos, um tipo de tarefa
-  repete-se).
+  repete-se, ou a produção ficou abaixo do esperado).
 - Usa markdown (títulos, negrito, listas) — vai ser convertido em
   formatação real no Basecamp.
 - Assina sempre como "— Alma"."""
 
-def _gerar_resumo(atrasados: list[dict]) -> str:
+def _gerar_resumo(atrasados: list[dict], producao_texto: str = None) -> str:
     por_projeto = {}
     for item in atrasados:
         por_projeto.setdefault(item["projeto"], []).append(item)
@@ -70,6 +99,8 @@ Total de tarefas/cards em atraso: {len(atrasados)}
 
 Por projeto:
 {resumo_projetos}"""
+    if producao_texto:
+        contexto += f"\n\nProdução da semana passada:\n{producao_texto}"
 
     resposta = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=800,
@@ -78,10 +109,12 @@ Por projeto:
     )
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
-def _correr(lock: threading.Lock, etiqueta: str, filtro, projeto_mural: str):
+def _correr(lock: threading.Lock, etiqueta: str, filtro, projeto_mural: str, incluir_producao: bool = False):
     """Núcleo partilhado pelas duas corridas: só muda o filtro dos atrasados,
-    o lock (para não sobrepor duas corridas da mesma equipa) e o mural onde
-    fica publicado o resumo."""
+    o lock (para não sobrepor duas corridas da mesma equipa), o mural onde
+    fica publicado o resumo, e se inclui também a produção da semana
+    passada (só faz sentido para a Ecos Largos — a Interior Guider não tem
+    dashboard de produção)."""
     if not lock.acquire(blocking=False):
         print(f"[resumo_semanal:{etiqueta}] já há uma corrida em curso — ignorado")
         return
@@ -93,7 +126,14 @@ def _correr(lock: threading.Lock, etiqueta: str, filtro, projeto_mural: str):
             print(f"[resumo_semanal:{etiqueta}] não foi possível obter tarefas do Basecamp: {e!r}")
             return
 
-        texto = _gerar_resumo(atrasados)
+        producao_texto = None
+        if incluir_producao:
+            try:
+                producao_texto = _texto_producao_semana_passada()
+            except Exception as e:
+                print(f"[resumo_semanal:{etiqueta}] não consegui obter os dados de produção: {e!r}")
+
+        texto = _gerar_resumo(atrasados, producao_texto)
         basecamp.publicar_mural("Resumo semanal de atividade", texto, projeto=projeto_mural)
         print(f"[resumo_semanal:{etiqueta}] publicado no mural")
     except Exception:
@@ -113,5 +153,8 @@ def correr_resumo_semanal():
 
 def correr_resumo_semanal_ecos_largos():
     """Gera e publica no Mural da Ecos Largos o resumo semanal de atividade —
-    só dos projetos da Ecos Largos, separado do resumo da Interior Guider."""
-    _correr(_a_correr_ecos_largos, "ecos_largos", _e_projeto_ecos_largos, "Ecos Largos")
+    tarefas/cards da Ecos Largos em atraso, e (pedido do Rui, 2026-07-27) a
+    produção da semana passada, no mesmo resumo — separado do resumo da
+    Interior Guider."""
+    _correr(_a_correr_ecos_largos, "ecos_largos", _e_projeto_ecos_largos, "Ecos Largos",
+           incluir_producao=True)
