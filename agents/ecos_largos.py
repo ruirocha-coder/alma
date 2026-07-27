@@ -52,7 +52,11 @@ clarificar:
   teres tentado. Se a informação estiver num PDF anexado ao card (não no
   texto das notas), usa ler_anexos_registo_basecamp com o campo "url_api"
   do card encontrado (nunca o campo "url", que é só o link para abrir no
-  browser).
+  browser). Se as notas mencionarem o nome de um ficheiro mas
+  ler_anexos_registo_basecamp não encontrar nada anexado ao card, o
+  ficheiro pode estar anexado a um COMENTÁRIO em vez da descrição — usa
+  procurar_anexo_em_comentarios com o campo "comments_url" do card e o
+  nome do ficheiro, em vez de percorreres os comentários um a um.
 - Para documentos do projeto usa procurar_documentos_empresa e
   ler_documento_empresa, pesquisando por "Ecos Largos" ou pelo termo certo.
 

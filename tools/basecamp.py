@@ -326,6 +326,20 @@ def ler_comentarios(comments_url: str) -> list[dict]:
         })
     return resultado
 
+def procurar_anexo_em_comentarios(comments_url: str, termo: str) -> list[dict]:
+    """Procura, nos comentários de uma tarefa/card, aqueles que têm um
+    ficheiro anexado cujo nome contenha `termo` (ex: um nome de ficheiro
+    mencionado nas notas do card, como "OR 2026_13.pdf") — pedido real
+    (Beatriz, 2026-07-27): as notas de um card mencionavam nomes de
+    PDFs (fatura/orçamento), mas os ficheiros em si estavam anexados a
+    UM comentário entre 145, e não havia forma de encontrar qual sem os
+    percorrer manualmente. Devolve cada comentário correspondente, com o
+    seu próprio "url" pronto a passar a ler_anexos_registo_basecamp."""
+    termo_normalizado = _normalizar(termo)
+    comentarios = ler_comentarios(comments_url)
+    return [c for c in comentarios
+            if any(termo_normalizado in _normalizar(nome) for nome in (c.get("anexos") or []))]
+
 def _escapar_html(texto: str) -> str:
     return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -715,7 +729,7 @@ TOOLS_ESTADO_PROJETO = [
     },
     {
         "name": "procurar_cards_basecamp",
-        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é. Se precisares de ler um PDF anexado ao card (ex: a fatura ou o orçamento, para identificar os produtos), usa depois ler_anexos_registo_basecamp com o campo \"url_api\" do card encontrado (nunca o campo \"url\", que é só o link para abrir no browser).",
+        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é. Se precisares de ler um PDF anexado ao card (ex: a fatura ou o orçamento, para identificar os produtos), usa depois ler_anexos_registo_basecamp com o campo \"url_api\" do card encontrado (nunca o campo \"url\", que é só o link para abrir no browser). Se o PDF estiver mencionado nas notas mas ler_anexos_registo_basecamp não encontrar nada anexado ao card, o ficheiro pode estar anexado a um COMENTÁRIO em vez da descrição — usa então procurar_anexo_em_comentarios com o campo \"comments_url\" deste card.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -723,6 +737,18 @@ TOOLS_ESTADO_PROJETO = [
                 "projeto": {"type": "string", "description": "opcional — filtra por um projeto específico"}
             },
             "required": ["termo"]
+        }
+    },
+    {
+        "name": "procurar_anexo_em_comentarios",
+        "description": "Procura, nos comentários de uma tarefa/card, aqueles que têm um ficheiro anexado cujo nome contenha `termo` — usa isto quando um nome de ficheiro (ex: um PDF de fatura/orçamento mencionado nas notas do card, como \"OR 2026_13.pdf\") não aparece anexado diretamente ao card (ler_anexos_registo_basecamp devolve vazio), já que o Basecamp às vezes só permite anexar ficheiros a comentários, não à descrição do card. Nunca percorras os comentários um a um à procura disto — esta ferramenta encontra o comentário certo diretamente, mesmo havendo uma centena ou mais. Devolve cada comentário correspondente com o seu próprio \"url\", pronto a passar a ler_anexos_registo_basecamp para ler o ficheiro.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "comments_url": {"type": "string", "description": "o campo \"comments_url\" do card (devolvido por procurar_cards_basecamp, estado_projeto_basecamp, etc.) — nunca inventado"},
+                "termo": {"type": "string", "description": "nome (ou parte do nome) do ficheiro a encontrar, ex: \"OR 2026_13\""}
+            },
+            "required": ["comments_url", "termo"]
         }
     }
 ]
