@@ -221,7 +221,17 @@ def ler_anexos_registo_basecamp(url: str) -> dict:
     except Exception as e:
         return {"erro": f"não consegui aceder a este registo do Basecamp: {e}"}
 
-    anexos = recording.get("content_attachments") or []
+    # bug real confirmado ao vivo (Beatriz, 2026-07-27, contra a API real do
+    # Basecamp): o array de anexos embutidos chama-se "content_attachments"
+    # só para tipos com um campo "content" (ex: Message) — uma tarefa/card do
+    # Card Table tem as notas no campo "description", e os anexos embutidos
+    # nela vêm em "description_attachments", um nome diferente. Esta função
+    # só olhava para "content_attachments", por isso NUNCA encontrava PDFs
+    # anexados diretamente às notas de um card (dizia sempre "não tem
+    # ficheiros anexados", mesmo havendo — confirmado com o card real
+    # "Ana Fraião", id 9577718481, com "OR 2026_13.pdf" e outro PDF
+    # anexados diretamente na descrição). Junta os dois, nunca só um.
+    anexos = (recording.get("content_attachments") or []) + (recording.get("description_attachments") or [])
     if not anexos:
         return {"anexos": [], "aviso": "este registo não tem ficheiros anexados diretamente"}
 
