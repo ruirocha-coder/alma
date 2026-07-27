@@ -2,9 +2,9 @@ import re, traceback
 from bs4 import BeautifulSoup
 from persona import PERSONA
 from agents.base import correr_agente, TOOLS_COMUNS
-from agents import ecos_largos as ecos_largos_agent, qualidade_toros_ecos_largos
+from agents import ecos_largos as ecos_largos_agent, qualidade_toros_ecos_largos, ceo as ceo_agent
 from orchestrator import escolher_agente_ecos_largos
-from tools import basecamp
+from tools import basecamp, logistica
 import db
 
 # partilhado pelas duas missões abaixo — as convenções de como responder a
@@ -68,6 +68,20 @@ MISSAO_BASECAMP_ECOS_LARGOS = ecos_largos_agent.MISSAO_ECOS_LARGOS + _REGRAS_MEN
 # decisão usada na consola, ver orchestrator.escolher_agente_ecos_largos.
 MISSAO_BASECAMP_QUALIDADE_TOROS = qualidade_toros_ecos_largos.MISSAO_QUALIDADE_TOROS + _REGRAS_MENCAO_BASECAMP
 
+# pedido explícito da Beatriz/Rui (2026-07-27): uma menção no projeto
+# "Entregas" tinha só a missão geral (MISSAO_BASECAMP) e TOOLS_COMUNS —
+# sem diagnosticar_logistica_on_hold nem disparar_sugestao_semanal_logistica
+# (só existem em agents/ceo.py), por isso uma pergunta sobre o estado deste
+# projeto caía sempre em estado_projeto_basecamp, que trata "On Hold" como
+# uma coluna qualquer, sem resolver a região real nem explicar que esses
+# cards já chegaram ao armazém, prontos a entregar — uma resposta tecnicamente
+# do projeto certo mas sem o significado logístico que interessa aqui.
+# Reutiliza-se a missão e as ferramentas completas do CEO (que já têm essa
+# lógica), tal como uma menção na Ecos Largos reutiliza a missão completa
+# dessa equipa — comparação EXATA ao nome do projeto (nunca substring, ver
+# tools.logistica.PROJETO_ENTREGAS), para nunca confundir com outro projeto.
+MISSAO_BASECAMP_ENTREGAS = ceo_agent.MISSAO_CEO + _REGRAS_MENCAO_BASECAMP
+
 def responder(utilizador: str, mensagens: list, projeto: str = "", tem_anexos: bool = False) -> str:
     if "ecos largos" in (projeto or "").lower():
         pergunta = mensagens[-1]["content"] if mensagens else ""
@@ -76,6 +90,9 @@ def responder(utilizador: str, mensagens: list, projeto: str = "", tem_anexos: b
                                  mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
         return correr_agente(MISSAO_BASECAMP_ECOS_LARGOS, ecos_largos_agent.TOOLS_ECOS_LARGOS,
                              mensagens, utilizador, origem="basecamp", projeto_mural="Ecos Largos")
+    if (projeto or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower():
+        return correr_agente(MISSAO_BASECAMP_ENTREGAS, ceo_agent.TOOLS_CEO, mensagens, utilizador,
+                             origem="basecamp", projeto_mural="Gestão")
     return correr_agente(MISSAO_BASECAMP, TOOLS_COMUNS, mensagens, utilizador,
                          origem="basecamp", projeto_mural="Gestão")
 
