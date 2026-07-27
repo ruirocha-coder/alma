@@ -28,7 +28,17 @@ TOOL_DIAGNOSTICO_LOGISTICA = {
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
-TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL, TOOL_DIAGNOSTICO_LOGISTICA]
+# pedido explícito do Rui (2026-07-27): trajeto de Google Maps otimizado
+# para as entregas, a pedido (não só na sugestão semanal automática, que
+# já inclui isto também — ver agents/sugestao_logistica_semanal.py).
+TOOL_TRAJETOS_LOGISTICA = {
+    "name": "trajetos_logistica_entregas",
+    "description": "Gera um link do Google Maps, por região (Lisboa/Porto/Outro), com o trajeto de ida e volta ao armazém passando por todas as moradas das entregas já prontas a fazer agora nessa região — usa isto sempre que pedirem um trajeto, uma rota, ou o link do Google Maps para as entregas (ex: \"dá-me o trajeto de hoje\", \"qual a rota para as entregas de Lisboa\"), fora do resumo semanal automático. O link já vem pronto a abrir no Google Maps; a otimização final da ordem das paragens faz-se lá dentro (a Alma não tem dados reais de distância/tempo entre moradas para decidir isso sozinha).",
+    "input_schema": {"type": "object", "properties": {}, "required": []}
+}
+
+TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL, TOOL_DIAGNOSTICO_LOGISTICA,
+                            TOOL_TRAJETOS_LOGISTICA]
 
 MISSAO_CEO = PERSONA + """
 
@@ -165,7 +175,21 @@ disparar_sugestao_semanal_logistica — isto publica mesmo, a sério, no
 Mural "Programação" do projeto Entregas, e notifica a Conceição Costa de
 verdade (não é uma simulação). Depois de a chamares, informa quantas
 entregas estavam prontas (por região) e que a publicação foi feita,
-usando o resultado devolvido pela tool.
+usando o resultado devolvido pela tool. Essa sugestão já inclui, no
+final, um link de Google Maps por região com o trajeto de ida e volta ao
+armazém — nunca precisas de gerar isso à parte quando disparares esta
+tool.
+
+Se pedirem só o trajeto/rota/link do Google Maps para as entregas (ex:
+"dá-me o trajeto de hoje", "qual a rota para Lisboa"), sem ser a
+sugestão semanal completa, usa trajetos_logistica_entregas — devolve um
+link por região com as paragens já prontas a entregar. Apresenta o(s)
+link(s) diretamente (nunca reescrevas o url à mão, copia-o exatamente
+como vem), e explica que a otimização final da ordem das paragens se
+faz dentro do próprio Google Maps depois de abrir o link (não têm dados
+reais de distância/tempo para decidir isso de antemão). Se não houver
+nenhuma entrega pronta nalguma região, diz isso claramente em vez de
+inventar um trajeto.
 
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão
