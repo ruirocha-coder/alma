@@ -29,8 +29,8 @@
 import threading
 from datetime import date, timedelta
 from agents.base import client
-from agents.logistica_entregas import _extrair_dados_encomenda, _regiao_estrutural
-from tools import basecamp, logistica
+from agents.logistica_entregas import _extrair_dados_encomenda, _regiao_estrutural, _formatar_documentos_referencia
+from tools import basecamp, logistica, documentos_referencia
 
 _a_correr = threading.Lock()
 MAX_CARDS_POR_CORRIDA = 40
@@ -81,10 +81,33 @@ def _formatar_card_pronto(titulo: str, dados: dict) -> str:
         f"  Data prevista de entrega: {data_entrega.isoformat() if data_entrega else '(não identificada)'}"
     )
 
-def _gerar_texto_sugestao(cards_por_regiao: dict, inicio_semana: date, fim_semana: date) -> str:
+def _gerar_texto_sugestao(cards_por_regiao: dict, inicio_semana: date, fim_semana: date,
+                          documentos_texto: str = None) -> str:
     blocos = [f"### {regiao} ({len(cards)} pronta(s) a entregar)\n" + "\n\n".join(cards)
              for regiao, cards in cards_por_regiao.items() if cards]
     contexto = "\n\n".join(blocos) if blocos else "(nenhum card pronto a entregar esta semana, em nenhuma região)"
+
+    # pedido do Rui (2026-07-24): o documento "Procedimento Tempos de
+    # Montagem para Logística" (projeto Alma Data) tem os tempos de
+    # montagem por produto — relevante aqui porque afeta quantas entregas
+    # cabem num dia e a ordem sensata de visitas, não só a distância entre
+    # moradas. Passa-se o texto todo dos documentos de referência (não só
+    # este), pela mesma razão de _gerar_texto_fg_h em logistica_entregas.py:
+    # o produto encomendado ("produtos_encomendados") é só um resumo em
+    # texto livre, por isso o modelo tem de procurar a correspondência ele
+    # próprio, com a mesma cautela de nunca inventar um tempo que não
+    # encontrar.
+    bloco_documentos = f"""
+
+Documentos de referência disponíveis (projeto Alma Data), incluindo o
+"Procedimento Tempos de Montagem para Logística" — usa-o para teres em conta
+o tempo de montagem previsto de cada entrega ao sugerires quantas cabem num
+dia e a ordem de visitas (uma montagem demorada limita quantas mais entregas
+cabem nesse dia). Só aplicas um tempo a um produto se conseguires
+identificá-lo com confiança a partir do que está descrito em "Encomendado";
+se não conseguires, ou o documento não cobrir esse produto, não inventes um
+tempo — segue só pela morada/região como até agora:
+{documentos_texto}""" if documentos_texto else ""
 
     missao = f"""Preparas, para a Conceição Costa (responsável pela logística de
 entregas da Interior Guider / Boa Safra), uma sugestão semanal de
@@ -97,6 +120,7 @@ feita ao fornecedor e o produto já está em armazém, pronto a ser
 entregue. Já vêm agrupados por região (Lisboa/Porto/Outro).
 
 {contexto}
+{bloco_documentos}
 
 Organiza uma sugestão de calendário para a semana: que dia(s) visitar
 cada região (agrupa sempre por região — nunca misturar Lisboa e Porto no
@@ -166,8 +190,14 @@ def correr_sugestao_semanal_logistica() -> dict:
             regiao = _regiao_estrutural(item) or _classificar_regiao(dados.get("morada"))
             cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
 
+        try:
+            documentos_texto = _formatar_documentos_referencia(documentos_referencia.documentos_referencia_empresa())
+        except Exception as e:
+            print(f"[sugestao_logistica_semanal] não consegui ler os documentos de referência: {e!r}")
+            documentos_texto = None
+
         inicio_semana, fim_semana = _semana_atual()
-        texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana)
+        texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana, documentos_texto)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
