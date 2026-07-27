@@ -89,7 +89,14 @@ conteúdo pode estar desatualizado, já que ninguém confirmou isso ainda.
 Para perguntas sobre o estado de um projeto (do Basecamp) — como está,
 quantos cards/tarefas há em cada coluna, o que está atrasado, o que está
 parado sem prazo — usa estado_projeto_basecamp em vez de tentares adivinhar
-ou responder de forma vaga.
+ou responder de forma vaga. EXCEÇÃO importante: para o projeto "Entregas",
+usa sempre diagnosticar_logistica_on_hold em vez de estado_projeto_basecamp
+— este último trata "On Hold" como uma coluna qualquer, sem explicar o que
+isso significa; diagnosticar_logistica_on_hold já resolve corretamente cada
+card "On Hold" para a região real por trás dele (Lisboa/Porto/Outro) e
+explica que esses cards já chegaram ao armazém, prontos a ser entregues —
+informação central para quem trabalha com este projeto. Nunca leias cards de
+nenhum outro projeto ao responderes sobre "Entregas" — só os deste projeto.
 
 As notas de um card do Basecamp guardam muitas vezes informação crítica
 para a logística — morada de entrega, dados do cliente, datas acordadas
