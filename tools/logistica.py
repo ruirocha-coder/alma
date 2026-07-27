@@ -265,7 +265,12 @@ Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche 
 
 # morada do armazém Boa Safra (Rui, 2026-07-27) — ponto de partida (e de
 # regresso) de qualquer trajeto de entregas gerado para o Google Maps.
-MORADA_ARMAZEM = "Rua da Serração, nº50 3885-143 Arada, Ovar. Armazém Boa Safra"
+# Importante: manter só a morada postal (rua, código postal, localidade,
+# país), sem nenhum texto descritivo a mais (ex.: nome do armazém) — texto
+# extra confunde o geocoder do Google Maps, que pode acabar a encontrar um
+# local completamente diferente e próximo em vez da morada real (bug
+# reportado em produção: o link resolvia para "Topsofás, R. do Navega").
+MORADA_ARMAZEM = "Rua da Serração, nº50, 3885-143 Arada, Ovar, Portugal"
 
 # limite generoso mas defensivo — o Google Maps (sem chave de API, só o
 # link público) aceita bem menos de 25 paragens antes de começar a
