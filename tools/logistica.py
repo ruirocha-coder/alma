@@ -7,6 +7,7 @@
 # agents/monitor_basecamp.py já faz para os atrasos gerais.
 import unicodedata
 from datetime import date, timedelta
+from urllib.parse import quote
 
 PROJETO_ENTREGAS = "Entregas"
 
@@ -261,3 +262,38 @@ Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche 
                 "foi concluída e fecha o card se sim. CC: @Conceição Costa @Isa Moreira")
 
     raise ValueError(f"condição sem texto fixo definido: {condicao!r}")
+
+# morada do armazém Boa Safra (Rui, 2026-07-27) — ponto de partida (e de
+# regresso) de qualquer trajeto de entregas gerado para o Google Maps.
+MORADA_ARMAZEM = "Rua da Serração, nº50 3885-143 Arada, Ovar. Armazém Boa Safra"
+
+# limite generoso mas defensivo — o Google Maps (sem chave de API, só o
+# link público) aceita bem menos de 25 paragens antes de começar a
+# recusar/cortar o pedido; nunca visto na prática mais do que isto numa
+# única região numa semana, mas evita gerar um link que o Maps rejeite.
+LIMITE_PARAGENS_GOOGLE_MAPS = 23
+
+def gerar_link_google_maps(moradas: list[str], origem: str = MORADA_ARMAZEM) -> str:
+    """Constrói um link do Google Maps com um trajeto de ida e volta a
+    partir de `origem` (por omissão o armazém Boa Safra), passando por
+    todas as `moradas` dadas (por esta ordem) — pedido explícito do Rui
+    (2026-07-27): a Alma não tem dados reais de distância/tempo entre
+    moradas para calcular ela mesma a ordem ótima, por isso constrói só o
+    link com todas as paragens; o próprio Google Maps, ao abrir o link,
+    permite otimizar a ordem das paragens e editar o trajeto antes de
+    seguir viagem — não tenta replicar isso aqui.
+
+    Devolve None se `moradas` estiver vazia (não há trajeto nenhum a
+    fazer). Trunca defensivamente a LIMITE_PARAGENS_GOOGLE_MAPS moradas
+    (o link público do Google Maps não aceita paragens ilimitadas), sem
+    rebentar — quem chamar isto deve avisar se isso aconteceu."""
+    if not moradas:
+        return None
+    moradas_validas = [m for m in moradas if m and m.strip()][:LIMITE_PARAGENS_GOOGLE_MAPS]
+    if not moradas_validas:
+        return None
+    origem_codificada = quote(origem)
+    paragens_codificadas = "|".join(quote(m) for m in moradas_validas)
+    return (f"https://www.google.com/maps/dir/?api=1&travelmode=driving"
+            f"&origin={origem_codificada}&destination={origem_codificada}"
+            f"&waypoints={paragens_codificadas}")
