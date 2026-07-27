@@ -6,12 +6,27 @@
 # Interior Guider, nem vice-versa. Por isso há duas corridas independentes,
 # cada uma filtrada aos projetos da sua equipa e publicada no mural certo.
 import threading
+from datetime import date, timedelta
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp
 
 _a_correr_interior_guider = threading.Lock()
 _a_correr_ecos_largos = threading.Lock()
+
+def _semana_atual() -> tuple:
+    """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
+    modelo (a mesma razão de sempre: aritmética de datas não se confia à
+    IA, ver tools/ecos_largos._semana_de). Bug real (Rui, 2026-07-27): o
+    resumo semanal nunca recebia a data de hoje no contexto, e o modelo
+    escreveu por iniciativa própria um cabeçalho "Semana de ___", sem
+    saber a data — como não sabia, e a persona pede honestidade
+    epistémica, escreveu literalmente "(data atual não disponível no
+    contexto — preencher antes de publicar)" e isso foi publicado a
+    sério no Mural, visível a toda a equipa."""
+    hoje = date.today()
+    inicio = hoje - timedelta(days=hoje.weekday())
+    return inicio, inicio + timedelta(days=4)
 
 def _e_projeto_ecos_largos(nome_projeto: str) -> bool:
     return "ecos largos" in (nome_projeto or "").lower()
@@ -23,6 +38,11 @@ Mural do Basecamp. Vais escrever UMA mensagem com base no estado atual das
 tarefas e cards em atraso (dados abaixo).
 
 Regras desta mensagem:
+- Começa sempre com um cabeçalho "Semana de {data_inicio} a {data_fim}",
+  usando EXATAMENTE o intervalo de datas dado no contexto abaixo — nunca
+  tentes calcular ou adivinhar a data tu mesma (não sabes a data de hoje
+  com fiabilidade), e nunca escrevas um aviso a dizer que a data não está
+  disponível: ela está sempre no contexto, junto aos dados de atrasos.
 - Tom calmo, direto e construtivo — nunca acusatório, isto é lido por toda
   a equipa.
 - Resume o panorama geral (quantos itens em atraso, quais os projetos mais
@@ -43,7 +63,10 @@ def _gerar_resumo(atrasados: list[dict]) -> str:
         for projeto, itens in sorted(por_projeto.items(), key=lambda x: -len(x[1]))
     ) or "(nenhum item em atraso esta semana)"
 
-    contexto = f"""Total de tarefas/cards em atraso: {len(atrasados)}
+    inicio_semana, fim_semana = _semana_atual()
+    contexto = f"""Semana de {inicio_semana.strftime('%d/%m/%Y')} a {fim_semana.strftime('%d/%m/%Y')}
+
+Total de tarefas/cards em atraso: {len(atrasados)}
 
 Por projeto:
 {resumo_projetos}"""
