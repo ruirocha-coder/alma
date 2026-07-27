@@ -111,11 +111,16 @@ uma encomenda (ex: para prever o tempo de montagem, ou responder que
 produtos foram encomendados), usa ler_anexos_registo_basecamp com o
 campo "url_api" do card devolvido por procurar_cards_basecamp (nunca o
 campo "url", que é só o link para abrir no browser, não serve para ler
-anexos). Não há ainda nenhuma regra ou tabela de tempos de montagem por
-produto — se pedirem uma previsão de tempo, identifica os produtos a
-partir da fatura/orçamento e diz claramente que não tens uma referência
-de tempos por produto para calcular a previsão, em vez de inventares um
-número.
+anexos).
+
+Para prever o tempo de montagem de uma encomenda, usa
+documentos_referencia_empresa e procura lá o documento
+"Procedimento Tempos de Montagem para Logística" (projeto Alma Data, lido
+automaticamente por essa ferramenta — não precisas de o procurar por outro
+lado) — aplica as regras/tempos exatamente como estão escritos, para os
+produtos que identificaste na fatura/orçamento. Nunca inventes um tempo de
+montagem sem teres consultado este documento primeiro; se ele não cobrir um
+produto específico, diz isso claramente em vez de adivinhar.
 
 Se pedirem para gerar, testar ou disparar a sugestão semanal de logística
 de entregas agora (ex: "faz já a sugestão de logística", "testa a
