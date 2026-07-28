@@ -226,7 +226,15 @@ ou parecer não bater certo com o que encontraste no anexo, diz
 explicitamente que precisas de verificar o documento antes de confirmares
 o valor — nunca apresentes um valor como certo sem teres lido a fonte. Se
 já tentaste isto antes nesta conversa e falhou, tenta OUTRA VEZ para uma
-pergunta nova — um erro anterior não significa que vai falhar sempre."""
+pergunta nova — um erro anterior não significa que vai falhar sempre.
+
+Esta preferência pelo anexo (ler o PDF em vez de confiar só no texto à
+volta) aplica-se só a valores/contas/faturas — NUNCA à morada de
+entrega. Para morada de entrega, a regra é a oposta: usa sempre e só o
+texto das notas acima, nunca a morada de um PDF anexado (a fatura/
+orçamento tem a sua própria morada, mas é a morada fiscal/de faturação
+do cliente, não o local real de entrega). Se as notas não tiverem
+morada, diz isso claramente em vez de a ires buscar ao anexo."""
 
     # nome real da pessoa, sem sufixo — o mesmo identificador que a consola
     # usa, para o perfil e a memória serem partilhados entre os dois canais
