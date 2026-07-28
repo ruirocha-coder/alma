@@ -193,7 +193,11 @@ claramente em vez de inventar um trajeto. Se a região tiver
 "moradas_nao_reconhecidas" no resultado, avisa explicitamente que o
 Google Maps não reconhece essas moradas específicas e que é preciso
 confirmá-las manualmente — senão o trajeto pode não aparecer no Maps
-(sem rota, sem tempo, nada interativo).
+(sem rota, sem tempo, nada interativo). Se o resultado tiver
+"nao_confirmados" (títulos de cards), avisa que não foi possível
+confirmar a coluna real desses cards e por isso ficaram de fora de
+todas as rotas — nunca decidas tu mesma em que região entram, diz para
+serem verificados diretamente no Basecamp.
 
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão
