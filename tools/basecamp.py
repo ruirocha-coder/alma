@@ -91,12 +91,18 @@ def _texto_simples(html: str) -> str:
         return ""
     return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
 
-def _itens_ativos() -> list[dict]:
+def _itens_ativos(forcar: bool = False) -> list[dict]:
     """Todas as tarefas (to-dos) e cards ativos e não concluídos, de todos os
     projetos — cacheado, porque várias funções (atrasos, cards parados, estado
     de projeto) partem dos mesmos dados e a conta tem milhares de itens em
-    aberto (percorrê-los pode demorar minutos)."""
-    if "itens_ativos" in _cache:
+    aberto (percorrê-los pode demorar minutos). `forcar=True` ignora a cache e
+    vai sempre buscar os dados atuais — usado pela sugestão semanal de
+    logística (bug real reportado, 2026-07-28: a equipa corrigia uma morada
+    nas notas de um card e a sugestão continuava a mostrar a morada antiga,
+    porque calhava de correr dentro da janela de 15 min da cache; esta
+    operação é rara e importante o suficiente para nunca valer a pena
+    arriscar dados desatualizados)."""
+    if not forcar and "itens_ativos" in _cache:
         ts, itens = _cache["itens_ativos"]
         if time.time() - ts < TTL_ITENS_ATIVOS:
             return itens

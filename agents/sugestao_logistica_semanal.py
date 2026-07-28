@@ -59,8 +59,14 @@ from agents.logistica_entregas import (_extrair_dados_encomenda, _coluna_real_on
 from tools import basecamp, logistica, documentos_referencia, tempos_montagem, agendamento_logistica
 import db
 
+# limite defensivo contra uma corrida descontrolada — nunca deve ser o
+# que decide quais entregas prontas entram (ver nota mais abaixo, no
+# corte real de 2026-07-28): o projeto "Entregas" tem, na realidade,
+# várias centenas de cards no total (confirmado contra a API real), por
+# isso este valor tem de ter folga bem acima do volume normal de
+# entregas prontas numa semana qualquer.
 _a_correr = threading.Lock()
-MAX_CARDS_POR_CORRIDA = 40
+MAX_CARDS_POR_CORRIDA = 300
 
 # nome completo tal como já usado nas menções existentes (ver
 # tools/logistica.gerar_texto_condicao_fixa) — mantém-se o mesmo em toda
@@ -196,16 +202,22 @@ def _cards_prontos_a_entregar() -> tuple:
     _construir_texto_proposta_agendamento) poder alinhar o tempo de
     montagem e a morada de cada entrega à sua posição na rota otimizada,
     sem repetir a extração de dados do card."""
-    itens = [i for i in basecamp._itens_ativos()
+    # forcar=True (bug real reportado, 2026-07-28): a equipa corrigia uma
+    # morada nas notas de um card e a sugestão continuava a mostrar a
+    # morada antiga — porque _itens_ativos() tem uma cache de 15 min
+    # partilhada com outras operações mais frequentes. A sugestão semanal
+    # é rara e importante o suficiente para nunca arriscar dados
+    # desatualizados, nem que seja só nesses 15 minutos.
+    itens = [i for i in basecamp._itens_ativos(forcar=True)
             if i.get("type") == "Kanban::Card"
             and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
-    itens = itens[:MAX_CARDS_POR_CORRIDA]
 
     cards_por_regiao = {regiao: [] for regiao in _REGIOES}
     moradas_por_regiao = {regiao: [] for regiao in _REGIOES}
     entregas_por_regiao = {regiao: [] for regiao in _REGIOES}
     nao_confirmados = []
     itens_prontos = []
+    cortados_pelo_limite = 0
 
     for item in itens:
         estado = ((item.get("parent") or {}).get("title") or "").strip()
@@ -232,6 +244,17 @@ def _cards_prontos_a_entregar() -> tuple:
                 nao_confirmados.append(titulo)
             continue
 
+        # bug real corrigido (2026-07-28): o limite era aplicado ANTES
+        # deste ponto, à lista bruta de TODOS os cards do projeto
+        # Entregas (265 no total, contra a API real) — cortava a maioria
+        # antes sequer de se saber quais estavam mesmo em "On Hold",
+        # deixando de fora entregas prontas só por caírem depois da
+        # posição 40 na lista. Agora o limite só conta cards que já se
+        # confirmou estarem mesmo prontos a entregar.
+        if len(itens_prontos) >= MAX_CARDS_POR_CORRIDA:
+            cortados_pelo_limite += 1
+            continue
+
         titulo = item.get("title") or item.get("content") or "(sem título)"
         notas = basecamp._texto_simples(item.get("description", ""))
         try:
@@ -249,6 +272,10 @@ def _cards_prontos_a_entregar() -> tuple:
             "id": item["id"], "titulo": titulo, "morada": dados.get("morada"),
             "cliente": dados.get("cliente"), "produtos_encomendados": dados.get("produtos_encomendados"),
         })
+
+    if cortados_pelo_limite:
+        print(f"[sugestao_logistica_semanal] ATENÇÃO: {cortados_pelo_limite} entrega(s) pronta(s) a mais "
+             f"do que o limite de {MAX_CARDS_POR_CORRIDA} por corrida — ficaram de fora desta sugestão")
 
     return cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos, entregas_por_regiao
 
