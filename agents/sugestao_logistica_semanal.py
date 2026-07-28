@@ -16,10 +16,15 @@
 # é sim o quadro geral "Logística", mas o PRÓPRIO objeto obtido a partir
 # do `url` já É a coluna de região, sem precisar de mais nenhum passo).
 # Por isso a região volta a ser lida da estrutura (ver
-# _coluna_real_on_hold, em agents/logistica_entregas.py) — só cai na
-# classificação por morada (ver _classificar_regiao) quando essa
-# resolução falhar de verdade (ex: API indisponível), como rede de
-# segurança.
+# _coluna_real_on_hold, em agents/logistica_entregas.py). Pedido
+# explícito do Rui (2026-07-28): a região de um card é sempre decidida
+# pela coluna real do Basecamp, NUNCA pela Alma a adivinhar pela morada —
+# mesmo um card cuja morada não pareça "à primeira vista" pertencer a
+# essa região pode estar lá de propósito, por ficar no caminho da rota
+# dessa região. Por isso, quando a coluna real não pode ser confirmada
+# (ex: API indisponível, ou parent sem url), o card fica de fora de
+# todas as rotas e é sinalizado para confirmação manual (ver
+# _texto_nao_confirmados) — nunca se adivinha a região pela morada.
 #
 # Regras de significado do "On Hold" CONFIRMADAS pelo Rui (2026-07-27) —
 # ver tools/logistica.py para o detalhe: por trás de "Produção" significa
@@ -54,27 +59,6 @@ MAX_CARDS_POR_CORRIDA = 40
 RESPONSAVEL_MENCAO = "Conceição Costa"
 
 _REGIOES = ("Lisboa", "Porto", "Outro")
-
-_MISSAO_CLASSIFICAR_REGIAO = """Classificas a morada de entrega abaixo
-numa destas três regiões: "Lisboa", "Porto", ou "Outro" (qualquer
-localização que não seja claramente da área de Lisboa ou do Porto,
-incluindo arredores/área metropolitana). Responde só com uma destas três
-palavras, nada mais."""
-
-def _classificar_regiao(morada: str) -> str:
-    """Rede de segurança para quando a coluna real por trás da secção
-    "On Hold" não é uma coluna de região (ex: o card ainda não foi movido
-    de "Produção" para a coluna certa, mas já foi marcado pronto) — a
-    morada de entrega é o sinal mais fiável que resta nesse caso."""
-    if not morada:
-        return "Outro"
-    resposta = client.messages.create(
-        model="claude-haiku-4-5-20251001", max_tokens=10,
-        system=_MISSAO_CLASSIFICAR_REGIAO,
-        messages=[{"role": "user", "content": morada}]
-    )
-    escolha = "".join(b.text for b in resposta.content if b.type == "text").strip()
-    return escolha if escolha in _REGIOES else "Outro"
 
 def _semana_atual() -> tuple:
     """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
@@ -171,17 +155,22 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 
 def _cards_prontos_a_entregar() -> tuple:
     """Lê os cards ativos do projeto "Entregas" e devolve
-    (cards_por_regiao, moradas_por_regiao): cards_por_regiao tem o texto
-    formatado de cada entrega pronta (cliente/morada/produto/data, para o
-    resumo em texto); moradas_por_regiao tem só as moradas em bruto de
-    cada uma (para o trajeto do Google Maps) — extraídos na mesma
-    passagem, para nunca ler os dados de cada card duas vezes. Só conta
-    cards mesmo prontos a entregar (em "On Hold" por trás de uma região —
-    nunca por trás de "Produção" ou "Assistências", ver
-    tools.logistica.fase_encomenda); a região vem da coluna real por trás
-    da secção "On Hold" (com a morada como rede de segurança só quando
-    essa resolução falhar — ver _coluna_real_on_hold e
-    _classificar_regiao)."""
+    (cards_por_regiao, moradas_por_regiao, nao_confirmados):
+    cards_por_regiao tem o texto formatado de cada entrega pronta
+    (cliente/morada/produto/data, para o resumo em texto);
+    moradas_por_regiao tem só as moradas em bruto de cada uma (para o
+    trajeto do Google Maps) — extraídos na mesma passagem, para nunca
+    ler os dados de cada card duas vezes. Só conta cards mesmo prontos a
+    entregar (em "On Hold" por trás de uma região — nunca por trás de
+    "Produção" ou "Assistências", ver tools.logistica.fase_encomenda); a
+    região vem sempre da coluna real por trás da secção "On Hold" (ver
+    _coluna_real_on_hold) — nunca da morada.
+
+    nao_confirmados é a lista de títulos de cards cuja coluna real não
+    pôde ser confirmada (ex: falha de rede, ou parent sem url) — pedido
+    explícito do Rui (2026-07-28): a decisão de região nunca é da Alma,
+    por isso estes cards ficam de fora de todas as rotas em vez de
+    adivinhados pela morada, e são sinalizados para verificação manual."""
     itens = [i for i in basecamp._itens_ativos()
             if i.get("type") == "Kanban::Card"
             and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
@@ -189,6 +178,7 @@ def _cards_prontos_a_entregar() -> tuple:
 
     cards_por_regiao = {regiao: [] for regiao in _REGIOES}
     moradas_por_regiao = {regiao: [] for regiao in _REGIOES}
+    nao_confirmados = []
 
     for item in itens:
         estado = ((item.get("parent") or {}).get("title") or "").strip()
@@ -202,14 +192,17 @@ def _cards_prontos_a_entregar() -> tuple:
         # significa data confirmada com o fornecedor mas AINDA NÃO
         # chegou ao armazém — nunca incluir isto na sugestão de
         # entregas (bug real: entrava como se já estivesse pronto).
-        # Por trás de "Assistências" também não é uma entrega. Só cai
-        # na morada como rede de segurança quando a resolução da
-        # coluna real falhar de verdade (ex: API indisponível) —
-        # nunca quando ela resolveu com sucesso para algo que
-        # confirmadamente não é uma região.
+        # Por trás de "Assistências" também não é uma entrega.
         if fase in ("producao", "assistencia_aguarda_agendamento"):
             continue
-        if fase == "outro" and coluna_real is not None:
+        if fase == "outro":
+            if coluna_real is None:
+                # a coluna real não pôde ser confirmada de todo — nunca
+                # adivinhar a região pela morada (pedido do Rui,
+                # 2026-07-28), fica fora de todas as rotas, sinalizado
+                # para verificação manual
+                titulo = item.get("title") or item.get("content") or "(sem título)"
+                nao_confirmados.append(titulo)
             continue
 
         titulo = item.get("title") or item.get("content") or "(sem título)"
@@ -220,15 +213,26 @@ def _cards_prontos_a_entregar() -> tuple:
             print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
             dados = {}
 
-        if fase == "pronto_entrega":
-            regiao = _REGIAO_POR_COLUNA[logistica.normalizar_coluna(coluna_real)]
-        else:
-            regiao = _classificar_regiao(dados.get("morada"))
+        regiao = _REGIAO_POR_COLUNA[logistica.normalizar_coluna(coluna_real)]
         cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
         if dados.get("morada"):
             moradas_por_regiao[regiao].append(dados["morada"])
 
-    return cards_por_regiao, moradas_por_regiao
+    return cards_por_regiao, moradas_por_regiao, nao_confirmados
+
+def _texto_nao_confirmados(nao_confirmados: list) -> str:
+    """Secção que sinaliza cards cuja coluna real por trás de "On Hold"
+    não pôde ser confirmada — nunca adivinhados pela morada (pedido do
+    Rui, 2026-07-28), por isso ficam de fora das rotas e têm de ser
+    verificados manualmente no Basecamp. Devolve "" se não houver
+    nenhum."""
+    if not nao_confirmados:
+        return ""
+    linhas = "\n".join(f"- {titulo}" for titulo in nao_confirmados)
+    return ("\n\n---\n\n### Cards por confirmar manualmente\n"
+            "Não foi possível confirmar automaticamente a região destes cards "
+            "(falha ao ler a coluna real por trás de \"On Hold\") — não entraram em "
+            f"nenhuma rota, verifica-os diretamente no Basecamp:\n{linhas}")
 
 def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
     """Constrói, em Python (nunca pedido ao modelo — um url é demasiado
@@ -270,7 +274,7 @@ def correr_sugestao_semanal_logistica() -> dict:
 
     try:
         try:
-            cards_por_regiao, moradas_por_regiao = _cards_prontos_a_entregar()
+            cards_por_regiao, moradas_por_regiao, nao_confirmados = _cards_prontos_a_entregar()
         except Exception as e:
             print(f"[sugestao_logistica_semanal] não foi possível obter os cards do Basecamp: {e!r}")
             return {"erro": str(e)}
@@ -284,12 +288,16 @@ def correr_sugestao_semanal_logistica() -> dict:
         inicio_semana, fim_semana = _semana_atual()
         texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana, documentos_texto)
         texto += _texto_trajetos_google_maps(moradas_por_regiao)
+        texto += _texto_nao_confirmados(nao_confirmados)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
         total_prontos = sum(contagens.values())
         print(f"[sugestao_logistica_semanal] publicado — {total_prontos} entrega(s) pronta(s): {contagens}")
-        return {"total_prontos": total_prontos, "por_regiao": contagens}
+        resultado = {"total_prontos": total_prontos, "por_regiao": contagens}
+        if nao_confirmados:
+            resultado["nao_confirmados"] = nao_confirmados
+        return resultado
     finally:
         _a_correr.release()
 
@@ -301,7 +309,7 @@ def trajetos_logistica_entregas() -> dict:
     segundas de manhã. Usa exatamente a mesma lógica de deteção de cards
     prontos a entregar (ver _cards_prontos_a_entregar), para nunca haver
     duas versões a divergir."""
-    cards_por_regiao, moradas_por_regiao = _cards_prontos_a_entregar()
+    cards_por_regiao, moradas_por_regiao, nao_confirmados = _cards_prontos_a_entregar()
     trajetos = {}
     for regiao, moradas in moradas_por_regiao.items():
         link = logistica.gerar_link_google_maps(moradas)
@@ -311,4 +319,7 @@ def trajetos_logistica_entregas() -> dict:
             if moradas_erradas:
                 trajetos[regiao]["moradas_nao_reconhecidas"] = moradas_erradas
     contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
-    return {"por_regiao": contagens, "trajetos_google_maps": trajetos}
+    resultado = {"por_regiao": contagens, "trajetos_google_maps": trajetos}
+    if nao_confirmados:
+        resultado["nao_confirmados"] = nao_confirmados
+    return resultado
