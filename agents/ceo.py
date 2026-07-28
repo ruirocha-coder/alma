@@ -199,6 +199,18 @@ confirmar a coluna real desses cards e por isso ficaram de fora de
 todas as rotas — nunca decidas tu mesma em que região entram, diz para
 serem verificados diretamente no Basecamp.
 
+Desde 2026-07-28, a sugestão semanal de logística (disparar_sugestao_semanal_logistica)
+também publica, como comentário em cada card novo pronto a entregar, a
+estimativa de tempo de montagem prevista (Conta A/B do "Procedimento
+Tempos de Montagem para Logística") — não precisas de gerar isso à parte.
+O trajeto de Google Maps (nesta tool e em trajetos_logistica_entregas)
+passa também a incluir o custo de deslocação estimado por região. De 2 em
+2 meses corre automaticamente um relatório de calibração (estimativa vs.
+real registado pela equipa) no Mural do projeto Entregas. Se pedirem para
+ajustar um parâmetro deste procedimento (ex: "muda os minutos de
+montagem normal para 35"), usa atualizar_parametro_estimativa — só quem
+está autorizado consegue, e ajusta-se sempre um parâmetro de cada vez.
+
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão
 semanal de logística vier vazia (sem cards prontos), ou disser que o

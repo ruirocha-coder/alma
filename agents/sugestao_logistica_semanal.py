@@ -46,9 +46,11 @@
 import threading
 from datetime import date, timedelta
 from agents.base import client
+from agents import estimativa_montagem
 from agents.logistica_entregas import (_extrair_dados_encomenda, _coluna_real_on_hold,
                                        _REGIAO_POR_COLUNA, _formatar_documentos_referencia)
-from tools import basecamp, logistica, documentos_referencia
+from tools import basecamp, logistica, documentos_referencia, tempos_montagem
+import db
 
 _a_correr = threading.Lock()
 MAX_CARDS_POR_CORRIDA = 40
@@ -155,7 +157,7 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 
 def _cards_prontos_a_entregar() -> tuple:
     """Lê os cards ativos do projeto "Entregas" e devolve
-    (cards_por_regiao, moradas_por_regiao, nao_confirmados):
+    (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos):
     cards_por_regiao tem o texto formatado de cada entrega pronta
     (cliente/morada/produto/data, para o resumo em texto);
     moradas_por_regiao tem só as moradas em bruto de cada uma (para o
@@ -170,7 +172,13 @@ def _cards_prontos_a_entregar() -> tuple:
     pôde ser confirmada (ex: falha de rede, ou parent sem url) — pedido
     explícito do Rui (2026-07-28): a decisão de região nunca é da Alma,
     por isso estes cards ficam de fora de todas as rotas em vez de
-    adivinhados pela morada, e são sinalizados para verificação manual."""
+    adivinhados pela morada, e são sinalizados para verificação manual.
+
+    itens_prontos é a lista dos itens brutos do Basecamp (não só o texto
+    já formatado) de cada card mesmo pronto a entregar — usado por
+    agents.estimativa_montagem para calcular e publicar a estimativa de
+    tempo de montagem por card (precisa do item bruto para ler o PDF da
+    encomenda e o comments_url, não só do texto já resumido)."""
     itens = [i for i in basecamp._itens_ativos()
             if i.get("type") == "Kanban::Card"
             and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
@@ -179,6 +187,7 @@ def _cards_prontos_a_entregar() -> tuple:
     cards_por_regiao = {regiao: [] for regiao in _REGIOES}
     moradas_por_regiao = {regiao: [] for regiao in _REGIOES}
     nao_confirmados = []
+    itens_prontos = []
 
     for item in itens:
         estado = ((item.get("parent") or {}).get("title") or "").strip()
@@ -217,8 +226,9 @@ def _cards_prontos_a_entregar() -> tuple:
         cards_por_regiao[regiao].append(_formatar_card_pronto(titulo, dados))
         if dados.get("morada"):
             moradas_por_regiao[regiao].append(dados["morada"])
+        itens_prontos.append(item)
 
-    return cards_por_regiao, moradas_por_regiao, nao_confirmados
+    return cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos
 
 def _texto_nao_confirmados(nao_confirmados: list) -> str:
     """Secção que sinaliza cards cuja coluna real por trás de "On Hold"
@@ -234,11 +244,33 @@ def _texto_nao_confirmados(nao_confirmados: list) -> str:
             "(falha ao ler a coluna real por trás de \"On Hold\") — não entraram em "
             f"nenhuma rota, verifica-os diretamente no Basecamp:\n{linhas}")
 
+def _texto_custo_deslocacao(regiao: str, moradas: list) -> str:
+    """Custo de deslocação estimado para esta região (ver
+    tools.tempos_montagem.custo_deslocacao), a partir de km/duração REAIS da
+    mesma chamada da Directions API já feita para o trajeto (ver
+    tools.logistica.metricas_trajeto) — nunca a tabela fixa de zonas do
+    documento. Devolve "" se não houver km/duração disponíveis (sem chave
+    configurada, ou falha do cálculo)."""
+    metricas = logistica.metricas_trajeto(moradas)
+    parametros = db.obter_parametros_estimativa()
+    custo = tempos_montagem.custo_deslocacao(regiao, metricas["km"], metricas["duracao_min"], parametros)
+    if not custo:
+        return ""
+    linha = (f"  Custo de deslocação estimado: combustível+manutenção "
+            f"{custo['combustivel'] + custo['manutencao']:.0f} € + tempo de equipa "
+            f"{custo['tempo_equipa']:.0f} €")
+    if custo["total_estimado"] is not None:
+        linha += f" + portagens {custo['portagens']:.0f} € = **{custo['total_estimado']:.0f} €**"
+    else:
+        linha += f" ≈ {custo['subtotal_sem_portagens']:.0f} € ({custo['portagens_nota']})"
+    return "\n" + linha
+
 def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
     """Constrói, em Python (nunca pedido ao modelo — um url é demasiado
     fácil de corromper se reescrito por um LLM), a secção com os links do
-    Google Maps de cada região que tenha entregas prontas esta semana.
-    Devolve "" se não houver nenhuma morada disponível em região nenhuma.
+    Google Maps de cada região que tenha entregas prontas esta semana, com
+    o custo de deslocação estimado (ver _texto_custo_deslocacao). Devolve ""
+    se não houver nenhuma morada disponível em região nenhuma.
 
     Antes de cada link, avisa se alguma das moradas dessa região não for
     reconhecida pelo Google Maps (ver logistica.moradas_nao_reconhecidas)
@@ -251,30 +283,46 @@ def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
         if not link:
             continue
         linhas.append(f"- **{regiao}** ({len(moradas)} paragem/paragens): {link}")
+        linhas.append(_texto_custo_deslocacao(regiao, moradas))
         for morada_errada in logistica.moradas_nao_reconhecidas(moradas):
             linhas.append(f"  - ⚠️ o Google Maps não reconhece esta morada: \"{morada_errada}\" "
                           "— confirma-a manualmente, senão o trajeto pode não aparecer no Maps")
     if not linhas:
         return ""
     return ("\n\n---\n\n### Trajetos no Google Maps (partida e regresso ao armazém)\n"
-            + "\n".join(linhas)
+            + "\n".join(l for l in linhas if l)
             + "\n\nA ordem das paragens já vem otimizada — abre o link para validar/editar "
               "o trajeto antes de sair.")
+
+def _publicar_estimativas_montagem(itens_prontos: list):
+    """Calcula e publica, como comentário em cada card, a estimativa de
+    tempo de montagem (ver agents.estimativa_montagem) — pedido explícito
+    do Rui (2026-07-28), seguindo o "Procedimento Tempos de Montagem para
+    Logística". Best-effort por card: uma falha num card nunca impede a
+    publicação da sugestão semanal em si (que já aconteceu antes disto), e
+    _estimar_e_publicar_card já ignora sozinha cards que já têm estimativa."""
+    for item in itens_prontos:
+        try:
+            estimativa_montagem._estimar_e_publicar_card(item, logistica.PROJETO_ENTREGAS)
+        except Exception as e:
+            print(f"[sugestao_logistica_semanal] falhou a estimativa de montagem de {item.get('id')}: {e!r}")
 
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards prontos a entregar (ver _cards_prontos_a_entregar), gera o
     texto de organização da semana e um trajeto de Google Maps por
-    região (ver _texto_trajetos_google_maps), e publica tudo junto no
-    Mural "Programação", dirigido à Conceição Costa. Pensado para correr
-    às segundas de manhã (agendado), mas pode ser disparado manualmente."""
+    região (ver _texto_trajetos_google_maps), publica tudo junto no
+    Mural "Programação", dirigido à Conceição Costa, e depois publica a
+    estimativa de tempo de montagem em cada card novo (ver
+    _publicar_estimativas_montagem). Pensado para correr às segundas de
+    manhã (agendado), mas pode ser disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
 
     try:
         try:
-            cards_por_regiao, moradas_por_regiao, nao_confirmados = _cards_prontos_a_entregar()
+            cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos = _cards_prontos_a_entregar()
         except Exception as e:
             print(f"[sugestao_logistica_semanal] não foi possível obter os cards do Basecamp: {e!r}")
             return {"erro": str(e)}
@@ -290,6 +338,8 @@ def correr_sugestao_semanal_logistica() -> dict:
         texto += _texto_trajetos_google_maps(moradas_por_regiao)
         texto += _texto_nao_confirmados(nao_confirmados)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
+
+        _publicar_estimativas_montagem(itens_prontos)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
         total_prontos = sum(contagens.values())
@@ -308,9 +358,11 @@ def trajetos_logistica_entregas() -> dict:
     semanal, mas disponível a qualquer momento na conversa, não só às
     segundas de manhã. Usa exatamente a mesma lógica de deteção de cards
     prontos a entregar (ver _cards_prontos_a_entregar), para nunca haver
-    duas versões a divergir."""
-    cards_por_regiao, moradas_por_regiao, nao_confirmados = _cards_prontos_a_entregar()
+    duas versões a divergir. Não publica estimativas de montagem (isso só
+    acontece no ciclo semanal, ver _publicar_estimativas_montagem)."""
+    cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos = _cards_prontos_a_entregar()
     trajetos = {}
+    parametros = db.obter_parametros_estimativa()
     for regiao, moradas in moradas_por_regiao.items():
         link = logistica.gerar_link_google_maps(moradas)
         if link:
@@ -318,6 +370,10 @@ def trajetos_logistica_entregas() -> dict:
             moradas_erradas = logistica.moradas_nao_reconhecidas(moradas)
             if moradas_erradas:
                 trajetos[regiao]["moradas_nao_reconhecidas"] = moradas_erradas
+            metricas = logistica.metricas_trajeto(moradas)
+            custo = tempos_montagem.custo_deslocacao(regiao, metricas["km"], metricas["duracao_min"], parametros)
+            if custo:
+                trajetos[regiao]["custo_deslocacao_estimado"] = custo
     contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
     resultado = {"por_regiao": contagens, "trajetos_google_maps": trajetos}
     if nao_confirmados:
