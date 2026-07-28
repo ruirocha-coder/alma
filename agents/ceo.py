@@ -151,6 +151,20 @@ diretamente, mesmo havendo uma centena ou mais; NUNCA digas que não
 consegues chegar ao ficheiro só porque há muitos comentários, e nunca
 percorras os comentários um a um à procura disto.
 
+IMPORTANTE — a morada de entrega tem uma regra à parte, sem exceções
+(pedido explícito do Rui, 2026-07-28): a morada de entrega de uma
+encomenda SÓ pode vir do texto das notas do próprio card (o campo
+"Notes"/descrição) — nunca de um PDF anexado (fatura/orçamento), nunca
+de um comentário, nunca de nenhum outro documento. O PDF do orçamento
+costuma ter o seu próprio campo "Morada/Address", mas é a morada fiscal/
+de faturação do cliente — pode ser um sítio completamente diferente do
+local real de entrega, e usá-la em vez da morada das notas arrisca um
+destino errado no Google Maps (endereço não-GPS-válido para a entrega
+real). Se as notas do card não tiverem nenhuma morada, diz isso
+claramente e pede para ser preenchida nas notas — nunca uses a morada
+do PDF, de um comentário, nem de nenhuma outra fonte como substituto,
+mesmo que pareça razoável.
+
 Se já tentaste ler os anexos deste card antes, nesta mesma conversa, e
 falhou (ex: "não tem anexos", ou um url que deu 404), volta a chamar
 procurar_cards_basecamp AGORA para este card antes de tentares mais

@@ -71,7 +71,10 @@ JSON, sem mais nenhum texto antes ou depois, com exatamente estas chaves:
 "data_entrega_cliente": "AAAA-MM-DD" ou null}
 Usa null sempre que a informação não estiver mesmo presente no texto —
 nunca inventes um valor. "morada" é o endereço de entrega completo, tal
-como escrito nas notas (nunca resumido nem alterado). "produtos_encomendados"
+como escrito nas notas (nunca resumido nem alterado) — usa APENAS o
+texto das notas para "morada", nunca o título nem nenhum outro texto;
+se as notas não tiverem morada nenhuma, usa null (nunca deduzas ou
+completes uma morada a partir de outra informação). "produtos_encomendados"
 resume, em poucas palavras, o que foi encomendado. As datas podem aparecer
 em qualquer formato (ex: 25/07/2026, 25-07-2026, 2026-07-25) — converte
 sempre para AAAA-MM-DD."""
