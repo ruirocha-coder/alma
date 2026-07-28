@@ -289,14 +289,21 @@ GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 
 def _info_trajeto(origem: str, moradas: list[str]) -> dict:
     """Chama a Google Directions API uma única vez para calcular a ordem
-    ótima das `moradas` (ida e volta a partir de `origem`) E os totais reais
-    de distância/duração da mesma resposta — usados depois para o custo de
-    deslocação (ver tools.tempos_montagem.custo_deslocacao), sem precisar de
-    nenhuma chamada extra. Devolve {"ordem": moradas (otimizada ou
-    inalterada), "km": float|None, "duracao_min": float|None} — None nos
-    totais sempre que não houver chave configurada, nenhuma morada, ou a
-    chamada falhar por qualquer razão (nunca deixa a rota por publicar só
-    por causa disto).
+    ótima das `moradas` (ida e volta a partir de `origem`) E os totais/por
+    perna reais de distância/duração da mesma resposta — usados depois
+    para o custo de deslocação (ver tools.tempos_montagem.custo_deslocacao)
+    e para a proposta de agendamento (ver tools.agendamento_logistica),
+    sem precisar de nenhuma chamada extra. Devolve {"ordem": moradas
+    (otimizada ou inalterada), "ordem_indices": índices na lista `moradas`
+    original (para alinhar outros dados por paragem, ex: título do card,
+    à mesma ordem, sem ambiguidade quando duas moradas forem iguais),
+    "km": float|None, "duracao_min": float|None, "pernas_minutos":
+    list[float]|None (uma por perna, N+1 pernas para N paragens: armazém→
+    p1, p1→p2, ..., pN→armazém, já na ordem otimizada)} — tudo None
+    (exceto "ordem"/"ordem_indices", que ficam na ordem original) sempre
+    que não houver chave configurada, nenhuma morada, ou a chamada falhar
+    por qualquer razão (nunca deixa a rota por publicar só por causa
+    disto).
 
     Chama a API mesmo com uma única morada — bug real corrigido
     (2026-07-28): com só 1 paragem não há nada a otimizar em termos de
@@ -304,8 +311,10 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
     distância/duração reais e computáveis; saltar a chamada nesse caso
     fazia o custo de deslocação ficar sempre em falta exatamente no caso
     mais comum (uma só entrega pronta numa região nessa semana)."""
+    vazio = {"ordem": moradas, "ordem_indices": list(range(len(moradas))),
+            "km": None, "duracao_min": None, "pernas_minutos": None}
     if not GOOGLE_MAPS_API_KEY or not moradas:
-        return {"ordem": moradas, "km": None, "duracao_min": None}
+        return vazio
     try:
         resposta = httpx.get(
             "https://maps.googleapis.com/maps/api/directions/json",
@@ -319,15 +328,17 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
         )
         dados = resposta.json()
         if dados.get("status") != "OK":
-            return {"ordem": moradas, "km": None, "duracao_min": None}
+            return vazio
         rota = dados["routes"][0]
         pernas = rota.get("legs") or []
         km_total = sum(p["distance"]["value"] for p in pernas) / 1000
         duracao_total_min = sum(p["duration"]["value"] for p in pernas) / 60
-        ordem = rota.get("waypoint_order") or list(range(len(moradas)))
-        return {"ordem": [moradas[i] for i in ordem], "km": km_total, "duracao_min": duracao_total_min}
+        pernas_minutos = [p["duration"]["value"] / 60 for p in pernas]
+        ordem_indices = rota.get("waypoint_order") or list(range(len(moradas)))
+        return {"ordem": [moradas[i] for i in ordem_indices], "ordem_indices": ordem_indices,
+                "km": km_total, "duracao_min": duracao_total_min, "pernas_minutos": pernas_minutos}
     except Exception:
-        return {"ordem": moradas, "km": None, "duracao_min": None}
+        return vazio
 
 def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
     """Como antes: só a ordem ótima das moradas (ver _info_trajeto para os
@@ -346,6 +357,24 @@ def metricas_trajeto(moradas: list[str], origem: str = MORADA_ARMAZEM) -> dict:
     com esse caso, nunca inventar um custo sem dados reais."""
     info = _info_trajeto(origem, [m for m in moradas if m and m.strip()])
     return {"km": info["km"], "duracao_min": info["duracao_min"]}
+
+def plano_trajeto(moradas: list[str], origem: str = MORADA_ARMAZEM) -> dict:
+    """Como metricas_trajeto, mas devolve também os índices da ordem
+    otimizada e a duração de cada perna individual — pedido do Rui
+    (2026-07-28), para a proposta de agendamento (ver
+    tools.agendamento_logistica.calcular_horario_dia) poder alinhar o
+    tempo de montagem de cada card à paragem certa, pela POSIÇÃO
+    original na lista `moradas` (nunca pelo texto da morada — evita
+    ambiguidade se duas encomendas tiverem a mesma morada).
+
+    Devolve {"ordem_indices": list[int] (índices em `moradas`, já na
+    ordem otimizada), "pernas_minutos": list[float]|None (N+1 valores
+    para N moradas), "km": float|None, "duracao_min": float|None} — os
+    campos que dependem da API ficam None se não for possível calcular
+    (sem chave, sem moradas, ou falha da chamada)."""
+    info = _info_trajeto(origem, [m for m in moradas if m and m.strip()])
+    return {"ordem_indices": info["ordem_indices"], "pernas_minutos": info["pernas_minutos"],
+            "km": info["km"], "duracao_min": info["duracao_min"]}
 
 def _morada_reconhecida(morada: str, origem: str = MORADA_ARMAZEM) -> bool:
     """Verifica se `morada` é reconhecida pelo Google Maps — usando a

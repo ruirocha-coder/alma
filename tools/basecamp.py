@@ -641,6 +641,40 @@ def criar_documento(titulo: str, conteudo: str, projeto: str) -> dict:
     r.raise_for_status()
     return r.json()
 
+def _resolver_schedule(projeto: str) -> tuple:
+    """Descobre o bucket_id e o id da Agenda (Schedule) de um projeto pelo
+    nome — tal como _resolver_mural/_resolver_vault. Confirmado ao vivo
+    (2026-07-28, contra a API real do Basecamp) que o projeto "Entregas"
+    já tem a Agenda ativada (dock "schedule")."""
+    termo = projeto.lower().strip()
+    for p in listar_projetos():
+        if termo not in p["name"].lower():
+            continue
+        for ferramenta in p.get("dock", []):
+            if ferramenta.get("name") == "schedule" and ferramenta.get("enabled"):
+                return p["id"], ferramenta["id"]
+        raise ValueError(f"o projeto {p['name']!r} não tem Agenda (Schedule) ativada — "
+                        "ativa-a nas definições do projeto no Basecamp antes de criar eventos")
+    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+
+def criar_evento_calendario(titulo: str, inicio_iso: str, fim_iso: str,
+                            descricao: str = "", projeto: str = "Entregas") -> dict:
+    """Cria um evento na Agenda (Schedule) de um projeto do Basecamp —
+    confirmado ao vivo (2026-07-28) contra o projeto "Entregas" real,
+    criado e depois apagado como teste. `inicio_iso`/`fim_iso` têm de ser
+    datetimes ISO8601 já com o fuso horário incluído (ver
+    tools.agendamento_logistica.horario_para_iso — nunca construídos aqui
+    sem fuso horário, para nunca assumir por engano a diferença errada
+    para UTC)."""
+    bucket_id, schedule_id = _resolver_schedule(projeto)
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/schedules/{schedule_id}/entries.json",
+                   headers=_headers(),
+                   json={"summary": titulo, "starts_at": inicio_iso, "ends_at": fim_iso,
+                        "description": _markdown_para_basecamp(descricao), "all_day": False, "notify": False},
+                   timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 def _get_bytes(url: str) -> bytes:
     """Descarrega um ficheiro anexado (Upload) — usa a mesma autenticação da API."""
     r = httpx.get(url, headers=_headers(), timeout=30, follow_redirects=True)
