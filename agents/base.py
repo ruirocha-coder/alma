@@ -113,6 +113,26 @@ TOOLS_MEMORIA = [
             },
             "required": ["nome", "empresa"]
         }
+    },
+    {
+        "name": "atualizar_parametro_estimativa",
+        "description": "Ajusta um parâmetro numérico do \"Procedimento Tempos de Montagem para Logística\" (minutos por artigo, acréscimos, bandas de rendimento, custos de deslocação) — usa isto só quando pedirem explicitamente para mudar um valor deste procedimento (ex: \"muda os minutos de montagem normal para 35\"), tipicamente depois de um relatório de calibração mostrar um desvio consistente entre a estimativa e o real. Só quem está autorizado consegue usar esta ferramenta. Ajusta só o parâmetro pedido, um de cada vez — nunca vários ao mesmo tempo, para se perceber o efeito de cada mudança isoladamente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nome": {"type": "string", "enum": [
+                    "minutos_ligeiro", "minutos_normal", "minutos_pesado",
+                    "acrescimo_fixa_parede_min", "acrescimo_candeeiro_teto_min",
+                    "acrescimo_desmontado_inesperado_min", "fixo_paragem_min",
+                    "fator_equipa_3_pessoas", "valor_dia_referencia_eur",
+                    "banda_baixa_eur_hora", "banda_alta_eur_hora",
+                    "fator_sem_elevador", "fator_obra", "fator_centro_historico",
+                    "custo_km_combustivel_eur", "custo_km_manutencao_eur", "custo_hora_pessoa_eur"
+                ]},
+                "valor": {"type": "number"}
+            },
+            "required": ["nome", "valor"]
+        }
     }
 ]
 
@@ -171,6 +191,16 @@ def _atualizar_empresa_pessoa_restrito(utilizador: str, nome: str, empresa: str)
         return {"erro": f"não encontrei nenhum perfil guardado exatamente com o nome {nome!r} — "
                         "confirma o nome exato (como está registado) antes de tentar outra vez"}
     return db.atualizar_empresa(nome, empresa)
+
+# pedido explícito do Rui (2026-07-28): ajustar um parâmetro do procedimento
+# de tempos de montagem (ver tools/tempos_montagem.py) é uma decisão de
+# negócio, não uma ação de logística do dia a dia — mesma restrição de quem
+# pode corrigir a empresa de outra pessoa (só o Rui e a Beatriz), nunca só
+# por instrução no texto da missão.
+def _atualizar_parametro_estimativa_restrito(utilizador: str, nome: str, valor: float) -> dict:
+    if not any(autorizado in utilizador.lower() for autorizado in _AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA):
+        return {"erro": f"{utilizador} não tem autorização para alterar parâmetros da estimativa de montagem"}
+    return db.atualizar_parametro_estimativa(nome, valor)
 
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
@@ -242,6 +272,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "definir_empresa": lambda empresa: db.atualizar_empresa(utilizador, empresa),
         "atualizar_empresa_pessoa": lambda nome, empresa: _atualizar_empresa_pessoa_restrito(
             utilizador, nome, empresa),
+        "atualizar_parametro_estimativa": lambda nome, valor: _atualizar_parametro_estimativa_restrito(
+            utilizador, nome, valor),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),

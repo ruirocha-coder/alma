@@ -16,7 +16,7 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
-                    sugestao_logistica_semanal)
+                    sugestao_logistica_semanal, estimativa_montagem)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
@@ -52,6 +52,15 @@ scheduler.add_job(logistica_entregas.correr_monitorizacao_logistica, "cron", hou
 # semanais das 9h/9h15, para nunca publicarem em simultâneo
 scheduler.add_job(sugestao_logistica_semanal.correr_sugestao_semanal_logistica, "cron",
                   day_of_week="mon", hour=8, minute=30)
+# verificar entregas concluídas e ler o "Real" registado pela equipa (ver
+# "Procedimento Tempos de Montagem para Logística"): todos os dias às 18h,
+# fim do dia — depois de qualquer entrega feita nesse dia
+scheduler.add_job(estimativa_montagem.verificar_entregas_concluidas_e_ler_real, "cron", hour=18, minute=0)
+# calibração da estimativa de tempos de montagem: de 2 em 2 meses, dia 1 às
+# 8h — compara estimativa vs. real acumulado e publica um relatório de
+# desvio (nunca ajusta parâmetros sozinha, ver agents/estimativa_montagem.py)
+scheduler.add_job(estimativa_montagem.correr_calibracao_estimativa, "cron",
+                  month="1,3,5,7,9,11", day=1, hour=8, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -569,6 +578,22 @@ def sugestao_semanal_logistica_agora():
     resultados/erros ficam nos logs do servidor. Útil para testar sem
     esperar pela segunda-feira."""
     threading.Thread(target=sugestao_logistica_semanal.correr_sugestao_semanal_logistica, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/logistica/verificar-real")
+def verificar_entregas_concluidas_agora():
+    """Dispara já a verificação de entregas concluídas e leitura do "Real"
+    registado pela equipa (ver "Procedimento Tempos de Montagem para
+    Logística"), em segundo plano — útil para testar sem esperar pelas 18h."""
+    threading.Thread(target=estimativa_montagem.verificar_entregas_concluidas_e_ler_real, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/logistica/calibrar-estimativa")
+def calibrar_estimativa_agora():
+    """Dispara já o relatório de calibração da estimativa de tempos de
+    montagem (estimativa vs. real, publicado no Mural do projeto Entregas),
+    em segundo plano — útil para testar sem esperar pelo ciclo bimestral."""
+    threading.Thread(target=estimativa_montagem.correr_calibracao_estimativa, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/ecos-largos/resumo-diario")
