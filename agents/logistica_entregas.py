@@ -27,7 +27,13 @@ import db
 
 _a_correr = threading.Lock()
 
-MAX_CARDS_POR_CORRIDA = 40  # limite defensivo, tal como monitor_basecamp.py
+# limite defensivo contra uma corrida descontrolada — o projeto
+# "Entregas" tem, na realidade, várias centenas de cards no total
+# (confirmado contra a API real), por isso tem de ter folga bem acima do
+# volume normal de encomendas ativas (bug real corrigido 2026-07-28: um
+# limite de 40, aplicado à lista bruta antes de se saber o estado real de
+# cada card, cortava a maioria silenciosamente).
+MAX_CARDS_POR_CORRIDA = 300
 
 _REGIAO_POR_COLUNA = {"lisboa": "Lisboa", "porto": "Porto", "outro": "Outro", "outros": "Outro"}
 
@@ -250,7 +256,11 @@ def diagnostico_cards_regiao(limite: int = 5) -> dict:
     extraídos se a extração funcionar, ou a resposta em bruto do modelo
     (ou o erro) se falhar — para se ver com dados reais qual é a causa."""
     try:
-        itens = [i for i in basecamp._itens_ativos()
+        # forcar=True: este diagnóstico existe precisamente para investigar
+        # discrepâncias entre o que se vê no Basecamp e o que a Alma
+        # mostra — nunca faz sentido arriscar respondê-las com dados
+        # desatualizados da cache.
+        itens = [i for i in basecamp._itens_ativos(forcar=True)
                 if i.get("type") == "Kanban::Card"
                 and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
     except Exception as e:
@@ -343,7 +353,7 @@ def correr_monitorizacao_logistica() -> dict:
     try:
         hoje = date.today()
         try:
-            itens = [i for i in basecamp._itens_ativos()
+            itens = [i for i in basecamp._itens_ativos(forcar=True)
                     if i.get("type") == "Kanban::Card"
                     and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()
                     and not basecamp._em_coluna_terminal(i)]
@@ -351,6 +361,9 @@ def correr_monitorizacao_logistica() -> dict:
             print(f"[logistica_entregas] não foi possível obter os cards do Basecamp: {e!r}")
             return {"erro": str(e)}
 
+        if len(itens) > MAX_CARDS_POR_CORRIDA:
+            print(f"[logistica_entregas] ATENÇÃO: {len(itens)} encomendas ativas, acima do limite de "
+                 f"{MAX_CARDS_POR_CORRIDA} por corrida — {len(itens) - MAX_CARDS_POR_CORRIDA} ficam de fora hoje")
         itens = itens[:MAX_CARDS_POR_CORRIDA]
         print(f"[logistica_entregas] {len(itens)} encomendas ativas a analisar")
 
