@@ -293,6 +293,30 @@ def _texto_nao_confirmados(nao_confirmados: list) -> str:
             "(falha ao ler a coluna real por trás de \"On Hold\") — não entraram em "
             f"nenhuma rota, verifica-os diretamente no Basecamp:\n{linhas}")
 
+def _separar_moradas_por_regiao(moradas_por_regiao: dict) -> tuple:
+    """Separa, por região, as moradas reconhecidas pelo Google Maps das
+    que não são (ver logistica.separar_moradas_por_reconhecimento) —
+    calculado uma só vez, partilhado entre o trajeto/custo
+    (_texto_trajetos_google_maps) e a proposta de agendamento
+    (_construir_texto_proposta_agendamento), para nunca verificar a
+    mesma morada duas vezes.
+
+    Bug real reportado em produção (2026-07-28): a Google Directions API
+    falha o pedido de trajeto com várias paragens por INTEIRO assim que
+    uma só das moradas não é geocodificável — sem ordem otimizada, sem
+    custo, sem proposta de horário para a região inteira, mesmo havendo
+    outras moradas boas no grupo. Separar antes de pedir o trajeto
+    (usando só as reconhecidas) evita perder tudo por causa de uma só
+    morada mal escrita.
+
+    Devolve (moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao)."""
+    reconhecidas_por_regiao, excluidas_por_regiao = {}, {}
+    for regiao, moradas in moradas_por_regiao.items():
+        reconhecidas, excluidas = logistica.separar_moradas_por_reconhecimento(moradas)
+        reconhecidas_por_regiao[regiao] = reconhecidas
+        excluidas_por_regiao[regiao] = excluidas
+    return reconhecidas_por_regiao, excluidas_por_regiao
+
 def _texto_custo_deslocacao(regiao: str, moradas: list) -> str:
     """Custo de deslocação estimado para esta região (ver
     tools.tempos_montagem.custo_deslocacao), a partir de km/duração REAIS da
@@ -314,28 +338,34 @@ def _texto_custo_deslocacao(regiao: str, moradas: list) -> str:
         linha += f" ≈ {custo['subtotal_sem_portagens']:.0f} € ({custo['portagens_nota']})"
     return "\n" + linha
 
-def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
+def _texto_trajetos_google_maps(moradas_reconhecidas_por_regiao: dict, moradas_excluidas_por_regiao: dict) -> str:
     """Constrói, em Python (nunca pedido ao modelo — um url é demasiado
     fácil de corromper se reescrito por um LLM), a secção com os links do
     Google Maps de cada região que tenha entregas prontas esta semana, com
     o custo de deslocação estimado (ver _texto_custo_deslocacao). Devolve ""
     se não houver nenhuma morada disponível em região nenhuma.
 
-    Antes de cada link, avisa se alguma das moradas dessa região não for
-    reconhecida pelo Google Maps (ver logistica.moradas_nao_reconhecidas)
-    — bug real reportado em produção: uma morada mal geocodificada
-    impede o Google Maps de calcular o trajeto todo (sem rota, sem
-    tempo, nada interativo), sem nenhum aviso claro do motivo."""
+    Recebe já os dois grupos separados (ver _separar_moradas_por_regiao)
+    — o link e o custo usam só as moradas reconhecidas pelo Google Maps,
+    nunca as excluídas (bug real reportado em produção, 2026-07-28: uma
+    só morada mal geocodificada fazia falhar o trajeto/custo da região
+    INTEIRA, mesmo havendo outras moradas boas). As excluídas ficam de
+    fora do link e são listadas explicitamente, para adicionar à mão."""
     linhas = []
-    for regiao, moradas in moradas_por_regiao.items():
-        link = logistica.gerar_link_google_maps(moradas)
-        if not link:
+    for regiao, moradas in moradas_reconhecidas_por_regiao.items():
+        excluidas = moradas_excluidas_por_regiao.get(regiao) or []
+        if not moradas and not excluidas:
             continue
-        linhas.append(f"- **{regiao}** ({len(moradas)} paragem/paragens): {link}")
-        linhas.append(_texto_custo_deslocacao(regiao, moradas))
-        for morada_errada in logistica.moradas_nao_reconhecidas(moradas):
-            linhas.append(f"  - ⚠️ o Google Maps não reconhece esta morada: \"{morada_errada}\" "
-                          "— confirma-a manualmente, senão o trajeto pode não aparecer no Maps")
+        link = logistica.gerar_link_google_maps(moradas) if moradas else None
+        if link:
+            linhas.append(f"- **{regiao}** ({len(moradas)} paragem/paragens): {link}")
+            linhas.append(_texto_custo_deslocacao(regiao, moradas))
+        elif excluidas:
+            linhas.append(f"- **{regiao}**: nenhuma morada desta região foi reconhecida pelo Google Maps "
+                          "— sem trajeto nem custo calculados")
+        for morada_errada in excluidas:
+            linhas.append(f"  - ⚠️ o Google Maps não reconhece esta morada: \"{morada_errada}\" — "
+                          "EXCLUÍDA do trajeto/custo acima, confirma-a e adiciona-a manualmente no Maps")
     if not linhas:
         return ""
     return ("\n\n---\n\n### Trajetos no Google Maps (partida e regresso ao armazém)\n"
@@ -367,7 +397,8 @@ def _publicar_estimativas_montagem(itens_prontos: list) -> dict:
             minutos_por_id[item["id"]] = resultado["minutos"]
     return minutos_por_id
 
-def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por_id: dict, inicio_semana: date) -> str:
+def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por_id: dict,
+                                          moradas_reconhecidas_por_regiao: dict, inicio_semana: date) -> str:
     """Constrói, em Python (nunca pedido ao modelo — datas/horas não se
     confiam à IA), a proposta de agendamento: um dia útil consecutivo por
     região com entregas prontas (a partir de `inicio_semana`), e dentro de
@@ -382,11 +413,14 @@ def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por
     criar_eventos_calendario_entregas (ver agents/agendamento_entregas.py)
     é chamada, com os valores finais tal como confirmados na conversa.
 
-    Entregas sem morada, ou cujo tempo de montagem ainda não foi
-    calculado, ficam de fora da proposta e são sinalizadas para inclusão
-    manual — nunca com um horário inventado. Se uma região não couber
-    dentro do turno normal, sinaliza isso claramente em vez de decidir
-    sozinha como dividir por mais dias (ver tools/agendamento_logistica.py).
+    Entregas sem morada, cuja morada não é reconhecida pelo Google Maps
+    (ver _separar_moradas_por_regiao — nunca entram no cálculo do
+    trajeto, para uma só morada má não fazer perder a proposta da região
+    inteira), ou cujo tempo de montagem ainda não foi calculado, ficam de
+    fora da proposta e são sinalizadas para inclusão manual — nunca com
+    um horário inventado. Se uma região não couber dentro do turno
+    normal, sinaliza isso claramente em vez de decidir sozinha como
+    dividir por mais dias (ver tools/agendamento_logistica.py).
 
     Devolve "" se não houver nenhuma entrega com morada e tempo de
     montagem disponíveis em região nenhuma."""
@@ -396,9 +430,13 @@ def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por
         if not entregas:
             continue
 
-        agendaveis = [e for e in entregas if e["morada"] and e["id"] in minutos_por_id]
+        moradas_reconhecidas = moradas_reconhecidas_por_regiao.get(regiao) or []
+        agendaveis = [e for e in entregas if e["morada"] in moradas_reconhecidas and e["id"] in minutos_por_id]
         sem_morada = [e["titulo"] for e in entregas if not e["morada"]]
-        sem_estimativa = [e["titulo"] for e in entregas if e["morada"] and e["id"] not in minutos_por_id]
+        sem_morada_reconhecida = [e["titulo"] for e in entregas
+                                  if e["morada"] and e["morada"] not in moradas_reconhecidas]
+        sem_estimativa = [e["titulo"] for e in entregas
+                          if e["morada"] in moradas_reconhecidas and e["id"] not in minutos_por_id]
 
         linhas = []
         if agendaveis:
@@ -428,6 +466,9 @@ def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por
 
         if sem_morada:
             linhas.append("⚠️ Sem morada identificada, fora da proposta: " + ", ".join(sem_morada))
+        if sem_morada_reconhecida:
+            linhas.append("⚠️ Morada não reconhecida pelo Google Maps, fora da proposta (confirma e agenda à mão): "
+                          + ", ".join(sem_morada_reconhecida))
         if sem_estimativa:
             linhas.append("⚠️ Sem tempo de montagem calculado ainda, fora da proposta: " + ", ".join(sem_estimativa))
 
@@ -471,10 +512,13 @@ def correr_sugestao_semanal_logistica() -> dict:
             print(f"[sugestao_logistica_semanal] não consegui ler os documentos de referência: {e!r}")
             documentos_texto = None
 
+        moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao = _separar_moradas_por_regiao(moradas_por_regiao)
+
         inicio_semana, fim_semana = _semana_atual()
         texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana, documentos_texto)
-        texto += _texto_trajetos_google_maps(moradas_por_regiao)
-        texto += _construir_texto_proposta_agendamento(entregas_por_regiao, minutos_por_id, inicio_semana)
+        texto += _texto_trajetos_google_maps(moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao)
+        texto += _construir_texto_proposta_agendamento(entregas_por_regiao, minutos_por_id,
+                                                       moradas_reconhecidas_por_regiao, inicio_semana)
         texto += _texto_nao_confirmados(nao_confirmados)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
 
@@ -498,19 +542,23 @@ def trajetos_logistica_entregas() -> dict:
     duas versões a divergir. Não publica estimativas de montagem (isso só
     acontece no ciclo semanal, ver _publicar_estimativas_montagem)."""
     cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos, _entregas_por_regiao = _cards_prontos_a_entregar()
+    moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao = _separar_moradas_por_regiao(moradas_por_regiao)
     trajetos = {}
     parametros = db.obter_parametros_estimativa()
-    for regiao, moradas in moradas_por_regiao.items():
-        link = logistica.gerar_link_google_maps(moradas)
+    for regiao, moradas in moradas_reconhecidas_por_regiao.items():
+        # usa só as moradas reconhecidas para o link/custo (ver
+        # _separar_moradas_por_regiao) — uma só morada mal geocodificada
+        # não pode fazer perder o trajeto/custo da região inteira
+        link = logistica.gerar_link_google_maps(moradas) if moradas else None
         if link:
             trajetos[regiao] = {"paragens": len(moradas), "link": link}
-            moradas_erradas = logistica.moradas_nao_reconhecidas(moradas)
-            if moradas_erradas:
-                trajetos[regiao]["moradas_nao_reconhecidas"] = moradas_erradas
             metricas = logistica.metricas_trajeto(moradas)
             custo = tempos_montagem.custo_deslocacao(regiao, metricas["km"], metricas["duracao_min"], parametros)
             if custo:
                 trajetos[regiao]["custo_deslocacao_estimado"] = custo
+        moradas_excluidas = moradas_excluidas_por_regiao.get(regiao) or []
+        if moradas_excluidas:
+            trajetos.setdefault(regiao, {"paragens": len(moradas), "link": link})["moradas_nao_reconhecidas"] = moradas_excluidas
     contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
     resultado = {"por_regiao": contagens, "trajetos_google_maps": trajetos}
     if nao_confirmados:
