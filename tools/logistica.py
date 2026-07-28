@@ -418,6 +418,29 @@ def moradas_nao_reconhecidas(moradas: list[str], origem: str = MORADA_ARMAZEM) -
         return []
     return [m for m in moradas if m and m.strip() and not _morada_reconhecida(m)]
 
+def separar_moradas_por_reconhecimento(moradas: list[str], origem: str = MORADA_ARMAZEM) -> tuple:
+    """Separa `moradas` em (reconhecidas, nao_reconhecidas) — usa isto
+    ANTES de pedir um trajeto/custo/agendamento para várias moradas de
+    uma vez (ver gerar_link_google_maps/metricas_trajeto/plano_trajeto).
+
+    Bug real reportado em produção (2026-07-28): a Google Directions API
+    falha o pedido de trajeto com VÁRIAS paragens por INTEIRO — sem
+    ordem otimizada, sem km/duração, sem proposta de horário — assim que
+    UMA só das moradas não é geocodificável (não falha "só essa
+    paragem", falha tudo). Isolar as moradas más antes de pedir o
+    trajeto, e pedi-lo só com as boas, permite continuar a calcular
+    trajeto/custo/horário reais para as restantes, em vez de perder tudo
+    por causa de uma só morada mal escrita.
+
+    Devolve (moradas, []) sem verificar nada se não houver chave
+    configurada (sem forma de confirmar — nunca trata como más sem
+    verificar)."""
+    if not GOOGLE_MAPS_API_KEY:
+        return moradas, []
+    nao_reconhecidas = [m for m in moradas if m and m.strip() and not _morada_reconhecida(m, origem)]
+    reconhecidas = [m for m in moradas if m and m.strip() and m not in nao_reconhecidas]
+    return reconhecidas, nao_reconhecidas
+
 def gerar_link_google_maps(moradas: list[str], origem: str = MORADA_ARMAZEM) -> str:
     """Constrói um link do Google Maps com um trajeto de ida e volta a
     partir de `origem` (por omissão o armazém Boa Safra/Ecos Largos),
