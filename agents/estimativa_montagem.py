@@ -144,11 +144,18 @@ def _texto_estimativa(titulo: str, conta_a: dict, rendimento: dict, confianca: s
 def _estimar_e_publicar_card(item: dict, projeto: str) -> dict:
     """Calcula e publica a estimativa de montagem de um card, se ainda não
     tiver sido publicada (ver db.estimativa_existente) — chamado pela
-    sugestão semanal para cada card pronto a entregar. Devolve a estimativa
-    calculada, ou None se já existia ou se não foi possível calcular nada."""
+    sugestão semanal para cada card pronto a entregar. Devolve a
+    estimativa (sempre com "minutos", quer tenha acabado de ser publicada
+    agora, quer já existisse de uma corrida anterior — pedido do Rui,
+    2026-07-28: a proposta de agendamento precisa do tempo de montagem de
+    TODAS as entregas prontas, não só das que ainda não tinham
+    estimativa), ou None se não foi possível calcular nada (ex: falha ao
+    publicar o comentário)."""
     recording_id = item["id"]
-    if db.estimativa_existente(recording_id):
-        return None
+    existente = db.estimativa_existente(recording_id)
+    if existente:
+        return {"recording_id": recording_id, "minutos": float(existente["estimativa_minutos"]),
+                "ja_publicada": True}
 
     titulo = item.get("title") or item.get("content") or "(sem título)"
     texto_fonte = _texto_pdf_encomenda(item)

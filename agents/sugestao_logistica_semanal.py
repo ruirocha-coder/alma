@@ -33,23 +33,30 @@
 # (também não é uma entrega, fica de fora); só por trás de uma região
 # (Lisboa/Porto/Outro) é que está mesmo pronta a ser entregue.
 #
-# Esta sugestão organiza: que dia visitar cada região (pelo modelo, sem
-# dados reais de distância/tempo — só uma organização sensata), e por
-# que ordem dentro de cada dia. Além disso (pedido do Rui, 2026-07-27),
-# gera um link de Google Maps por região, com todas as paragens prontas
-# a entregar essa semana, para a Conceição validar/editar diretamente no
-# Maps antes de sair — ver tools.logistica.gerar_link_google_maps. A
-# ordem das paragens já vem otimizada (via Google Directions API, pedido
-# do Rui 2026-07-27); se essa otimização não estiver disponível, o link
+# Esta sugestão organiza a semana em três camadas: (1) o texto do modelo
+# dá contexto geral (volume, notas relevantes) — nunca decide dias/horas;
+# (2) um link de Google Maps por região, com todas as paragens prontas a
+# entregar essa semana, para a Conceição validar/editar diretamente no
+# Maps antes de sair (ver tools.logistica.gerar_link_google_maps — a
+# ordem das paragens já vem otimizada via Google Directions API, pedido
+# do Rui 2026-07-27; se essa otimização não estiver disponível, o link
 # vem na ordem original e continua a poder ser otimizado/editado à mão
-# dentro do próprio Maps.
+# dentro do próprio Maps); (3) uma PROPOSTA DE AGENDAMENTO determinística
+# — dia útil + hora de chegada/saída de cada entrega, calculada a partir
+# do trajeto real e do tempo de montagem (ver
+# _construir_texto_proposta_agendamento e tools/agendamento_logistica.py)
+# — pedido explícito do Rui (2026-07-28). É só uma proposta: a Alma nunca
+# cria eventos no calendário do projeto Entregas sozinha a partir dela —
+# só depois de a Conceição ou a Isa confirmarem (com ou sem ajustes) é
+# que agents.agendamento_entregas.criar_eventos_calendario_entregas_restrito
+# é chamada, com os dados finais tal como confirmados na conversa.
 import threading
 from datetime import date, timedelta
 from agents.base import client
 from agents import estimativa_montagem
 from agents.logistica_entregas import (_extrair_dados_encomenda, _coluna_real_on_hold,
                                        _REGIAO_POR_COLUNA, _formatar_documentos_referencia)
-from tools import basecamp, logistica, documentos_referencia, tempos_montagem
+from tools import basecamp, logistica, documentos_referencia, tempos_montagem, agendamento_logistica
 import db
 
 _a_correr = threading.Lock()
@@ -121,17 +128,20 @@ entregue. Já vêm agrupados por região (Lisboa/Porto/Outro).
 {contexto}
 {bloco_documentos}
 
-Organiza uma sugestão de calendário para a semana: que dia(s) visitar
-cada região (agrupa sempre por região — nunca misturar Lisboa e Porto no
-mesmo dia), e dentro de cada dia, sugere uma ordem sensata de visita
-pelos endereços (usando o teu conhecimento geral da zona/ruas
-mencionadas). Esta parte da tua resposta NÃO é uma rota GPS otimizada
-com distâncias/tempos reais — é só uma organização sensata para não
-andar às voltas; diz isso claramente se não tiveres informação
-suficiente para ordenar com confiança. Para cada entrega, inclui sempre
-o cliente, a morada, o que foi encomendado, e a data prevista de
-entrega, exatamente como aparecem acima — nunca inventes nem alteres
-estes dados.
+Para cada entrega, inclui sempre o cliente, a morada, o que foi
+encomendado, a data prevista de entrega, e o tempo de montagem estimado,
+exatamente como aparecem acima — nunca inventes nem alteres estes dados.
+Agrupa sempre por região (nunca misturar Lisboa e Porto no mesmo bloco).
+
+NÃO proponhas tu mesma em que dia ou a que horas visitar cada entrega —
+isso é calculado à parte, com dados reais de trajeto e tempo de
+montagem (ver a "Proposta de agendamento" que vem a seguir ao teu
+texto, com dia e hora exatos de cada paragem); menciona só que essa
+proposta vem a seguir, para a Conceição/Isa validarem e pedirem à Alma
+para criar os eventos no calendário quando estiver fechada. O teu texto
+aqui serve para dar contexto geral da semana (quantas entregas,
+volume/carga de trabalho por região, alguma nota relevante sobre os
+produtos ou procedimentos) — nunca um calendário GPS otimizado.
 
 Não incluas tu mesma nenhum link de Google Maps nem tentes gerar um url
 — isso é acrescentado à parte, depois do teu texto, com o trajeto real
@@ -157,9 +167,9 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 
 def _cards_prontos_a_entregar() -> tuple:
     """Lê os cards ativos do projeto "Entregas" e devolve
-    (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos):
-    cards_por_regiao tem o texto formatado de cada entrega pronta
-    (cliente/morada/produto/data, para o resumo em texto);
+    (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos,
+    entregas_por_regiao): cards_por_regiao tem o texto formatado de cada
+    entrega pronta (cliente/morada/produto/data, para o resumo em texto);
     moradas_por_regiao tem só as moradas em bruto de cada uma (para o
     trajeto do Google Maps) — extraídos na mesma passagem, para nunca
     ler os dados de cada card duas vezes. Só conta cards mesmo prontos a
@@ -178,7 +188,14 @@ def _cards_prontos_a_entregar() -> tuple:
     já formatado) de cada card mesmo pronto a entregar — usado por
     agents.estimativa_montagem para calcular e publicar a estimativa de
     tempo de montagem por card (precisa do item bruto para ler o PDF da
-    encomenda e o comments_url, não só do texto já resumido)."""
+    encomenda e o comments_url, não só do texto já resumido).
+
+    entregas_por_regiao tem, por região, um dict por entrega
+    ({"id", "titulo", "morada", "cliente", "produtos_encomendados"}) —
+    pedido do Rui (2026-07-28), para a proposta de agendamento (ver
+    _construir_texto_proposta_agendamento) poder alinhar o tempo de
+    montagem e a morada de cada entrega à sua posição na rota otimizada,
+    sem repetir a extração de dados do card."""
     itens = [i for i in basecamp._itens_ativos()
             if i.get("type") == "Kanban::Card"
             and ((i.get("bucket") or {}).get("name") or "").strip().lower() == logistica.PROJETO_ENTREGAS.lower()]
@@ -186,6 +203,7 @@ def _cards_prontos_a_entregar() -> tuple:
 
     cards_por_regiao = {regiao: [] for regiao in _REGIOES}
     moradas_por_regiao = {regiao: [] for regiao in _REGIOES}
+    entregas_por_regiao = {regiao: [] for regiao in _REGIOES}
     nao_confirmados = []
     itens_prontos = []
 
@@ -227,8 +245,12 @@ def _cards_prontos_a_entregar() -> tuple:
         if dados.get("morada"):
             moradas_por_regiao[regiao].append(dados["morada"])
         itens_prontos.append(item)
+        entregas_por_regiao[regiao].append({
+            "id": item["id"], "titulo": titulo, "morada": dados.get("morada"),
+            "cliente": dados.get("cliente"), "produtos_encomendados": dados.get("produtos_encomendados"),
+        })
 
-    return cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos
+    return cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos, entregas_por_regiao
 
 def _texto_nao_confirmados(nao_confirmados: list) -> str:
     """Secção que sinaliza cards cuja coluna real por trás de "On Hold"
@@ -294,38 +316,127 @@ def _texto_trajetos_google_maps(moradas_por_regiao: dict) -> str:
             + "\n\nA ordem das paragens já vem otimizada — abre o link para validar/editar "
               "o trajeto antes de sair.")
 
-def _publicar_estimativas_montagem(itens_prontos: list):
+def _publicar_estimativas_montagem(itens_prontos: list) -> dict:
     """Calcula e publica, como comentário em cada card, a estimativa de
     tempo de montagem (ver agents.estimativa_montagem) — pedido explícito
     do Rui (2026-07-28), seguindo o "Procedimento Tempos de Montagem para
     Logística". Best-effort por card: uma falha num card nunca impede a
-    publicação da sugestão semanal em si (que já aconteceu antes disto), e
-    _estimar_e_publicar_card já ignora sozinha cards que já têm estimativa."""
+    publicação da sugestão semanal em si, e _estimar_e_publicar_card já
+    ignora sozinha cards que já têm estimativa (mas devolve os minutos na
+    mesma, ver lá).
+
+    Devolve {recording_id: minutos}, para a proposta de agendamento (ver
+    _construir_texto_proposta_agendamento) — cards sem estimativa
+    calculável (falha na extração ou ao publicar) ficam de fora deste
+    dict, nunca com um valor inventado."""
+    minutos_por_id = {}
     for item in itens_prontos:
         try:
-            estimativa_montagem._estimar_e_publicar_card(item, logistica.PROJETO_ENTREGAS)
+            resultado = estimativa_montagem._estimar_e_publicar_card(item, logistica.PROJETO_ENTREGAS)
         except Exception as e:
             print(f"[sugestao_logistica_semanal] falhou a estimativa de montagem de {item.get('id')}: {e!r}")
+            continue
+        if resultado:
+            minutos_por_id[item["id"]] = resultado["minutos"]
+    return minutos_por_id
+
+def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por_id: dict, inicio_semana: date) -> str:
+    """Constrói, em Python (nunca pedido ao modelo — datas/horas não se
+    confiam à IA), a proposta de agendamento: um dia útil consecutivo por
+    região com entregas prontas (a partir de `inicio_semana`), e dentro de
+    cada dia, a hora de chegada/saída de cada entrega — calculadas a
+    partir do trajeto real (Google Directions API, ver
+    tools.logistica.plano_trajeto) e do tempo de montagem já estimado
+    (ver tools.agendamento_logistica.calcular_horario_dia).
+
+    Pedido explícito do Rui (2026-07-28): esta é só a PROPOSTA — a Alma
+    nunca cria eventos no calendário sozinha a partir disto; só depois de
+    a Conceição ou a Isa confirmarem (com ou sem ajustes) é que
+    criar_eventos_calendario_entregas (ver agents/agendamento_entregas.py)
+    é chamada, com os valores finais tal como confirmados na conversa.
+
+    Entregas sem morada, ou cujo tempo de montagem ainda não foi
+    calculado, ficam de fora da proposta e são sinalizadas para inclusão
+    manual — nunca com um horário inventado. Se uma região não couber
+    dentro do turno normal, sinaliza isso claramente em vez de decidir
+    sozinha como dividir por mais dias (ver tools/agendamento_logistica.py).
+
+    Devolve "" se não houver nenhuma entrega com morada e tempo de
+    montagem disponíveis em região nenhuma."""
+    blocos = []
+    indice_dia = 0
+    for regiao, entregas in entregas_por_regiao.items():
+        if not entregas:
+            continue
+
+        agendaveis = [e for e in entregas if e["morada"] and e["id"] in minutos_por_id]
+        sem_morada = [e["titulo"] for e in entregas if not e["morada"]]
+        sem_estimativa = [e["titulo"] for e in entregas if e["morada"] and e["id"] not in minutos_por_id]
+
+        linhas = []
+        if agendaveis:
+            moradas = [e["morada"] for e in agendaveis]
+            plano = logistica.plano_trajeto(moradas)
+            if plano["pernas_minutos"] is None:
+                linhas.append("Não foi possível calcular o trajeto real desta região "
+                              "(sem dados da Google Directions API) — sem proposta de horário.")
+            else:
+                entregas_ordenadas = [agendaveis[i] for i in plano["ordem_indices"]]
+                paragens = [{**e, "minutos_montagem": minutos_por_id[e["id"]]} for e in entregas_ordenadas]
+                horario = agendamento_logistica.calcular_horario_dia(paragens, plano["pernas_minutos"])
+                dia = agendamento_logistica.proximo_dia_util(inicio_semana, indice_dia)
+                indice_dia += 1
+
+                linhas.append(f"**{dia.strftime('%d/%m/%Y (%A)')}**")
+                for paragem in horario["paragens"]:
+                    linhas.append(f"- {paragem['chegada']}–{paragem['saida']}: **{paragem['titulo']}** "
+                                  f"— {paragem['cliente'] or '(cliente não identificado)'}, "
+                                  f"{paragem['morada']}"
+                                  + (f" ({paragem['produtos_encomendados']})" if paragem.get("produtos_encomendados") else ""))
+                linhas.append(f"- Regresso ao armazém estimado: {horario['regresso']}")
+                if not horario["cabe_no_turno_normal"]:
+                    linhas.append(f"  - ⚠️ ultrapassa o turno normal (17:30) — a logística tem de decidir "
+                                  "manualmente que paragem(ns) passar para outro dia (as horas extra são a "
+                                  "margem para o imprevisto, não para planear)")
+
+        if sem_morada:
+            linhas.append("⚠️ Sem morada identificada, fora da proposta: " + ", ".join(sem_morada))
+        if sem_estimativa:
+            linhas.append("⚠️ Sem tempo de montagem calculado ainda, fora da proposta: " + ", ".join(sem_estimativa))
+
+        if linhas:
+            blocos.append(f"#### {regiao}\n" + "\n".join(linhas))
+
+    if not blocos:
+        return ""
+    return ("\n\n---\n\n### Proposta de agendamento\n\n" + "\n\n".join(blocos) +
+            "\n\nEsta é só uma proposta — depois de validada/ajustada pela Conceição ou pela Isa, "
+            "pede à Alma para criar os eventos no calendário do projeto Entregas com os dados finais.")
 
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
-    cards prontos a entregar (ver _cards_prontos_a_entregar), gera o
-    texto de organização da semana e um trajeto de Google Maps por
-    região (ver _texto_trajetos_google_maps), publica tudo junto no
-    Mural "Programação", dirigido à Conceição Costa, e depois publica a
+    cards prontos a entregar (ver _cards_prontos_a_entregar), publica a
     estimativa de tempo de montagem em cada card novo (ver
-    _publicar_estimativas_montagem). Pensado para correr às segundas de
-    manhã (agendado), mas pode ser disparado manualmente."""
+    _publicar_estimativas_montagem — feito sempre, em toda corrida, seja
+    agendada ou disparada manualmente), gera o texto de organização da
+    semana, um trajeto de Google Maps por região (ver
+    _texto_trajetos_google_maps) e uma proposta de agendamento (dia/hora
+    por entrega, ver _construir_texto_proposta_agendamento), e publica
+    tudo junto no Mural "Programação", dirigido à Conceição Costa.
+    Pensado para correr às segundas de manhã (agendado), mas pode ser
+    disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
 
     try:
         try:
-            cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos = _cards_prontos_a_entregar()
+            cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos, entregas_por_regiao = _cards_prontos_a_entregar()
         except Exception as e:
             print(f"[sugestao_logistica_semanal] não foi possível obter os cards do Basecamp: {e!r}")
             return {"erro": str(e)}
+
+        minutos_por_id = _publicar_estimativas_montagem(itens_prontos)
 
         try:
             documentos_texto = _formatar_documentos_referencia(documentos_referencia.documentos_referencia_empresa())
@@ -336,10 +447,9 @@ def correr_sugestao_semanal_logistica() -> dict:
         inicio_semana, fim_semana = _semana_atual()
         texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana, documentos_texto)
         texto += _texto_trajetos_google_maps(moradas_por_regiao)
+        texto += _construir_texto_proposta_agendamento(entregas_por_regiao, minutos_por_id, inicio_semana)
         texto += _texto_nao_confirmados(nao_confirmados)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
-
-        _publicar_estimativas_montagem(itens_prontos)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
         total_prontos = sum(contagens.values())
@@ -360,7 +470,7 @@ def trajetos_logistica_entregas() -> dict:
     prontos a entregar (ver _cards_prontos_a_entregar), para nunca haver
     duas versões a divergir. Não publica estimativas de montagem (isso só
     acontece no ciclo semanal, ver _publicar_estimativas_montagem)."""
-    cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos = _cards_prontos_a_entregar()
+    cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos, _entregas_por_regiao = _cards_prontos_a_entregar()
     trajetos = {}
     parametros = db.obter_parametros_estimativa()
     for regiao, moradas in moradas_por_regiao.items():

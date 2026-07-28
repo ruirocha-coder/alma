@@ -1,5 +1,6 @@
 import anthropic, json, threading
 from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos, documentos_gerados
+from agents import agendamento_entregas
 import db
 
 # entre rondas de tool-use (ex: a consultar o Basecamp, que pode demorar
@@ -132,6 +133,30 @@ TOOLS_MEMORIA = [
                 "valor": {"type": "number"}
             },
             "required": ["nome", "valor"]
+        }
+    },
+    {
+        "name": "criar_eventos_calendario_entregas",
+        "description": "Cria eventos reais na Agenda (calendário) do projeto \"Entregas\" no Basecamp, um por entrega — usa isto SÓ depois de a Conceição ou a Isa confirmarem explicitamente a proposta de agendamento (a que vem no fim da sugestão semanal de logística, ou discutida na conversa), com ou sem ajustes pedidos antes. NUNCA chames isto só com base na proposta inicial sem confirmação explícita, e nunca inventes data/hora que não tenham sido mesmo confirmadas na conversa. Cada evento precisa de título, data (AAAA-MM-DD), hora de início e hora de fim (HH:MM) — usa a morada/cliente/produtos como descrição, para a equipa de entrega ter tudo o que precisa ao consultar o calendário. Só quem está autorizado consegue usar esta ferramenta.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "eventos": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "titulo": {"type": "string"},
+                            "data": {"type": "string", "description": "AAAA-MM-DD"},
+                            "hora_inicio": {"type": "string", "description": "HH:MM"},
+                            "hora_fim": {"type": "string", "description": "HH:MM"},
+                            "descricao": {"type": "string", "description": "cliente, morada, produtos encomendados, e qualquer nota relevante para a equipa de entrega"}
+                        },
+                        "required": ["titulo", "data", "hora_inicio", "hora_fim"]
+                    }
+                }
+            },
+            "required": ["eventos"]
         }
     }
 ]
@@ -274,6 +299,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
             utilizador, nome, empresa),
         "atualizar_parametro_estimativa": lambda nome, valor: _atualizar_parametro_estimativa_restrito(
             utilizador, nome, valor),
+        "criar_eventos_calendario_entregas": lambda eventos: agendamento_entregas.criar_eventos_calendario_entregas_restrito(
+            utilizador, eventos),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
