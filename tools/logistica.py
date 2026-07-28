@@ -287,15 +287,18 @@ LIMITE_PARAGENS_GOOGLE_MAPS = 23
 # não rebenta — publica o trajeto na ordem original, tal como antes.
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 
-def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
-    """Chama a Google Directions API para calcular a ordem ótima das
-    `moradas` (ida e volta a partir de `origem`). Devolve `moradas` na
-    ordem ótima, ou inalterada (mesma ordem de entrada) se não houver
-    chave configurada, se houver menos de 2 paragens (nada a otimizar),
-    ou se a chamada falhar por qualquer razão — nunca deixa a rota por
-    publicar só por causa disto."""
+def _info_trajeto(origem: str, moradas: list[str]) -> dict:
+    """Chama a Google Directions API uma única vez para calcular a ordem
+    ótima das `moradas` (ida e volta a partir de `origem`) E os totais reais
+    de distância/duração da mesma resposta — usados depois para o custo de
+    deslocação (ver tools.tempos_montagem.custo_deslocacao), sem precisar de
+    nenhuma chamada extra. Devolve {"ordem": moradas (otimizada ou
+    inalterada), "km": float|None, "duracao_min": float|None} — None nos
+    totais sempre que não houver chave configurada, menos de 2 paragens, ou
+    a chamada falhar por qualquer razão (nunca deixa a rota por publicar só
+    por causa disto)."""
     if not GOOGLE_MAPS_API_KEY or len(moradas) < 2:
-        return moradas
+        return {"ordem": moradas, "km": None, "duracao_min": None}
     try:
         resposta = httpx.get(
             "https://maps.googleapis.com/maps/api/directions/json",
@@ -309,11 +312,33 @@ def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
         )
         dados = resposta.json()
         if dados.get("status") != "OK":
-            return moradas
-        ordem = dados["routes"][0]["waypoint_order"]
-        return [moradas[i] for i in ordem]
+            return {"ordem": moradas, "km": None, "duracao_min": None}
+        rota = dados["routes"][0]
+        pernas = rota.get("legs") or []
+        km_total = sum(p["distance"]["value"] for p in pernas) / 1000
+        duracao_total_min = sum(p["duration"]["value"] for p in pernas) / 60
+        ordem = rota["waypoint_order"]
+        return {"ordem": [moradas[i] for i in ordem], "km": km_total, "duracao_min": duracao_total_min}
     except Exception:
-        return moradas
+        return {"ordem": moradas, "km": None, "duracao_min": None}
+
+def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
+    """Como antes: só a ordem ótima das moradas (ver _info_trajeto para os
+    totais de km/duração, usados pelo custo de deslocação)."""
+    return _info_trajeto(origem, moradas)["ordem"]
+
+def metricas_trajeto(moradas: list[str], origem: str = MORADA_ARMAZEM) -> dict:
+    """Totais REAIS de distância (km) e duração (minutos) do trajeto de ida
+    e volta a `origem` passando por `moradas` — pedido do Rui (2026-07-28)
+    para calcular o custo de deslocação com dados reais da Google Directions
+    API, em vez da tabela fixa de zonas do "Procedimento Tempos de Montagem
+    para Logística" (mais preciso, e usa a mesma chamada já feita para
+    otimizar a ordem das paragens, sem custo extra). Devolve {"km": None,
+    "duracao_min": None} sempre que não for possível calcular (sem chave,
+    menos de 2 paragens, ou falha da chamada) — quem usar isto tem de lidar
+    com esse caso, nunca inventar um custo sem dados reais."""
+    info = _info_trajeto(origem, [m for m in moradas if m and m.strip()])
+    return {"km": info["km"], "duracao_min": info["duracao_min"]}
 
 def _morada_reconhecida(morada: str, origem: str = MORADA_ARMAZEM) -> bool:
     """Verifica se `morada` é reconhecida pelo Google Maps — usando a

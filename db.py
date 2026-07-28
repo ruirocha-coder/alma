@@ -95,6 +95,58 @@ CREATE TABLE IF NOT EXISTS documentos_gerados (
     pdf BYTEA NOT NULL,             -- guardado em Postgres, não em disco (Railway não persiste disco entre deploys)
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+-- parâmetros numéricos do "Procedimento Tempos de Montagem para Logística"
+-- (projeto Alma Data) — ver tools/tempos_montagem.py. Guardados em DB, não
+-- hardcoded, precisamente para poderem ser calibrados de 2 em 2 meses (ver
+-- agents/estimativa_montagem.py) sem precisar de alteração de código.
+CREATE TABLE IF NOT EXISTS parametros_estimativa (
+    chave TEXT PRIMARY KEY,
+    valor NUMERIC NOT NULL,
+    atualizado_em TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS estimativas_montagem (
+    recording_id BIGINT PRIMARY KEY,
+    titulo TEXT,
+    url_api TEXT,                  -- para reler o registo depois (nunca reconstruído à mão)
+    comments_url TEXT,              -- para ler comentários e encontrar o "Real" depois da entrega
+    publicado_em TIMESTAMPTZ DEFAULT now(),
+    estimativa_minutos NUMERIC,
+    valor_encomenda NUMERIC,
+    decomposicao JSONB,
+    confianca TEXT,
+    real_minutos NUMERIC,
+    real_pessoas INTEGER,
+    real_ocorrencias TEXT,
+    real_registado_em TIMESTAMPTZ,
+    calibrado BOOLEAN NOT NULL DEFAULT false
+);
+"""
+
+# valores exatamente os do "Procedimento Tempos de Montagem para Logística"
+# (Rui/documento, 2026-07-28) — ON CONFLICT DO NOTHING para nunca sobrescrever
+# um valor já calibrado manualmente com o valor de origem do documento.
+SEED_PARAMETROS_ESTIMATIVA = """
+INSERT INTO parametros_estimativa (chave, valor) VALUES
+    ('minutos_ligeiro', 10),
+    ('minutos_normal', 30),
+    ('minutos_pesado', 75),
+    ('acrescimo_fixa_parede_min', 40),
+    ('acrescimo_candeeiro_teto_min', 30),
+    ('acrescimo_desmontado_inesperado_min', 45),
+    ('fixo_paragem_min', 40),
+    ('fator_equipa_3_pessoas', 0.75),
+    ('valor_dia_referencia_eur', 15000),
+    ('banda_baixa_eur_hora', 800),
+    ('banda_alta_eur_hora', 4000),
+    ('fator_sem_elevador', 1.4),
+    ('fator_obra', 1.3),
+    ('fator_centro_historico', 1.2),
+    ('custo_km_combustivel_eur', 0.23),
+    ('custo_km_manutencao_eur', 0.12),
+    ('custo_hora_pessoa_eur', 15)
+ON CONFLICT (chave) DO NOTHING;
 """
 
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
@@ -148,6 +200,7 @@ def inicializar_schema():
             cur.execute(SCHEMA)
             cur.execute(MIGRACOES)
             cur.execute(MIGRACAO_CLIENTE_RESUMO_NULAVEL)
+            cur.execute(SEED_PARAMETROS_ESTIMATIVA)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
@@ -438,6 +491,94 @@ def logistica_registar_alerta(recording_id: int, condicao: str):
                    VALUES (%s, %s, now())
                    ON CONFLICT (recording_id, condicao) DO UPDATE SET criado_em = now()""",
                 (recording_id, condicao)
+            )
+        conn.commit()
+
+def obter_parametros_estimativa() -> dict:
+    """Todos os parâmetros do procedimento de tempos de montagem, chave →
+    valor numérico (float) — ver tools/tempos_montagem.py para o uso."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT chave, valor FROM parametros_estimativa")
+            return {linha["chave"]: float(linha["valor"]) for linha in cur.fetchall()}
+
+def atualizar_parametro_estimativa(chave: str, valor: float) -> dict:
+    """Atualiza um parâmetro já existente — nunca cria uma chave nova (evita
+    um erro de digitação a criar um parâmetro solto que nunca é lido por
+    nada); ver agents/base.py para a restrição de quem pode chamar isto."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE parametros_estimativa SET valor = %s, atualizado_em = now()
+                   WHERE chave = %s""",
+                (valor, chave)
+            )
+            if cur.rowcount == 0:
+                return {"erro": f"parâmetro desconhecido: {chave!r}"}
+        conn.commit()
+        return {"chave": chave, "novo_valor": valor}
+
+def estimativa_existente(recording_id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM estimativas_montagem WHERE recording_id = %s", (recording_id,))
+            return cur.fetchone()
+
+def registar_estimativa_montagem(recording_id: int, titulo: str, url_api: str, comments_url: str,
+                                 estimativa_minutos: float, valor_encomenda: float,
+                                 decomposicao: dict, confianca: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO estimativas_montagem
+                   (recording_id, titulo, url_api, comments_url, estimativa_minutos, valor_encomenda,
+                    decomposicao, confianca)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (recording_id) DO NOTHING""",
+                (recording_id, titulo, url_api, comments_url, estimativa_minutos, valor_encomenda,
+                 Json(decomposicao), confianca)
+            )
+        conn.commit()
+
+def marcar_real_estimativa(recording_id: int, real_minutos: float, real_pessoas: int, real_ocorrencias: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE estimativas_montagem
+                   SET real_minutos = %s, real_pessoas = %s, real_ocorrencias = %s,
+                       real_registado_em = now()
+                   WHERE recording_id = %s""",
+                (real_minutos, real_pessoas, real_ocorrencias, recording_id)
+            )
+        conn.commit()
+
+def estimativas_aguardando_real() -> list:
+    """Estimativas já publicadas cuja entrega ainda não foi confirmada como
+    concluída (sem "Real" registado) — ver
+    agents.estimativa_montagem.verificar_entregas_concluidas_e_ler_real."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM estimativas_montagem WHERE real_registado_em IS NULL")
+            return cur.fetchall()
+
+def estimativas_por_calibrar() -> list:
+    """Estimativas com "Real" já registado mas ainda não incluídas em nenhum
+    relatório de calibração — ver agents.estimativa_montagem.correr_calibracao_estimativa."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM estimativas_montagem WHERE real_registado_em IS NOT NULL AND calibrado = false"
+            )
+            return cur.fetchall()
+
+def marcar_calibrado(recording_ids: list):
+    if not recording_ids:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE estimativas_montagem SET calibrado = true WHERE recording_id = ANY(%s)",
+                (recording_ids,)
             )
         conn.commit()
 
