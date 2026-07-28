@@ -294,10 +294,17 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
     deslocação (ver tools.tempos_montagem.custo_deslocacao), sem precisar de
     nenhuma chamada extra. Devolve {"ordem": moradas (otimizada ou
     inalterada), "km": float|None, "duracao_min": float|None} — None nos
-    totais sempre que não houver chave configurada, menos de 2 paragens, ou
-    a chamada falhar por qualquer razão (nunca deixa a rota por publicar só
-    por causa disto)."""
-    if not GOOGLE_MAPS_API_KEY or len(moradas) < 2:
+    totais sempre que não houver chave configurada, nenhuma morada, ou a
+    chamada falhar por qualquer razão (nunca deixa a rota por publicar só
+    por causa disto).
+
+    Chama a API mesmo com uma única morada — bug real corrigido
+    (2026-07-28): com só 1 paragem não há nada a otimizar em termos de
+    ordem, mas a viagem de ida e volta a essa morada continua a ter uma
+    distância/duração reais e computáveis; saltar a chamada nesse caso
+    fazia o custo de deslocação ficar sempre em falta exatamente no caso
+    mais comum (uma só entrega pronta numa região nessa semana)."""
+    if not GOOGLE_MAPS_API_KEY or not moradas:
         return {"ordem": moradas, "km": None, "duracao_min": None}
     try:
         resposta = httpx.get(
@@ -317,7 +324,7 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
         pernas = rota.get("legs") or []
         km_total = sum(p["distance"]["value"] for p in pernas) / 1000
         duracao_total_min = sum(p["duration"]["value"] for p in pernas) / 60
-        ordem = rota["waypoint_order"]
+        ordem = rota.get("waypoint_order") or list(range(len(moradas)))
         return {"ordem": [moradas[i] for i in ordem], "km": km_total, "duracao_min": duracao_total_min}
     except Exception:
         return {"ordem": moradas, "km": None, "duracao_min": None}
