@@ -562,17 +562,16 @@ MURAL_BOARD_ID = 85747247
 
 def _resolver_mural(projeto: str) -> tuple:
     """Descobre o bucket_id e o id do Mural (message_board) de um projeto
-    pelo nome — usado para publicar no mural de projetos que não sejam a
-    Gestão (ex: o mural próprio da Ecos Largos, só visível à equipa deles)."""
-    termo = projeto.lower().strip()
-    for p in listar_projetos():
-        if termo not in p["name"].lower():
-            continue
-        for ferramenta in p.get("dock", []):
-            if ferramenta.get("name") == "message_board" and ferramenta.get("enabled"):
-                return p["id"], ferramenta["id"]
-        raise ValueError(f"o projeto {p['name']!r} não tem Mural (message board) ativado")
-    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    pelo nome (ver _encontrar_projeto) — usado para publicar no mural de
+    projetos que não sejam a Gestão (ex: o mural próprio da Ecos Largos,
+    só visível à equipa deles)."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    for ferramenta in p.get("dock", []):
+        if ferramenta.get("name") == "message_board" and ferramenta.get("enabled"):
+            return p["id"], ferramenta["id"]
+    raise ValueError(f"o projeto {p['name']!r} não tem Mural (message board) ativado")
 
 def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
     """Publica uma mensagem no Mural de um projeto (visível a quem tem
@@ -632,18 +631,17 @@ def ler_mensagem_mural(url: str) -> dict:
 
 def _resolver_vault(projeto: str) -> tuple:
     """Descobre o bucket_id e o id do Vault (Docs & Files) de um projeto
-    pelo nome — tal como _resolver_mural, mas para o Vault em vez do
-    Mural. Usado para criar um documento novo e permanente num projeto
-    (ex: o resumo anual de avaliações de cargas de toros da Ecos Largos)."""
-    termo = projeto.lower().strip()
-    for p in listar_projetos():
-        if termo not in p["name"].lower():
-            continue
-        for ferramenta in p.get("dock", []):
-            if ferramenta.get("name") == "vault" and ferramenta.get("enabled"):
-                return p["id"], ferramenta["id"]
-        raise ValueError(f"o projeto {p['name']!r} não tem Docs & Files (vault) ativado")
-    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    pelo nome (ver _encontrar_projeto) — tal como _resolver_mural, mas
+    para o Vault em vez do Mural. Usado para criar um documento novo e
+    permanente num projeto (ex: o resumo anual de avaliações de cargas
+    de toros da Ecos Largos)."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    for ferramenta in p.get("dock", []):
+        if ferramenta.get("name") == "vault" and ferramenta.get("enabled"):
+            return p["id"], ferramenta["id"]
+    raise ValueError(f"o projeto {p['name']!r} não tem Docs & Files (vault) ativado")
 
 def criar_documento(titulo: str, conteudo: str, projeto: str) -> dict:
     """Cria um novo Documento no Vault (Docs & Files) de um projeto do
@@ -661,19 +659,18 @@ def criar_documento(titulo: str, conteudo: str, projeto: str) -> dict:
 
 def _resolver_schedule(projeto: str) -> tuple:
     """Descobre o bucket_id e o id da Agenda (Schedule) de um projeto pelo
-    nome — tal como _resolver_mural/_resolver_vault. Confirmado ao vivo
-    (2026-07-28, contra a API real do Basecamp) que o projeto "Entregas"
-    já tem a Agenda ativada (dock "schedule")."""
-    termo = projeto.lower().strip()
-    for p in listar_projetos():
-        if termo not in p["name"].lower():
-            continue
-        for ferramenta in p.get("dock", []):
-            if ferramenta.get("name") == "schedule" and ferramenta.get("enabled"):
-                return p["id"], ferramenta["id"]
-        raise ValueError(f"o projeto {p['name']!r} não tem Agenda (Schedule) ativada — "
-                        "ativa-a nas definições do projeto no Basecamp antes de criar eventos")
-    raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    nome (ver _encontrar_projeto) — tal como _resolver_mural/
+    _resolver_vault. Confirmado ao vivo (2026-07-28, contra a API real do
+    Basecamp) que o projeto "Entregas" já tem a Agenda ativada (dock
+    "schedule")."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    for ferramenta in p.get("dock", []):
+        if ferramenta.get("name") == "schedule" and ferramenta.get("enabled"):
+            return p["id"], ferramenta["id"]
+    raise ValueError(f"o projeto {p['name']!r} não tem Agenda (Schedule) ativada — "
+                    "ativa-a nas definições do projeto no Basecamp antes de criar eventos")
 
 def criar_evento_calendario(titulo: str, inicio_iso: str, fim_iso: str,
                             descricao: str = "", projeto: str = "Entregas") -> dict:
@@ -720,21 +717,53 @@ def meu_perfil() -> dict:
 def listar_projetos() -> list[dict]:
     return _get_paginado(f"{_base_url()}/projects.json")
 
+def _encontrar_projeto(nome: str) -> dict:
+    """Encontra um projeto do Basecamp pelo nome — usado por
+    pessoas_projeto/_resolver_mural/_resolver_vault/_resolver_schedule,
+    para nunca haver duas versões desta lógica a divergir.
+
+    Bug real reportado em produção (2026-07-29): a correspondência era só
+    por substring ("termo in p['name'].lower()"), sem preferência
+    nenhuma por uma correspondência exata — se houver mais do que um
+    projeto cujo nome contenha o termo (ex: um projeto arquivado ou
+    duplicado com nome parecido), o primeiro da lista (ordem arbitrária
+    da API) era escolhido sempre, mesmo sendo o projeto errado.
+    Confirmado ao vivo: a busca por "Marketing Interior Guider" resolveu
+    para um bucket_id que devolvia 404 em /people.json — sinal claro de
+    que não era o projeto certo, e por isso NENHUMA menção (nem
+    "@Beatriz Barbosa", nem "@Rui Rocha", ambas escritas corretamente com
+    "@") conseguia resolver-se.
+
+    Tenta sempre primeiro uma correspondência EXATA (sem acentuação/
+    maiúsculas); só cai para substring se não houver nenhuma exata, para
+    continuar a tolerar pedidos parciais legítimos. Devolve None se não
+    encontrar nenhum projeto."""
+    termo = nome.lower().strip()
+    projetos = listar_projetos()
+    for p in projetos:
+        if p["name"].strip().lower() == termo:
+            return p
+    for p in projetos:
+        if termo in p["name"].lower():
+            return p
+    return None
+
 TTL_PESSOAS_PROJETO = 3600  # 1h — a equipa de um projeto não muda de hora a hora
 
 def pessoas_projeto(projeto: str) -> list[dict]:
-    """Pessoas com acesso a um projeto específico do Basecamp (pelo nome) —
-    usado para a Alma saber automaticamente quem pertence a que equipa (ex:
-    Ecos Largos, uma equipa parceira gerida no mesmo Basecamp mas à parte da
-    Interior Guider), sem precisar de uma lista de nomes fixa no código."""
+    """Pessoas com acesso a um projeto específico do Basecamp (pelo nome,
+    ver _encontrar_projeto) — usado para a Alma saber automaticamente
+    quem pertence a que equipa (ex: Ecos Largos, uma equipa parceira
+    gerida no mesmo Basecamp mas à parte da Interior Guider), sem
+    precisar de uma lista de nomes fixa no código, e para resolver
+    menções "@Nome" (ver _resolver_mencoes)."""
     chave = f"pessoas_{projeto.lower().strip()}"
     if chave in _cache:
         ts, pessoas = _cache[chave]
         if time.time() - ts < TTL_PESSOAS_PROJETO:
             return pessoas
-    termo = projeto.lower().strip()
-    encontrados = [p for p in listar_projetos() if termo in p["name"].lower()]
-    pessoas = _get_paginado(f"{_base_url()}/buckets/{encontrados[0]['id']}/people.json") if encontrados else []
+    p = _encontrar_projeto(projeto)
+    pessoas = _get_paginado(f"{_base_url()}/buckets/{p['id']}/people.json") if p else []
     _cache[chave] = (time.time(), pessoas)
     return pessoas
 
