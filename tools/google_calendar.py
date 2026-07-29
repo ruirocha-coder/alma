@@ -17,6 +17,12 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 EVENTOS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendario_id}/events"
 SCOPE = "https://www.googleapis.com/auth/calendar"
 
+# colorId dos eventos do Google Calendar (paleta fixa da API, 1-11 — sem
+# suporte a cor arbitrária/hex): "Peacock" é o azul, pedido do Rui
+# (2026-07-29) para os eventos de deslocação ("Viagem: X -> Y") se
+# distinguirem visualmente dos de entrega no calendário.
+COR_AZUL_VIAGEM = "7"
+
 _cache = {}
 
 
@@ -61,32 +67,35 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {_access_token()}", "Content-Type": "application/json"}
 
 
-def _corpo_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str) -> dict:
+def _corpo_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str, cor_id: str = None) -> dict:
     # inicio_iso/fim_iso já vêm com o fuso horário incluído (ver
     # tools.agendamento_logistica.horario_para_iso) — o Calendar API aceita
     # "dateTime" em RFC3339 com offset diretamente, sem "timeZone" à parte.
-    return {
+    corpo = {
         "summary": titulo,
         "description": descricao or "",
         "start": {"dateTime": inicio_iso},
         "end": {"dateTime": fim_iso},
     }
+    if cor_id:
+        corpo["colorId"] = cor_id
+    return corpo
 
 
-def criar_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str = "") -> dict:
+def criar_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str = "", cor_id: str = None) -> dict:
     r = httpx.post(
         EVENTOS_URL.format(calendario_id=_calendario_id()),
-        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao), timeout=30,
+        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id), timeout=30,
     )
     r.raise_for_status()
     return r.json()
 
 
 def atualizar_evento(google_event_id: str, titulo: str, inicio_iso: str, fim_iso: str,
-                     descricao: str = "") -> dict:
+                     descricao: str = "", cor_id: str = None) -> dict:
     r = httpx.patch(
         f"{EVENTOS_URL.format(calendario_id=_calendario_id())}/{google_event_id}",
-        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao), timeout=30,
+        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id), timeout=30,
     )
     r.raise_for_status()
     return r.json()
