@@ -28,17 +28,40 @@
 # - mapeamento sem entrada correspondente no Basecamp -> a entrada foi
 #   apagada (Basecamp deixa simplesmente de a listar como ativa) -> apaga
 #   o evento no Google Calendar e remove o mapeamento.
+#
+# Bug real, encontrado ao testar ao vivo (2026-07-29) contra a conta real:
+# a Agenda do projeto Entregas tem 1180 entradas ativas, algumas desde
+# 2016 — sem filtro, o primeiro ciclo de sincronização criaria 1180
+# eventos históricos de uma só vez no Google Calendar. JANELA_DIAS_PASSADO
+# faz com que só entradas recentes/futuras sejam candidatas a CRIAR pela
+# primeira vez; história antiga, nunca antes sincronizada, fica de fora
+# para sempre (nunca ganha mapeamento, por isso nunca é reavaliada). Uma
+# entrada já mapeada continua a ser verificada para atualização/eliminação
+# independentemente da idade — só a criação inicial é filtrada por data.
 import threading
+from datetime import date, timedelta
 from tools import basecamp, google_calendar
 import db
 
 _a_correr = threading.Lock()
 
 PROJETO_ENTREGAS = "Entregas"
+JANELA_DIAS_PASSADO = 7
 
 
 def _estado_atual(entrada: dict) -> tuple:
     return (entrada.get("summary") or "", entrada.get("starts_at") or "", entrada.get("ends_at") or "")
+
+
+def _dentro_da_janela_de_sincronizacao(entrada: dict, hoje: date) -> bool:
+    inicio = entrada.get("starts_at")
+    if not inicio:
+        return True  # sem data — não há forma de filtrar, mais vale sincronizar do que perder a entrada
+    try:
+        data_inicio = date.fromisoformat(inicio[:10])
+    except ValueError:
+        return True
+    return data_inicio >= hoje - timedelta(days=JANELA_DIAS_PASSADO)
 
 
 def correr_sincronizacao_calendario() -> dict:
@@ -46,7 +69,10 @@ def correr_sincronizacao_calendario() -> dict:
     Basecamp (projeto Entregas), compara contra o mapeamento guardado, e
     espelha no Google Calendar tudo o que for novo, alterado ou removido.
     Sem custo evitável: se nada mudou desde o ciclo anterior, não chama o
-    Google Calendar API nenhuma vez."""
+    Google Calendar API nenhuma vez. Nunca cria no Google Calendar entradas
+    históricas nunca antes sincronizadas — só as dos últimos
+    JANELA_DIAS_PASSADO dias (ou futuras) — ver
+    _dentro_da_janela_de_sincronizacao."""
     if not _a_correr.acquire(blocking=False):
         print("[sincronizacao_calendario] já há um ciclo em curso — ignorado")
         return {"erro": "já está a correr um ciclo de sincronização"}
@@ -59,8 +85,10 @@ def correr_sincronizacao_calendario() -> dict:
 
         mapeamentos = db.mapeamentos_calendario_google()
         entradas_por_id = {e["id"]: e for e in entradas}
+        hoje = date.today()
 
         criados = atualizados = eliminados = 0
+        ignorados_historico = 0
 
         for entry_id, entrada in entradas_por_id.items():
             titulo, inicio, fim = _estado_atual(entrada)
@@ -68,6 +96,9 @@ def correr_sincronizacao_calendario() -> dict:
             mapeamento = mapeamentos.get(entry_id)
             try:
                 if mapeamento is None:
+                    if not _dentro_da_janela_de_sincronizacao(entrada, hoje):
+                        ignorados_historico += 1
+                        continue
                     evento = google_calendar.criar_evento(titulo, inicio, fim, descricao)
                     db.registar_mapeamento_calendario_google(entry_id, evento["id"], titulo, inicio, fim)
                     criados += 1
@@ -91,7 +122,8 @@ def correr_sincronizacao_calendario() -> dict:
 
         if criados or atualizados or eliminados:
             print(f"[sincronizacao_calendario] {criados} criado(s), {atualizados} atualizado(s), "
-                  f"{eliminados} eliminado(s)")
-        return {"criados": criados, "atualizados": atualizados, "eliminados": eliminados}
+                  f"{eliminados} eliminado(s), {ignorados_historico} histórico(s) ignorado(s)")
+        return {"criados": criados, "atualizados": atualizados, "eliminados": eliminados,
+                "ignorados_historico": ignorados_historico}
     finally:
         _a_correr.release()
