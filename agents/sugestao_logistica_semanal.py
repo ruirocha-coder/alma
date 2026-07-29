@@ -293,6 +293,7 @@ def _cards_prontos_a_entregar() -> tuple:
         entregas_por_regiao[regiao].append({
             "id": item["id"], "titulo": titulo, "morada": dados.get("morada"),
             "cliente": dados.get("cliente"), "produtos_encomendados": dados.get("produtos_encomendados"),
+            "data_entrada_armazem": dados.get("data_entrada_armazem"),
         })
 
     if cortados_pelo_limite:
@@ -429,6 +430,32 @@ def _publicar_estimativas_montagem(itens_prontos: list, textos_pdf_por_id: dict 
                                               "rendimento": resultado.get("rendimento") or {"euros_hora": None, "banda": None}}
     return estimativas_por_id
 
+# dia fixo da semana por região, pedido explícito do documento "GESTÃO
+# DAS AGENDAS" (projeto Alma Data, lido em 2026-07-29): substitui o dia
+# útil sequencial por um dia fixo, sempre o mesmo todas as semanas.
+# 0=segunda ... 6=domingo (ver date.weekday()). "Outro" não está neste
+# documento — continua a usar o dia útil sequencial de sempre (ver
+# agendamento_logistica.proximo_dia_util), tal como antes desta mudança.
+# "Vigo (ES)" também está no documento, com as mesmas regras do Porto,
+# mas fica de fora por agora (pedido do Rui, 2026-07-29): ainda não há
+# forma de identificar os cards de Vigo no quadro Kanban do Basecamp
+# (sem coluna própria, só referências antigas em to-dos já concluídos)
+# — a acrescentar aqui quando existir um sinal claro.
+DIA_SEMANA_FIXO_POR_REGIAO = {"Lisboa": 3, "Porto": 1}  # Lisboa: 5ª feira; Porto: 3ª feira
+
+def _prazo_armazem_semana(regiao: str, inicio_semana: date):
+    """Data limite (inclusive) para uma encomenda estar pronta em
+    armazém para entrar na agenda da semana que começa em
+    `inicio_semana` (uma segunda-feira) — regra do documento "GESTÃO DAS
+    AGENDAS": Lisboa, até 2ª feira da própria semana (N); Porto, até 6ª
+    feira da semana anterior (N-1). Devolve None para uma região sem
+    prazo definido no documento (ex: "Outro"), sem filtro nenhum."""
+    if regiao == "Lisboa":
+        return inicio_semana  # 2ª feira da semana N
+    if regiao == "Porto":
+        return inicio_semana - timedelta(days=3)  # 6ª feira da semana N-1
+    return None
+
 def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_id: dict,
                                      moradas_reconhecidas_por_regiao: dict, inicio_semana: date) -> dict:
     """Calcula, uma única vez por região, tudo o que a proposta de
@@ -442,15 +469,24 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
     Entregas sem morada, cuja morada não é reconhecida pelo Google Maps
     (ver _separar_moradas_por_regiao — nunca entram no cálculo do
     trajeto, para uma só morada má não fazer perder a proposta da região
-    inteira), ou cujo tempo de montagem ainda não foi calculado, ficam de
-    fora e são devolvidas à parte, para serem sinalizadas para inclusão
-    manual — nunca com um horário inventado.
+    inteira), cujo tempo de montagem ainda não foi calculado, ou que
+    ainda não estavam prontas em armazém dentro do prazo desta semana
+    (ver _prazo_armazem_semana — ficam para a semana seguinte,
+    naturalmente, sem nenhuma ação extra: o prazo avança 7 dias a cada
+    corrida), ficam de fora e são devolvidas à parte, para serem
+    sinalizadas para inclusão manual — nunca com um horário inventado.
+
+    O dia da semana usado é o fixo do documento "GESTÃO DAS AGENDAS"
+    quando a região o tiver (ver DIA_SEMANA_FIXO_POR_REGIAO); as
+    restantes regiões (ex: "Outro") continuam com o próximo dia útil
+    sequencial, tal como sempre.
 
     Devolve {regiao: {"dia": date|None, "horario": dict|None (ver
     calcular_horario_dia — None se não houver entregas agendáveis, ou se
     o trajeto real não puder ser calculado), "sem_morada": [titulos],
-    "sem_morada_reconhecida": [titulos], "sem_estimativa": [titulos]}} —
-    só para regiões com pelo menos uma entrega pronta a entregar."""
+    "sem_morada_reconhecida": [titulos], "sem_estimativa": [titulos],
+    "fora_do_prazo": [titulos]}} — só para regiões com pelo menos uma
+    entrega pronta a entregar."""
     resultado = {}
     indice_dia = 0
     for regiao, entregas in entregas_por_regiao.items():
@@ -458,12 +494,22 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
             continue
 
         moradas_reconhecidas = moradas_reconhecidas_por_regiao.get(regiao) or []
-        agendaveis = [e for e in entregas if e["morada"] in moradas_reconhecidas and e["id"] in estimativas_por_id]
+        candidatas = [e for e in entregas if e["morada"] in moradas_reconhecidas and e["id"] in estimativas_por_id]
         sem_morada = [e["titulo"] for e in entregas if not e["morada"]]
         sem_morada_reconhecida = [e["titulo"] for e in entregas
                                   if e["morada"] and e["morada"] not in moradas_reconhecidas]
         sem_estimativa = [e["titulo"] for e in entregas
                           if e["morada"] in moradas_reconhecidas and e["id"] not in estimativas_por_id]
+
+        prazo_armazem = _prazo_armazem_semana(regiao, inicio_semana)
+        if prazo_armazem is not None:
+            agendaveis = [e for e in candidatas
+                         if e.get("data_entrada_armazem") and e["data_entrada_armazem"] <= prazo_armazem]
+            fora_do_prazo = [e["titulo"] for e in candidatas
+                            if not e.get("data_entrada_armazem") or e["data_entrada_armazem"] > prazo_armazem]
+        else:
+            agendaveis = candidatas
+            fora_do_prazo = []
 
         dia = None
         horario = None
@@ -477,12 +523,15 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
                            for e in entregas_ordenadas]
                 horario = agendamento_logistica.calcular_horario_dia(
                     paragens, plano["pernas_minutos"], plano["pernas_km"])
-                dia = agendamento_logistica.proximo_dia_util(inicio_semana, indice_dia)
-                indice_dia += 1
+                if regiao in DIA_SEMANA_FIXO_POR_REGIAO:
+                    dia = inicio_semana + timedelta(days=DIA_SEMANA_FIXO_POR_REGIAO[regiao])
+                else:
+                    dia = agendamento_logistica.proximo_dia_util(inicio_semana, indice_dia)
+                    indice_dia += 1
 
         resultado[regiao] = {"dia": dia, "horario": horario, "sem_morada": sem_morada,
                              "sem_morada_reconhecida": sem_morada_reconhecida,
-                             "sem_estimativa": sem_estimativa}
+                             "sem_estimativa": sem_estimativa, "fora_do_prazo": fora_do_prazo}
     return resultado
 
 def _construir_texto_proposta_agendamento(agendamento_por_regiao: dict) -> str:
@@ -529,6 +578,10 @@ def _construir_texto_proposta_agendamento(agendamento_por_regiao: dict) -> str:
                           + ", ".join(info["sem_morada_reconhecida"]))
         if info["sem_estimativa"]:
             linhas.append("⚠️ Sem tempo de montagem calculado ainda, fora da proposta: " + ", ".join(info["sem_estimativa"]))
+        if info["fora_do_prazo"]:
+            linhas.append("⚠️ Ainda não estava pronta em armazém dentro do prazo desta semana "
+                          "(\"GESTÃO DAS AGENDAS\") — fica para a agenda da próxima semana: "
+                          + ", ".join(info["fora_do_prazo"]))
 
         if linhas:
             blocos.append(f"#### {regiao}\n" + "\n".join(linhas))
