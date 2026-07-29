@@ -66,30 +66,56 @@ def _regiao_estrutural(item: dict):
         return None
     return _REGIAO_POR_COLUNA.get(logistica.normalizar_coluna(titulo))
 
-_MISSAO_EXTRACAO = """Extrais dados estruturados do título e das notas de um
-card do Basecamp sobre uma encomenda de mobiliário, para a equipa de
-logística da Interior Guider / Boa Safra. Responde APENAS com um objeto
-JSON, sem mais nenhum texto antes ou depois, com exatamente estas chaves:
+_MISSAO_EXTRACAO = """Extrais dados estruturados do título, das notas e
+(quando fornecido) do PDF da encomenda de um card do Basecamp sobre uma
+encomenda de mobiliário, para a equipa de logística da Interior Guider /
+Boa Safra. Responde APENAS com um objeto JSON, sem mais nenhum texto
+antes ou depois, com exatamente estas chaves:
 {"cliente": string ou null, "numero_encomenda": string ou null,
 "fornecedor": string ou null, "designer": string ou null,
 "morada": string ou null, "produtos_encomendados": string ou null,
 "data_entrada_armazem": "AAAA-MM-DD" ou null,
 "data_entrega_cliente": "AAAA-MM-DD" ou null}
 Usa null sempre que a informação não estiver mesmo presente no texto —
-nunca inventes um valor. "morada" é o endereço de entrega completo, tal
-como escrito nas notas (nunca resumido nem alterado) — usa APENAS o
-texto das notas para "morada", nunca o título nem nenhum outro texto;
-se as notas não tiverem morada nenhuma, usa null (nunca deduzas ou
-completes uma morada a partir de outra informação). "produtos_encomendados"
-resume, em poucas palavras, o que foi encomendado. As datas podem aparecer
-em qualquer formato (ex: 25/07/2026, 25-07-2026, 2026-07-25) — converte
-sempre para AAAA-MM-DD."""
+nunca inventes um valor.
 
-def _chamar_extracao_llm(titulo: str, notas: str) -> str:
+REGRA ESPECIAL E ABSOLUTA para "morada" (pedido explícito do Rui,
+2026-07-29, depois de repetidos erros de morada na sugestão de
+logística): nas notas do card tem de existir sempre um campo rotulado
+explicitamente "Morada GPS" (ou uma variação óbvia da mesma etiqueta,
+ex: "Morada GPS:", "MORADA GPS -") — é a morada verificada pela
+Conceição, à entrada do card no projeto Entregas, testada diretamente no
+Google Maps. Usa em "morada" SÓ E APENAS o texto que vem a seguir a essa
+etiqueta específica, tal como está escrito (nunca resumido nem
+alterado). Se essa etiqueta "Morada GPS" não existir nas notas — mesmo
+que outro endereço apareça noutro sítio do texto (ex: uma morada de
+faturação, ou uma morada sem essa etiqueta) — usa null, NUNCA uses esse
+outro endereço, e nunca o vás procurar no PDF, no título, ou em qualquer
+outro texto. "morada" vem sempre e só das NOTAS do card, nunca do PDF.
+
+"produtos_encomendados" resume, em poucas palavras, o que foi
+encomendado — o orçamento/PDF da encomenda, quando fornecido a seguir às
+notas, tem quase sempre a lista de produtos completa, por isso usa-o
+como fonte principal para este campo quando as notas sozinhas não
+chegarem (mas nunca uses o PDF para "morada", ver regra acima). As
+restantes chaves (cliente, número de encomenda, fornecedor, designer)
+também podem ser confirmadas ou complementadas pelo PDF, quando
+fornecido. As datas podem aparecer em qualquer formato (ex: 25/07/2026,
+25-07-2026, 2026-07-25) — converte sempre para AAAA-MM-DD."""
+
+def _chamar_extracao_llm(titulo: str, notas: str, texto_pdf: str = None) -> str:
+    conteudo = f"Título: {titulo}\n\nNotas:\n{notas or '(sem notas)'}"
+    if texto_pdf and texto_pdf.strip():
+        # o PDF/orçamento da encomenda tem quase sempre a lista de
+        # produtos completa (pedido do Rui, 2026-07-29: a leitura do PDF
+        # passa a ser obrigatória sempre que a sugestão semanal de
+        # logística corre) — nunca usado para "morada", só para
+        # produtos/dados adicionais (ver _MISSAO_EXTRACAO).
+        conteudo += f"\n\nPDF/orçamento da encomenda (nunca usar para \"morada\"):\n{texto_pdf[:15000]}"
     resposta = client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=300,
         system=_MISSAO_EXTRACAO,
-        messages=[{"role": "user", "content": f"Título: {titulo}\n\nNotas:\n{notas or '(sem notas)'}"}]
+        messages=[{"role": "user", "content": conteudo}]
     )
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
@@ -103,8 +129,15 @@ def _limpar_bloco_codigo(texto: str) -> str:
             texto = texto[:-3]
     return texto.strip()
 
-def _extrair_dados_encomenda(titulo: str, notas: str) -> dict:
-    texto = _limpar_bloco_codigo(_chamar_extracao_llm(titulo, notas))
+def _extrair_dados_encomenda(titulo: str, notas: str, texto_pdf: str = None) -> dict:
+    """`texto_pdf`, quando fornecido, é o texto do PDF/orçamento anexado ao
+    card (ver agents.estimativa_montagem._texto_pdf_encomenda) — usado só
+    para ajudar a preencher "produtos_encomendados" e os restantes campos
+    (nunca "morada", ver _MISSAO_EXTRACAO). Pedido explícito do Rui
+    (2026-07-29): a leitura do PDF passa a ser obrigatória sempre que a
+    sugestão semanal de logística corre, porque o orçamento tem quase
+    sempre a lista de produtos completa."""
+    texto = _limpar_bloco_codigo(_chamar_extracao_llm(titulo, notas, texto_pdf))
     try:
         dados = json.loads(texto)
     except ValueError:
