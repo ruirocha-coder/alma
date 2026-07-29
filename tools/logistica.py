@@ -12,6 +12,14 @@ import httpx
 
 PROJETO_ENTREGAS = "Entregas"
 
+# pedido explícito do Rui (2026-07-29): os posts no Mural do projeto
+# Entregas (sugestão semanal, avisos de agenda, calibração da estimativa)
+# notificavam, por omissão do Basecamp, toda a gente com acesso ao
+# projeto (12 pessoas) — devem notificar só a Conceição e a Isa (ver
+# tools.basecamp.publicar_mural, parâmetro notificar_apenas). Constante
+# partilhada para nunca haver dois sítios com listas diferentes.
+NOTIFICAR_APENAS_ENTREGAS = ["Conceição Costa", "Isa Moreira"]
+
 # pedido explícito do Rui (2026-07-24): este agente só pode ler cards do
 # projeto "Entregas", nunca de nenhum outro — em agents/logistica_entregas.py
 # e agents/sugestao_logistica_semanal.py, o filtro pelo bucket é sempre uma

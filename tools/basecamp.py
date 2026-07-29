@@ -605,12 +605,51 @@ def _resolver_mural(projeto: str) -> tuple:
             return p["id"], ferramenta["id"]
     raise ValueError(f"o projeto {p['name']!r} não tem Mural (message board) ativado")
 
-def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
+def _definir_subscritores(bucket_id: int, recording_id: int, projeto: str, nomes: list) -> None:
+    """Restringe quem é notificado sobre um registo do Basecamp (ex: uma
+    mensagem do Mural) exatamente às pessoas em `nomes` — por omissão o
+    Basecamp subscreve automaticamente toda a gente com acesso ao
+    projeto (bug real reportado em produção, 2026-07-29: os posts no
+    Mural do projeto Entregas notificavam as 12 pessoas do projeto,
+    quando só a Conceição e a Isa deviam ser notificadas).
+
+    Confirmado ao vivo contra a API real do Basecamp: o PUT
+    ".../subscription.json" só remove mesmo alguém da lista de
+    notificação através do campo "unsubscriptions" — o campo
+    "subscriptions" sozinho (só com quem se quer manter) NÃO substitui a
+    lista automática, mantém toda a gente (testado e confirmado: com só
+    "subscriptions", a lista continuou com as 12 pessoas). É preciso
+    mandar sempre os dois campos: "subscriptions" (quem manter) e
+    "unsubscriptions" (toda a gente com acesso ao projeto que NÃO esteja
+    em `nomes`, explicitamente).
+
+    Nomes que não corresponderem a ninguém com acesso ao projeto são
+    ignorados; nunca deixa a publicação da mensagem em si falhar por
+    causa disto (chamar isto é sempre um passo à parte, depois de criar
+    o registo)."""
+    pessoas = pessoas_projeto(projeto)
+    termos = {_normalizar(nome) for nome in nomes}
+    manter = [p["id"] for p in pessoas if _normalizar(p["name"]) in termos]
+    remover = [p["id"] for p in pessoas if p["id"] not in manter]
+    url = f"{_base_url()}/buckets/{bucket_id}/recordings/{recording_id}/subscription.json"
+    r = httpx.put(url, headers=_headers(),
+                 json={"subscriptions": manter, "unsubscriptions": remover}, timeout=30)
+    r.raise_for_status()
+
+def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão", notificar_apenas: list = None):
     """Publica uma mensagem no Mural de um projeto (visível a quem tem
     acesso a esse projeto). Por omissão, o mural da Gestão (toda a equipa da
     Interior Guider); passa `projeto` para publicar no mural de outro
     projeto (ex: "Ecos Largos"). "@Nome" na mensagem vira uma menção real
-    (notifica a pessoa) se corresponder a alguém com acesso a este projeto."""
+    (notifica a pessoa) se corresponder a alguém com acesso a este projeto.
+
+    `notificar_apenas`, quando indicado (lista de nomes completos),
+    restringe quem é NOTIFICADO sobre esta mensagem exatamente a essas
+    pessoas — por omissão do Basecamp, toda a gente com acesso ao
+    projeto seria notificada (ver _definir_subscritores). Uma falha ao
+    restringir as notificações nunca impede a publicação da mensagem em
+    si (fica só publicada com a notificação por omissão do Basecamp, e o
+    erro é registado nos logs)."""
     if projeto.strip().lower() == "gestão":
         bucket_id, board_id = MURAL_BUCKET_ID, MURAL_BOARD_ID
     else:
@@ -621,7 +660,14 @@ def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão"):
                         "status": "active"},
                    timeout=30)
     r.raise_for_status()
-    return r.json()
+    resultado = r.json()
+    if notificar_apenas:
+        try:
+            _definir_subscritores(bucket_id, resultado["id"], projeto, notificar_apenas)
+        except Exception as e:
+            print(f"[basecamp] não consegui restringir as notificações de \"{assunto}\" "
+                 f"a {notificar_apenas}: {e!r}")
+    return resultado
 
 def listar_mural(projeto: str = "Gestão", limite: int = 20) -> list[dict]:
     """Lista as mensagens mais recentes do Mural de um projeto (assunto,

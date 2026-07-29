@@ -316,6 +316,7 @@ def correr_calibracao_estimativa() -> dict:
         "ajustar algum parâmetro com a tool atualizar_parametro_estimativa — ajusta um de cada "
         "vez, para se perceber o efeito de cada mudança."
     )
-    basecamp.publicar_mural("Calibração da estimativa de montagem", texto, projeto=logistica.PROJETO_ENTREGAS)
+    basecamp.publicar_mural("Calibração da estimativa de montagem", texto, projeto=logistica.PROJETO_ENTREGAS,
+                            notificar_apenas=logistica.NOTIFICAR_APENAS_ENTREGAS)
     db.marcar_calibrado(ids_processados)
     return {"casos": len(razoes), "desvio_medio": media}

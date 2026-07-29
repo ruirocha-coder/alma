@@ -165,7 +165,8 @@ def correr_avisos_gestao_agendas() -> dict:
             texto = _texto_aviso(regiao, marco, inicio_semana_entrega,
                                  dentro_do_prazo, fora_do_prazo, sem_data)
             try:
-                basecamp.publicar_mural(f"Aviso de agenda — {regiao}", texto, projeto=logistica.PROJETO_ENTREGAS)
+                basecamp.publicar_mural(f"Aviso de agenda — {regiao}", texto, projeto=logistica.PROJETO_ENTREGAS,
+                                        notificar_apenas=logistica.NOTIFICAR_APENAS_ENTREGAS)
                 publicados += 1
             except Exception as e:
                 print(f"[avisos_gestao_agendas] falhou a publicar o aviso de {regiao}/{marco}: {e!r}")
