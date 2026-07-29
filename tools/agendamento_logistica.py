@@ -26,45 +26,99 @@ from zoneinfo import ZoneInfo
 INICIO_TURNO_MIN = 8 * 60 + 40  # 8:40 — logo depois da preparação/carga 8:00-8:40 do documento
 LIMITE_TURNO_NORMAL_MIN = 17 * 60 + 30  # 17:30 — turno normal (as horas extra são margem para o imprevisto, não para planear)
 
+# pausa de almoço (pedido do Rui, 2026-07-29): o documento não fixa uma
+# hora exata, por isso insere-se uma pausa fixa de 60 min, uma única vez
+# por dia, assim que o relógio simulado atinge o meio-dia (12:00) — no
+# primeiro ponto de paragem natural (fim de uma viagem ou de uma
+# montagem), nunca a meio de uma viagem ou de uma montagem em curso.
+DURACAO_ALMOCO_MIN = 60
+JANELA_ALMOCO_INICIO_MIN = 12 * 60  # 12:00
+
 FUSO_HORARIO = ZoneInfo("Europe/Lisbon")
 
 def _minutos_para_hora(minutos_desde_meia_noite: float) -> str:
     minutos_inteiros = round(minutos_desde_meia_noite)
     return f"{minutos_inteiros // 60:02d}:{minutos_inteiros % 60:02d}"
 
-def calcular_horario_dia(paragens: list, pernas_minutos: list) -> dict:
+def calcular_horario_dia(paragens: list, pernas_minutos: list, pernas_km: list = None) -> dict:
     """Simula um único dia de entregas: dado `paragens` (já na ordem
     otimizada do trajeto, cada uma com pelo menos "minutos_montagem") e
     `pernas_minutos` (N+1 durações — armazém→p1, p1→p2, ..., pN→armazém,
     na MESMA ordem — ver tools.logistica.plano_trajeto), calcula a hora
     de chegada/saída de cada paragem e a hora de regresso ao armazém, a
-    partir das 8:40.
+    partir das 8:40, com uma pausa de almoço de 60 min inserida uma única
+    vez assim que o dia atinge o meio-dia (ver DURACAO_ALMOCO_MIN acima).
+    `pernas_km` (opcional, mesma forma que `pernas_minutos` — ver
+    tools.logistica.plano_trajeto) anexa a distância de cada perna aos
+    "eventos" devolvidos, para o custo de viagem por perna (ver
+    tools.tempos_montagem.custo_viagem_perna) — fica None em cada evento
+    de viagem se não for fornecido.
 
     Devolve {"paragens": [{**paragem original, "chegada": "HH:MM",
-    "saida": "HH:MM"}, ...], "regresso": "HH:MM",
-    "cabe_no_turno_normal": bool}. Nunca decide sozinha como dividir por
-    mais de um dia se não couber — só sinaliza (ver nota no topo do
-    ficheiro)."""
+    "saida": "HH:MM"}, ...], "eventos": [...], "regresso": "HH:MM",
+    "cabe_no_turno_normal": bool}.
+
+    "eventos" é a mesma informação, mas em ORDEM CRONOLÓGICA/DE ROTA real
+    (viagem, cliente, almoço intercalados) — pedido explícito do Rui
+    (2026-07-29), para a tabela preparatória de agendamento (ver
+    agents.sugestao_logistica_semanal._construir_tabela_agendamento)
+    poder listar os eventos pela ordem em que acontecem mesmo, sem
+    reconstruir esta lógica. Cada evento tem "tipo" ("viagem"|"cliente"|
+    "almoco") e "minutos"; um evento "viagem" tem também "de"/"para"/
+    "km"; um evento "cliente" tem também os campos originais da paragem
+    (id/titulo/cliente/morada/produtos_encomendados) mais "chegada"/
+    "saida".
+
+    Nunca decide sozinha como dividir por mais de um dia se não couber —
+    só sinaliza (ver nota no topo do ficheiro)."""
     n = len(paragens)
     if len(pernas_minutos) != n + 1:
         raise ValueError(
             f"pernas_minutos tem de ter uma perna a mais que paragens "
             f"({len(pernas_minutos)} pernas para {n} paragens — esperava {n + 1})")
+    if pernas_km is not None and len(pernas_km) != n + 1:
+        raise ValueError(
+            f"pernas_km tem de ter uma perna a mais que paragens "
+            f"({len(pernas_km)} pernas para {n} paragens — esperava {n + 1})")
 
     tempo = INICIO_TURNO_MIN
     resultado_paragens = []
+    eventos = []
+    almoco_feito = False
+    local_anterior = "Armazém"
+
+    def _talvez_inserir_almoco():
+        nonlocal tempo, almoco_feito
+        if not almoco_feito and tempo >= JANELA_ALMOCO_INICIO_MIN:
+            eventos.append({"tipo": "almoco", "minutos": DURACAO_ALMOCO_MIN})
+            tempo += DURACAO_ALMOCO_MIN
+            almoco_feito = True
+
     for i, paragem in enumerate(paragens):
         tempo += pernas_minutos[i]
+        eventos.append({"tipo": "viagem", "de": local_anterior, "para": paragem.get("titulo"),
+                        "minutos": pernas_minutos[i],
+                        "km": pernas_km[i] if pernas_km is not None else None})
+        _talvez_inserir_almoco()
         chegada = tempo
         tempo += paragem["minutos_montagem"]
         saida = tempo
-        resultado_paragens.append({**paragem, "chegada": _minutos_para_hora(chegada),
-                                   "saida": _minutos_para_hora(saida)})
+        paragem_com_horario = {**paragem, "chegada": _minutos_para_hora(chegada),
+                               "saida": _minutos_para_hora(saida)}
+        resultado_paragens.append(paragem_com_horario)
+        eventos.append({"tipo": "cliente", **paragem_com_horario, "minutos": paragem["minutos_montagem"]})
+        _talvez_inserir_almoco()
+        local_anterior = paragem.get("titulo")
+
     tempo += pernas_minutos[-1]
+    eventos.append({"tipo": "viagem", "de": local_anterior, "para": "Armazém",
+                    "minutos": pernas_minutos[-1],
+                    "km": pernas_km[-1] if pernas_km is not None else None})
     regresso = tempo
 
     return {
         "paragens": resultado_paragens,
+        "eventos": eventos,
         "regresso": _minutos_para_hora(regresso),
         "cabe_no_turno_normal": regresso <= LIMITE_TURNO_NORMAL_MIN,
     }

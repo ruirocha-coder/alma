@@ -174,15 +174,16 @@ Escreve só o texto final da mensagem do mural, sem comentário à parte."""
 def _cards_prontos_a_entregar() -> tuple:
     """Lê os cards ativos do projeto "Entregas" e devolve
     (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos,
-    entregas_por_regiao): cards_por_regiao tem o texto formatado de cada
-    entrega pronta (cliente/morada/produto/data, para o resumo em texto);
-    moradas_por_regiao tem só as moradas em bruto de cada uma (para o
-    trajeto do Google Maps) — extraídos na mesma passagem, para nunca
-    ler os dados de cada card duas vezes. Só conta cards mesmo prontos a
-    entregar (em "On Hold" por trás de uma região — nunca por trás de
-    "Produção" ou "Assistências", ver tools.logistica.fase_encomenda); a
-    região vem sempre da coluna real por trás da secção "On Hold" (ver
-    _coluna_real_on_hold) — nunca da morada.
+    entregas_por_regiao, textos_pdf_por_id): cards_por_regiao tem o texto
+    formatado de cada entrega pronta (cliente/morada/produto/data, para o
+    resumo em texto); moradas_por_regiao tem só as moradas em bruto de
+    cada uma (para o trajeto do Google Maps) — extraídos na mesma
+    passagem, para nunca ler os dados de cada card duas vezes. Só conta
+    cards mesmo prontos a entregar (em "On Hold" por trás de uma região —
+    nunca por trás de "Produção" ou "Assistências", ver
+    tools.logistica.fase_encomenda); a região vem sempre da coluna real
+    por trás da secção "On Hold" (ver _coluna_real_on_hold) — nunca da
+    morada.
 
     nao_confirmados é a lista de títulos de cards cuja coluna real não
     pôde ser confirmada (ex: falha de rede, ou parent sem url) — pedido
@@ -201,7 +202,15 @@ def _cards_prontos_a_entregar() -> tuple:
     pedido do Rui (2026-07-28), para a proposta de agendamento (ver
     _construir_texto_proposta_agendamento) poder alinhar o tempo de
     montagem e a morada de cada entrega à sua posição na rota otimizada,
-    sem repetir a extração de dados do card."""
+    sem repetir a extração de dados do card.
+
+    textos_pdf_por_id tem, por id de card, o texto do PDF/orçamento já
+    lido (ver agents.estimativa_montagem._texto_pdf_encomenda) — pedido
+    explícito do Rui (2026-07-29): a leitura do PDF passa a ser
+    obrigatória sempre que esta sugestão corre (o orçamento tem quase
+    sempre a lista de produtos completa, nunca a morada). Devolvido aqui
+    e reaproveitado por _publicar_estimativas_montagem, para nunca ler e
+    processar o mesmo PDF duas vezes por card."""
     # forcar=True (bug real reportado, 2026-07-28): a equipa corrigia uma
     # morada nas notas de um card e a sugestão continuava a mostrar a
     # morada antiga — porque _itens_ativos() tem uma cache de 15 min
@@ -217,6 +226,7 @@ def _cards_prontos_a_entregar() -> tuple:
     entregas_por_regiao = {regiao: [] for regiao in _REGIOES}
     nao_confirmados = []
     itens_prontos = []
+    textos_pdf_por_id = {}
     cortados_pelo_limite = 0
 
     for item in itens:
@@ -257,8 +267,20 @@ def _cards_prontos_a_entregar() -> tuple:
 
         titulo = item.get("title") or item.get("content") or "(sem título)"
         notas = basecamp._texto_simples(item.get("description", ""))
+        # leitura do PDF obrigatória (pedido do Rui, 2026-07-29) — o
+        # orçamento/PDF tem quase sempre a lista de produtos completa;
+        # nunca usado para "morada" (ver _MISSAO_EXTRACAO). Lido aqui uma
+        # única vez por card e reaproveitado por
+        # _publicar_estimativas_montagem (evita ler o mesmo PDF duas
+        # vezes).
         try:
-            dados = _extrair_dados_encomenda(titulo, notas)
+            texto_pdf = estimativa_montagem._texto_pdf_encomenda(item)
+        except Exception as e:
+            print(f"[sugestao_logistica_semanal] não consegui ler o PDF de {item['id']}: {e!r}")
+            texto_pdf = None
+        textos_pdf_por_id[item["id"]] = texto_pdf
+        try:
+            dados = _extrair_dados_encomenda(titulo, notas, texto_pdf=texto_pdf)
         except Exception as e:
             print(f"[sugestao_logistica_semanal] falhou a extrair dados de {item['id']}: {e!r}")
             dados = {}
@@ -277,7 +299,8 @@ def _cards_prontos_a_entregar() -> tuple:
         print(f"[sugestao_logistica_semanal] ATENÇÃO: {cortados_pelo_limite} entrega(s) pronta(s) a mais "
              f"do que o limite de {MAX_CARDS_POR_CORRIDA} por corrida — ficaram de fora desta sugestão")
 
-    return cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos, entregas_por_regiao
+    return (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos,
+           entregas_por_regiao, textos_pdf_por_id)
 
 def _texto_nao_confirmados(nao_confirmados: list) -> str:
     """Secção que sinaliza cards cuja coluna real por trás de "On Hold"
@@ -373,7 +396,7 @@ def _texto_trajetos_google_maps(moradas_reconhecidas_por_regiao: dict, moradas_e
             + "\n\nA ordem das paragens já vem otimizada — abre o link para validar/editar "
               "o trajeto antes de sair.")
 
-def _publicar_estimativas_montagem(itens_prontos: list) -> dict:
+def _publicar_estimativas_montagem(itens_prontos: list, textos_pdf_por_id: dict = None) -> dict:
     """Calcula e publica, como comentário em cada card, a estimativa de
     tempo de montagem (ver agents.estimativa_montagem) — pedido explícito
     do Rui (2026-07-28), seguindo o "Procedimento Tempos de Montagem para
@@ -382,30 +405,93 @@ def _publicar_estimativas_montagem(itens_prontos: list) -> dict:
     ignora sozinha cards que já têm estimativa (mas devolve os minutos na
     mesma, ver lá).
 
-    Devolve {recording_id: minutos}, para a proposta de agendamento (ver
-    _construir_texto_proposta_agendamento) — cards sem estimativa
-    calculável (falha na extração ou ao publicar) ficam de fora deste
-    dict, nunca com um valor inventado."""
-    minutos_por_id = {}
+    `textos_pdf_por_id`, quando fornecido (ver _cards_prontos_a_entregar),
+    reaproveita o PDF já lido para a extração de dados da encomenda, para
+    nunca ler o mesmo PDF duas vezes por card.
+
+    Devolve {recording_id: {"minutos":, "rendimento":}}, para a proposta
+    de agendamento e a tabela preparatória (ver
+    _construir_texto_proposta_agendamento e
+    _construir_tabela_agendamento) — cards sem estimativa calculável
+    (falha na extração ou ao publicar) ficam de fora deste dict, nunca
+    com um valor inventado."""
+    estimativas_por_id = {}
     for item in itens_prontos:
+        texto_pdf = (textos_pdf_por_id or {}).get(item.get("id"))
         try:
-            resultado = estimativa_montagem._estimar_e_publicar_card(item, logistica.PROJETO_ENTREGAS)
+            resultado = estimativa_montagem._estimar_e_publicar_card(
+                item, logistica.PROJETO_ENTREGAS, texto_pdf=texto_pdf)
         except Exception as e:
             print(f"[sugestao_logistica_semanal] falhou a estimativa de montagem de {item.get('id')}: {e!r}")
             continue
         if resultado:
-            minutos_por_id[item["id"]] = resultado["minutos"]
-    return minutos_por_id
+            estimativas_por_id[item["id"]] = {"minutos": resultado["minutos"],
+                                              "rendimento": resultado.get("rendimento") or {"euros_hora": None, "banda": None}}
+    return estimativas_por_id
 
-def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por_id: dict,
-                                          moradas_reconhecidas_por_regiao: dict, inicio_semana: date) -> str:
+def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_id: dict,
+                                     moradas_reconhecidas_por_regiao: dict, inicio_semana: date) -> dict:
+    """Calcula, uma única vez por região, tudo o que a proposta de
+    agendamento em texto (_construir_texto_proposta_agendamento) e a
+    tabela preparatória (_construir_tabela_agendamento) precisam —
+    entregas agendáveis, trajeto real (Google Directions API, ver
+    tools.logistica.plano_trajeto) e horário do dia (ver
+    tools.agendamento_logistica.calcular_horario_dia) — para nunca pedir
+    o mesmo trajeto à Directions API duas vezes pela mesma região.
+
+    Entregas sem morada, cuja morada não é reconhecida pelo Google Maps
+    (ver _separar_moradas_por_regiao — nunca entram no cálculo do
+    trajeto, para uma só morada má não fazer perder a proposta da região
+    inteira), ou cujo tempo de montagem ainda não foi calculado, ficam de
+    fora e são devolvidas à parte, para serem sinalizadas para inclusão
+    manual — nunca com um horário inventado.
+
+    Devolve {regiao: {"dia": date|None, "horario": dict|None (ver
+    calcular_horario_dia — None se não houver entregas agendáveis, ou se
+    o trajeto real não puder ser calculado), "sem_morada": [titulos],
+    "sem_morada_reconhecida": [titulos], "sem_estimativa": [titulos]}} —
+    só para regiões com pelo menos uma entrega pronta a entregar."""
+    resultado = {}
+    indice_dia = 0
+    for regiao, entregas in entregas_por_regiao.items():
+        if not entregas:
+            continue
+
+        moradas_reconhecidas = moradas_reconhecidas_por_regiao.get(regiao) or []
+        agendaveis = [e for e in entregas if e["morada"] in moradas_reconhecidas and e["id"] in estimativas_por_id]
+        sem_morada = [e["titulo"] for e in entregas if not e["morada"]]
+        sem_morada_reconhecida = [e["titulo"] for e in entregas
+                                  if e["morada"] and e["morada"] not in moradas_reconhecidas]
+        sem_estimativa = [e["titulo"] for e in entregas
+                          if e["morada"] in moradas_reconhecidas and e["id"] not in estimativas_por_id]
+
+        dia = None
+        horario = None
+        if agendaveis:
+            moradas = [e["morada"] for e in agendaveis]
+            plano = logistica.plano_trajeto(moradas)
+            if plano["pernas_minutos"] is not None:
+                entregas_ordenadas = [agendaveis[i] for i in plano["ordem_indices"]]
+                paragens = [{**e, "minutos_montagem": estimativas_por_id[e["id"]]["minutos"],
+                            "rendimento": estimativas_por_id[e["id"]]["rendimento"]}
+                           for e in entregas_ordenadas]
+                horario = agendamento_logistica.calcular_horario_dia(
+                    paragens, plano["pernas_minutos"], plano["pernas_km"])
+                dia = agendamento_logistica.proximo_dia_util(inicio_semana, indice_dia)
+                indice_dia += 1
+
+        resultado[regiao] = {"dia": dia, "horario": horario, "sem_morada": sem_morada,
+                             "sem_morada_reconhecida": sem_morada_reconhecida,
+                             "sem_estimativa": sem_estimativa}
+    return resultado
+
+def _construir_texto_proposta_agendamento(agendamento_por_regiao: dict) -> str:
     """Constrói, em Python (nunca pedido ao modelo — datas/horas não se
     confiam à IA), a proposta de agendamento: um dia útil consecutivo por
-    região com entregas prontas (a partir de `inicio_semana`), e dentro de
-    cada dia, a hora de chegada/saída de cada entrega — calculadas a
-    partir do trajeto real (Google Directions API, ver
-    tools.logistica.plano_trajeto) e do tempo de montagem já estimado
-    (ver tools.agendamento_logistica.calcular_horario_dia).
+    região com entregas prontas, e dentro de cada dia, a hora de
+    chegada/saída de cada entrega — a partir de
+    _calcular_agendamento_por_regiao (trajeto real + horário do dia já
+    calculados uma única vez).
 
     Pedido explícito do Rui (2026-07-28): esta é só a PROPOSTA — a Alma
     nunca cria eventos no calendário sozinha a partir disto; só depois de
@@ -413,64 +499,36 @@ def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por
     criar_eventos_calendario_entregas (ver agents/agendamento_entregas.py)
     é chamada, com os valores finais tal como confirmados na conversa.
 
-    Entregas sem morada, cuja morada não é reconhecida pelo Google Maps
-    (ver _separar_moradas_por_regiao — nunca entram no cálculo do
-    trajeto, para uma só morada má não fazer perder a proposta da região
-    inteira), ou cujo tempo de montagem ainda não foi calculado, ficam de
-    fora da proposta e são sinalizadas para inclusão manual — nunca com
-    um horário inventado. Se uma região não couber dentro do turno
-    normal, sinaliza isso claramente em vez de decidir sozinha como
-    dividir por mais dias (ver tools/agendamento_logistica.py).
+    Se uma região não couber dentro do turno normal, sinaliza isso
+    claramente em vez de decidir sozinha como dividir por mais dias (ver
+    tools/agendamento_logistica.py).
 
-    Devolve "" se não houver nenhuma entrega com morada e tempo de
-    montagem disponíveis em região nenhuma."""
+    Devolve "" se não houver nenhuma entrega agendável em região
+    nenhuma."""
     blocos = []
-    indice_dia = 0
-    for regiao, entregas in entregas_por_regiao.items():
-        if not entregas:
-            continue
-
-        moradas_reconhecidas = moradas_reconhecidas_por_regiao.get(regiao) or []
-        agendaveis = [e for e in entregas if e["morada"] in moradas_reconhecidas and e["id"] in minutos_por_id]
-        sem_morada = [e["titulo"] for e in entregas if not e["morada"]]
-        sem_morada_reconhecida = [e["titulo"] for e in entregas
-                                  if e["morada"] and e["morada"] not in moradas_reconhecidas]
-        sem_estimativa = [e["titulo"] for e in entregas
-                          if e["morada"] in moradas_reconhecidas and e["id"] not in minutos_por_id]
-
+    for regiao, info in agendamento_por_regiao.items():
         linhas = []
-        if agendaveis:
-            moradas = [e["morada"] for e in agendaveis]
-            plano = logistica.plano_trajeto(moradas)
-            if plano["pernas_minutos"] is None:
-                linhas.append("Não foi possível calcular o trajeto real desta região "
-                              "(sem dados da Google Directions API) — sem proposta de horário.")
-            else:
-                entregas_ordenadas = [agendaveis[i] for i in plano["ordem_indices"]]
-                paragens = [{**e, "minutos_montagem": minutos_por_id[e["id"]]} for e in entregas_ordenadas]
-                horario = agendamento_logistica.calcular_horario_dia(paragens, plano["pernas_minutos"])
-                dia = agendamento_logistica.proximo_dia_util(inicio_semana, indice_dia)
-                indice_dia += 1
+        horario = info["horario"]
+        if horario is not None:
+            linhas.append(f"**{info['dia'].strftime('%d/%m/%Y (%A)')}**")
+            for paragem in horario["paragens"]:
+                linhas.append(f"- {paragem['chegada']}–{paragem['saida']}: **{paragem['titulo']}** "
+                              f"— {paragem['cliente'] or '(cliente não identificado)'}, "
+                              f"{paragem['morada']}"
+                              + (f" ({paragem['produtos_encomendados']})" if paragem.get("produtos_encomendados") else ""))
+            linhas.append(f"- Regresso ao armazém estimado: {horario['regresso']}")
+            if not horario["cabe_no_turno_normal"]:
+                linhas.append(f"  - ⚠️ ultrapassa o turno normal (17:30) — a logística tem de decidir "
+                              "manualmente que paragem(ns) passar para outro dia (as horas extra são a "
+                              "margem para o imprevisto, não para planear)")
 
-                linhas.append(f"**{dia.strftime('%d/%m/%Y (%A)')}**")
-                for paragem in horario["paragens"]:
-                    linhas.append(f"- {paragem['chegada']}–{paragem['saida']}: **{paragem['titulo']}** "
-                                  f"— {paragem['cliente'] or '(cliente não identificado)'}, "
-                                  f"{paragem['morada']}"
-                                  + (f" ({paragem['produtos_encomendados']})" if paragem.get("produtos_encomendados") else ""))
-                linhas.append(f"- Regresso ao armazém estimado: {horario['regresso']}")
-                if not horario["cabe_no_turno_normal"]:
-                    linhas.append(f"  - ⚠️ ultrapassa o turno normal (17:30) — a logística tem de decidir "
-                                  "manualmente que paragem(ns) passar para outro dia (as horas extra são a "
-                                  "margem para o imprevisto, não para planear)")
-
-        if sem_morada:
-            linhas.append("⚠️ Sem morada identificada, fora da proposta: " + ", ".join(sem_morada))
-        if sem_morada_reconhecida:
+        if info["sem_morada"]:
+            linhas.append("⚠️ Sem morada identificada, fora da proposta: " + ", ".join(info["sem_morada"]))
+        if info["sem_morada_reconhecida"]:
             linhas.append("⚠️ Morada não reconhecida pelo Google Maps, fora da proposta (confirma e agenda à mão): "
-                          + ", ".join(sem_morada_reconhecida))
-        if sem_estimativa:
-            linhas.append("⚠️ Sem tempo de montagem calculado ainda, fora da proposta: " + ", ".join(sem_estimativa))
+                          + ", ".join(info["sem_morada_reconhecida"]))
+        if info["sem_estimativa"]:
+            linhas.append("⚠️ Sem tempo de montagem calculado ainda, fora da proposta: " + ", ".join(info["sem_estimativa"]))
 
         if linhas:
             blocos.append(f"#### {regiao}\n" + "\n".join(linhas))
@@ -480,6 +538,89 @@ def _construir_texto_proposta_agendamento(entregas_por_regiao: dict, minutos_por
     return ("\n\n---\n\n### Proposta de agendamento\n\n" + "\n\n".join(blocos) +
             "\n\nEsta é só uma proposta — depois de validada/ajustada pela Conceição ou pela Isa, "
             "pede à Alma para criar os eventos no calendário do projeto Entregas com os dados finais.")
+
+def _texto_tempo_montagem_resumido(rendimento: dict, minutos_conta_a: float) -> str:
+    """Resume Conta A (minutos, a única estimativa de tempo que o
+    procedimento produz) e Conta B (€/h + banda — ver
+    tools.tempos_montagem.calcular_rendimento) na mesma célula da tabela.
+
+    NOTA IMPORTANTE (pedido do Rui, 2026-07-29): o pedido original diz
+    para escolher sempre "a de menor tempo" entre Conta A e Conta B — mas
+    o "Procedimento Tempos de Montagem para Logística" define Conta B só
+    como uma VERIFICAÇÃO do rendimento (€/h) da Conta A, nunca como uma
+    estimativa de tempo independente e comparável (não há, no
+    procedimento, uma fórmula para converter €/h de volta em minutos sem
+    inventar um valor de referência que o documento não dá). Por isso,
+    por agora, o tempo usado no agendamento é sempre o da Conta A (a
+    única estimativa de tempo real disponível) — Conta B aparece
+    resumida ao lado só como o seu papel real: uma verificação, para a
+    Conceição/Isa confirmarem se o rendimento implícito faz sentido, não
+    como um segundo tempo a escolher. Confirma com o Rui se isto não for
+    o que se pretendia."""
+    minutos_texto = f"{minutos_conta_a:.0f} min (Conta A)"
+    if rendimento and rendimento.get("euros_hora") is not None:
+        minutos_texto += f" · Conta B: {rendimento['euros_hora']:.0f} €/h, banda \"{rendimento['banda']}\""
+    return minutos_texto
+
+def _construir_tabela_agendamento(agendamento_por_regiao: dict) -> str:
+    """Tabela preparatória de agendamento, pedida explicitamente pelo Rui
+    (2026-07-29), para rever ANTES de pedir a criação dos eventos no
+    calendário: uma lista de eventos (viagem/cliente/almoço), pela ordem
+    real da rota, com o tempo estimado e o custo de cada um — a partir de
+    _calcular_agendamento_por_regiao (mesmo trajeto/horário já calculados
+    para a proposta em texto, nunca recalculado/repedido à API).
+
+    Custo de viagem: tools.tempos_montagem.custo_viagem_perna (por
+    perna). Custo de montagem: tools.tempos_montagem.custo_montagem_paragem
+    (horas × custo_hora_pessoa_eur × 2 pessoas, mesma taxa da viagem).
+    Ver _texto_tempo_montagem_resumido para a nota sobre Conta A/Conta B.
+
+    Devolve "" se não houver nenhum dia com horário calculado em região
+    nenhuma."""
+    if not any(info["horario"] is not None for info in agendamento_por_regiao.values()):
+        return ""
+
+    parametros = db.obter_parametros_estimativa()
+    blocos = []
+    for regiao, info in agendamento_por_regiao.items():
+        horario = info["horario"]
+        if horario is None:
+            continue
+
+        linhas = ["| Evento | Tempo estimado | Custo |", "|---|---|---|"]
+        total_viagem_min = total_montagem_min = 0.0
+        total_custo = 0.0
+        for evento in horario["eventos"]:
+            if evento["tipo"] == "viagem":
+                custo = tempos_montagem.custo_viagem_perna(evento["km"], evento["minutos"], parametros)
+                total_viagem_min += evento["minutos"]
+                if custo and custo["subtotal"] is not None:
+                    total_custo += custo["subtotal"]
+                    custo_texto = f"{custo['combustivel'] + custo['manutencao']:.0f} € combustível+manutenção + {custo['tempo_equipa']:.0f} € equipa = {custo['subtotal']:.0f} €"
+                elif custo:
+                    total_custo += custo["tempo_equipa"]
+                    custo_texto = f"{custo['tempo_equipa']:.0f} € equipa (sem km — só duração disponível)"
+                else:
+                    custo_texto = "—"
+                linhas.append(f"| Viagem: {evento['de']} → {evento['para']} | {evento['minutos']:.0f} min | {custo_texto} |")
+            elif evento["tipo"] == "cliente":
+                custo_montagem = tempos_montagem.custo_montagem_paragem(evento["minutos"], parametros)
+                total_montagem_min += evento["minutos"]
+                total_custo += custo_montagem or 0
+                tempo_texto = _texto_tempo_montagem_resumido(evento.get("rendimento"), evento["minutos"])
+                cliente_texto = evento.get("cliente") or "(cliente não identificado)"
+                linhas.append(f"| Cliente: {evento['titulo']} — {cliente_texto} | {tempo_texto} | {custo_montagem:.0f} € |")
+            else:  # almoço
+                linhas.append(f"| Almoço | {evento['minutos']:.0f} min | — |")
+
+        linhas.append(f"| **Total** | **{total_viagem_min:.0f} min viagem + {total_montagem_min:.0f} min montagem** | **{total_custo:.0f} €** |")
+        titulo_bloco = f"#### {regiao}" + (f" — {info['dia'].strftime('%d/%m/%Y (%A)')}" if info["dia"] else "")
+        blocos.append(titulo_bloco + "\n" + "\n".join(linhas))
+
+    if not blocos:
+        return ""
+    return ("\n\n---\n\n### Tabela preparatória de agendamento\n\n" + "\n\n".join(blocos) +
+            "\n\nRevê esta tabela antes de pedir a criação dos eventos no calendário do projeto Entregas.")
 
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
@@ -499,12 +640,13 @@ def correr_sugestao_semanal_logistica() -> dict:
 
     try:
         try:
-            cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos, entregas_por_regiao = _cards_prontos_a_entregar()
+            (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos,
+             entregas_por_regiao, textos_pdf_por_id) = _cards_prontos_a_entregar()
         except Exception as e:
             print(f"[sugestao_logistica_semanal] não foi possível obter os cards do Basecamp: {e!r}")
             return {"erro": str(e)}
 
-        minutos_por_id = _publicar_estimativas_montagem(itens_prontos)
+        estimativas_por_id = _publicar_estimativas_montagem(itens_prontos, textos_pdf_por_id)
 
         try:
             documentos_texto = _formatar_documentos_referencia(documentos_referencia.documentos_referencia_empresa())
@@ -515,10 +657,12 @@ def correr_sugestao_semanal_logistica() -> dict:
         moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao = _separar_moradas_por_regiao(moradas_por_regiao)
 
         inicio_semana, fim_semana = _semana_atual()
+        agendamento_por_regiao = _calcular_agendamento_por_regiao(
+            entregas_por_regiao, estimativas_por_id, moradas_reconhecidas_por_regiao, inicio_semana)
         texto = _gerar_texto_sugestao(cards_por_regiao, inicio_semana, fim_semana, documentos_texto)
         texto += _texto_trajetos_google_maps(moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao)
-        texto += _construir_texto_proposta_agendamento(entregas_por_regiao, minutos_por_id,
-                                                       moradas_reconhecidas_por_regiao, inicio_semana)
+        texto += _construir_texto_proposta_agendamento(agendamento_por_regiao)
+        texto += _construir_tabela_agendamento(agendamento_por_regiao)
         texto += _texto_nao_confirmados(nao_confirmados)
         basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
 
@@ -541,7 +685,8 @@ def trajetos_logistica_entregas() -> dict:
     prontos a entregar (ver _cards_prontos_a_entregar), para nunca haver
     duas versões a divergir. Não publica estimativas de montagem (isso só
     acontece no ciclo semanal, ver _publicar_estimativas_montagem)."""
-    cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos, _entregas_por_regiao = _cards_prontos_a_entregar()
+    (cards_por_regiao, moradas_por_regiao, nao_confirmados, _itens_prontos,
+     _entregas_por_regiao, _textos_pdf_por_id) = _cards_prontos_a_entregar()
     moradas_reconhecidas_por_regiao, moradas_excluidas_por_regiao = _separar_moradas_por_regiao(moradas_por_regiao)
     trajetos = {}
     parametros = db.obter_parametros_estimativa()

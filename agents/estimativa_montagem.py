@@ -141,24 +141,31 @@ def _texto_estimativa(titulo: str, conta_a: dict, rendimento: dict, confianca: s
         linhas.extend(f"- {v}" for v in validacoes)
     return "\n".join(linhas)
 
-def _estimar_e_publicar_card(item: dict, projeto: str) -> dict:
+def _estimar_e_publicar_card(item: dict, projeto: str, texto_pdf: str = None) -> dict:
     """Calcula e publica a estimativa de montagem de um card, se ainda não
     tiver sido publicada (ver db.estimativa_existente) — chamado pela
     sugestão semanal para cada card pronto a entregar. Devolve a
-    estimativa (sempre com "minutos", quer tenha acabado de ser publicada
-    agora, quer já existisse de uma corrida anterior — pedido do Rui,
-    2026-07-28: a proposta de agendamento precisa do tempo de montagem de
-    TODAS as entregas prontas, não só das que ainda não tinham
-    estimativa), ou None se não foi possível calcular nada (ex: falha ao
-    publicar o comentário)."""
+    estimativa (sempre com "minutos" e "rendimento" — Conta A e Conta B,
+    ver tools.tempos_montagem — quer tenha acabado de ser publicada agora,
+    quer já existisse de uma corrida anterior — pedido do Rui, 2026-07-28:
+    a proposta de agendamento precisa do tempo de montagem de TODAS as
+    entregas prontas, não só das que ainda não tinham estimativa), ou None
+    se não foi possível calcular nada (ex: falha ao publicar o comentário).
+
+    `texto_pdf`, quando fornecido, é usado em vez de ler o PDF outra vez
+    (ver _texto_pdf_encomenda) — pedido do Rui (2026-07-29): a sugestão
+    semanal já lê o PDF de cada card para extrair os dados da encomenda
+    (produtos, cliente, etc. — nunca a morada), e reaproveita aqui esse
+    mesmo texto para nunca ler e processar o mesmo PDF duas vezes."""
     recording_id = item["id"]
     existente = db.estimativa_existente(recording_id)
     if existente:
+        rendimento = (existente.get("decomposicao") or {}).get("rendimento") or {"euros_hora": None, "banda": None}
         return {"recording_id": recording_id, "minutos": float(existente["estimativa_minutos"]),
-                "ja_publicada": True}
+                "rendimento": rendimento, "ja_publicada": True}
 
     titulo = item.get("title") or item.get("content") or "(sem título)"
-    texto_fonte = _texto_pdf_encomenda(item)
+    texto_fonte = texto_pdf if texto_pdf is not None else _texto_pdf_encomenda(item)
     extraido = _extrair_itens_montagem(texto_fonte)
     parametros = db.obter_parametros_estimativa()
 

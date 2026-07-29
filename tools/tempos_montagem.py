@@ -164,6 +164,44 @@ def custo_deslocacao(regiao: str, km: float, duracao_min: float, parametros: dic
         "subtotal_sem_portagens": subtotal_sem_portagens, "total_estimado": total_estimado,
     }
 
+def custo_viagem_perna(km: float, duracao_min: float, parametros: dict, pessoas: int = 2) -> dict:
+    """Custo de UMA perna individual de viagem (armazém→paragem, ou
+    paragem→paragem) — pedido do Rui (2026-07-29), para a tabela
+    preparatória de agendamento (ver
+    agents.sugestao_logistica_semanal._construir_tabela_agendamento)
+    poder mostrar o custo linha a linha, na ordem real da rota. Mesma
+    taxa de combustível+manutenção+tempo de equipa que custo_deslocacao,
+    só que aplicada a uma perna em vez do trajeto todo — nunca inclui
+    portagens aqui (essas só contam uma vez, para o trajeto de ida e
+    volta completo, ver custo_deslocacao).
+
+    Devolve {"combustivel": float|None, "manutencao": float|None,
+    "tempo_equipa": float, "subtotal": float|None} — "combustivel"/
+    "manutencao"/"subtotal" ficam None se não houver km desta perna (só
+    duração), para nunca inventar um custo de combustível sem distância
+    real. Devolve None se não houver sequer duração."""
+    if duracao_min is None:
+        return None
+    horas = duracao_min / 60
+    tempo_equipa = horas * parametros["custo_hora_pessoa_eur"] * pessoas
+    if km is None:
+        return {"combustivel": None, "manutencao": None, "tempo_equipa": tempo_equipa, "subtotal": None}
+    combustivel = km * parametros["custo_km_combustivel_eur"]
+    manutencao = km * parametros["custo_km_manutencao_eur"]
+    return {"combustivel": combustivel, "manutencao": manutencao, "tempo_equipa": tempo_equipa,
+            "subtotal": combustivel + manutencao + tempo_equipa}
+
+def custo_montagem_paragem(minutos: float, parametros: dict, pessoas: int = 2) -> float:
+    """Custo de mão de obra de montagem de uma paragem — horas × custo/hora
+    × pessoas, a mesma taxa de custo_hora_pessoa_eur já usada para o
+    tempo de equipa em viagem (custo_deslocacao/custo_viagem_perna),
+    aplicada agora ao tempo de montagem — pedido do Rui (2026-07-29),
+    para a coluna "custo" da tabela preparatória de agendamento. Devolve
+    None se não houver minutos (nunca inventa um custo sem tempo real)."""
+    if minutos is None:
+        return None
+    return (minutos / 60) * parametros["custo_hora_pessoa_eur"] * pessoas
+
 def validacoes_necessarias(rendimento_banda: str, tem_peca_fixa_parede: bool,
                            itens_nao_classificados: list, acesso_desconhecido: bool) -> list:
     """Situações em que o documento pede validação humana (§7), aplicadas ao
