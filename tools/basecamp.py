@@ -789,6 +789,18 @@ def criar_evento_calendario(titulo: str, inicio_iso: str, fim_iso: str,
     r.raise_for_status()
     return r.json()
 
+def entradas_agenda(projeto: str = "Entregas") -> list[dict]:
+    """Lista as entradas atualmente ativas na Agenda (Schedule) de um
+    projeto — usado pela sincronização unidirecional para o Google
+    Calendar (ver agents/sincronizacao_calendario.py) para saber o que
+    existe agora no Basecamp. O Basecamp só devolve aqui entradas ativas
+    (uma entrada apagada/trashed deixa simplesmente de aparecer nesta
+    lista) — é assim que a sincronização deteta eliminações, comparando
+    esta lista contra o mapeamento guardado na base de dados."""
+    bucket_id, schedule_id = _resolver_schedule(projeto)
+    return _get_paginado(f"{_base_url()}/buckets/{bucket_id}/schedules/{schedule_id}/entries.json")
+
+
 def _get_bytes(url: str) -> bytes:
     """Descarrega um ficheiro anexado (Upload) — usa a mesma autenticação da API."""
     r = httpx.get(url, headers=_headers(), timeout=30, follow_redirects=True)
