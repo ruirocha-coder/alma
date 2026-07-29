@@ -775,7 +775,8 @@ def correr_sugestao_semanal_logistica() -> dict:
         texto += _construir_texto_proposta_agendamento(agendamento_por_regiao)
         texto += _construir_tabela_agendamento(agendamento_por_regiao)
         texto += _texto_nao_confirmados(nao_confirmados)
-        basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS)
+        basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS,
+                                notificar_apenas=logistica.NOTIFICAR_APENAS_ENTREGAS)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
         total_prontos = sum(contagens.values())
