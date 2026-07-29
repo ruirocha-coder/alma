@@ -515,6 +515,18 @@ def _resolver_mencoes(texto: str, projeto: str) -> tuple:
             if _normalizar(p["name"]) == termo and p.get("attachable_sgid"):
                 sgids.append(p["attachable_sgid"])
                 return f"@@MENCAO{len(sgids) - 1}@@"
+        # bug real reportado em produção (2026-07-29): sem este log, uma
+        # menção falhada (nome sem correspondência exata a ninguém com
+        # acesso a este projeto, ou sem attachable_sgid) fica
+        # INDISTINGUÍVEL de um "@Nome" que nunca chegou a ser escrito —
+        # nos dois casos o resultado final é só o nome em texto simples,
+        # sem "@" nenhum (ver comentário acima). Este log é a única forma
+        # de confirmar, pelos logs do Railway, QUAL dos dois está mesmo a
+        # acontecer da próxima vez, sem ter de partilhar credenciais para
+        # investigar.
+        print(f"[basecamp] menção \"@{nome}\" não corresponde a ninguém com acesso ao projeto "
+             f"\"{projeto}\" (ou a pessoa não tem attachable_sgid) — publicada sem menção real. "
+             f"Pessoas encontradas nesse projeto: {[p.get('name') for p in pessoas]}")
         return nome
 
     return _PADRAO_MENCAO.sub(_substituir, texto), sgids
