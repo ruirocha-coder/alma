@@ -46,6 +46,11 @@ def _trajetos_logistica_entregas():
     from agents import sugestao_logistica_semanal
     return sugestao_logistica_semanal.trajetos_logistica_entregas()
 
+def _disparar_avisos_gestao_agendas():
+    # mesma razão do import adiado acima.
+    from agents import avisos_gestao_agendas
+    return avisos_gestao_agendas.correr_avisos_gestao_agendas()
+
 FUNCOES = {
     "procurar_produtos": bigcommerce.procurar_produtos,
     "procurar_paginas": bigcommerce.procurar_paginas,
@@ -70,6 +75,7 @@ FUNCOES = {
     "disparar_sugestao_semanal_logistica": _disparar_sugestao_semanal_logistica,
     "diagnosticar_logistica_on_hold": _diagnosticar_logistica_on_hold,
     "trajetos_logistica_entregas": _trajetos_logistica_entregas,
+    "disparar_avisos_gestao_agendas": _disparar_avisos_gestao_agendas,
 }
 
 # Memória de longo prazo por utilizador — disponível a qualquer agente,

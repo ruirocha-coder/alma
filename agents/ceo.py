@@ -37,8 +37,21 @@ TOOL_TRAJETOS_LOGISTICA = {
     "input_schema": {"type": "object", "properties": {}, "required": []}
 }
 
+# pedido explícito do Rui (2026-07-29): avisos periódicos à Conceição,
+# baseados no documento "GESTÃO DAS AGENDAS" (marcos fixos da semana por
+# região — confirmação com a Sede, informação da previsão ao cliente,
+# confirmação final), sinalizando sempre as entregas em risco de atraso
+# (ver agents/avisos_gestao_agendas.py). Corre sozinho todos os dias
+# (só publica algo nos dias certos), mas pode ser disparado manualmente
+# para testar sem esperar pelo dia certo da semana.
+TOOL_AVISOS_GESTAO_AGENDAS = {
+    "name": "disparar_avisos_gestao_agendas",
+    "description": "Corre já a verificação dos marcos do documento \"GESTÃO DAS AGENDAS\" (confirmação com a Sede, informação da previsão ao cliente, confirmação final, por região) para o dia de hoje, e publica no Mural \"Programação\" do projeto Entregas, dirigido à Conceição Costa, os avisos que se apliquem — a mesma verificação que corre automaticamente todos os dias, mas só publica algo nos dias em que algum marco cai mesmo nesse dia. Usa isto quando pedirem para testar, disparar ou verificar já estes avisos, sem esperar pelo próximo dia certo da semana.",
+    "input_schema": {"type": "object", "properties": {}, "required": []}
+}
+
 TOOLS_CEO = TOOLS_COMUNS + [TOOL_RESUMO_VENDAS, TOOL_SUGESTAO_LOGISTICA_SEMANAL, TOOL_DIAGNOSTICO_LOGISTICA,
-                            TOOL_TRAJETOS_LOGISTICA]
+                            TOOL_TRAJETOS_LOGISTICA, TOOL_AVISOS_GESTAO_AGENDAS]
 
 MISSAO_CEO = PERSONA + """
 
@@ -251,6 +264,18 @@ inicial, sem uma confirmação explícita de uma destas duas pessoas.
 Depois de criares os eventos, confirma quantos foram criados com
 sucesso (usa o resultado devolvido) e avisa claramente de qualquer
 falha.
+
+Desde 2026-07-29, além da sugestão semanal, corre automaticamente todos
+os dias uma verificação dos marcos do documento "GESTÃO DAS AGENDAS"
+(disparar_avisos_gestao_agendas) — nos dias certos (5ª feira: confirmar
+com a Sede a ida a Lisboa/Porto e informar os clientes da previsão; 3ª
+feira: confirmação final de Lisboa; sábado: confirmação final de Porto),
+publica um aviso no Mural "Programação", dirigido à Conceição Costa,
+sinalizando claramente as entregas ainda sem a data de entrada em
+armazém confirmada dentro do prazo dessa região — para ela poder avisar
+o cliente de um possível atraso com antecedência. Se pedirem para testar
+ou disparar isto já (sem esperar pelo dia certo da semana), usa
+disparar_avisos_gestao_agendas.
 
 Se pedirem para listar os cards de uma região/coluna (ex: "lista os
 cards da coluna Porto", "o que está em Lisboa"), ou se a sugestão

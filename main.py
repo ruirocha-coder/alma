@@ -16,7 +16,8 @@ from db import (guardar_mensagem, historico_sessao, log_routing,
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
-                    sugestao_logistica_semanal, estimativa_montagem)
+                    sugestao_logistica_semanal, estimativa_montagem,
+                    avisos_gestao_agendas)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
@@ -61,6 +62,13 @@ scheduler.add_job(estimativa_montagem.verificar_entregas_concluidas_e_ler_real, 
 # desvio (nunca ajusta parâmetros sozinha, ver agents/estimativa_montagem.py)
 scheduler.add_job(estimativa_montagem.correr_calibracao_estimativa, "cron",
                   month="1,3,5,7,9,11", day=1, hour=8, minute=0)
+# avisos do documento "GESTÃO DAS AGENDAS" (projeto Alma Data), dirigidos
+# à Conceição Costa: todos os dias às 8h, depois da monitorização de
+# logística das 7h30 — a própria função só publica algo nos dias em que
+# um marco do documento cai mesmo nesse dia (ver
+# agents/avisos_gestao_agendas.py), por isso corre sozinha todos os dias
+# sem custo extra na maioria deles.
+scheduler.add_job(avisos_gestao_agendas.correr_avisos_gestao_agendas, "cron", hour=8, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -594,6 +602,16 @@ def calibrar_estimativa_agora():
     montagem (estimativa vs. real, publicado no Mural do projeto Entregas),
     em segundo plano — útil para testar sem esperar pelo ciclo bimestral."""
     threading.Thread(target=estimativa_montagem.correr_calibracao_estimativa, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/logistica/avisos-gestao-agendas")
+def avisos_gestao_agendas_agora():
+    """Dispara já a verificação dos marcos do documento "GESTÃO DAS
+    AGENDAS" (confirmação com a Sede, informação da previsão ao cliente,
+    confirmação final, por região), em segundo plano — só publica algo
+    no Mural do projeto Entregas se hoje for mesmo um desses dias. Útil
+    para testar sem esperar pelo dia certo da semana."""
+    threading.Thread(target=avisos_gestao_agendas.correr_avisos_gestao_agendas, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/ecos-largos/resumo-diario")
