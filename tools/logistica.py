@@ -271,7 +271,22 @@ Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche 
 # instalações da Ecos Largos, e que pesquisar "Ecos Largos" no Google Maps
 # encontra o local certo — por isso usa-se este nome, tal como testado,
 # em vez da morada postal.
-MORADA_ARMAZEM = "Ecos Largos"
+#
+# NOTA (2026-07-29): esse teste foi feito na app/site do Google Maps (que
+# usa pesquisa de negócios, muito mais tolerante), não na Directions API
+# usada aqui — a Directions API tem um geocoder mais estrito, que pode
+# falhar a encontrar um nome de local isolado sem país. Bug real
+# reportado em produção: com só "Ecos Largos", a Directions API chegou a
+# devolver NOT_FOUND para o próprio armazém — o que, por o armazém ser
+# sempre a origem/destino de qualquer trajeto, fazia TODAS as moradas
+# serem sinalizadas como más de uma só vez (mesmo moradas corretas,
+# entretanto confirmadas manualmente pela equipa). Acrescentar ", Portugal"
+# e o parâmetro region=pt (ver _info_trajeto) reduz essa ambiguidade sem
+# voltar à morada postal completa (já confirmada que não funciona). Se
+# isto ainda assim não resolver, os logs (ver print em _info_trajeto)
+# mostram agora o status exato devolvido pela Google, para diagnosticar
+# sem precisar de partilhar credenciais outra vez.
+MORADA_ARMAZEM = "Ecos Largos, Portugal"
 
 # limite generoso mas defensivo — o Google Maps (sem chave de API, só o
 # link público) aceita bem menos de 25 paragens antes de começar a
@@ -325,12 +340,19 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
                 "origin": origem,
                 "destination": origem,
                 "waypoints": "optimize:true|" + "|".join(moradas),
+                "region": "pt",
                 "key": GOOGLE_MAPS_API_KEY,
             },
             timeout=10,
         )
         dados = resposta.json()
         if dados.get("status") != "OK":
+            # bug real reportado em produção (2026-07-29): esta falha ficava
+            # completamente silenciosa — sem o status exato da Google não
+            # havia forma de distinguir "o armazém não geocodifica" de "uma
+            # morada é mesmo inválida" sem partilhar credenciais outra vez.
+            print(f"[logistica] trajeto para \"{origem}\" com {len(moradas)} paragem(ns) falhou: "
+                 f"status={dados.get('status')!r} error_message={dados.get('error_message')!r}")
             return vazio
         rota = dados["routes"][0]
         pernas = rota.get("legs") or []
@@ -342,7 +364,8 @@ def _info_trajeto(origem: str, moradas: list[str]) -> dict:
         return {"ordem": [moradas[i] for i in ordem_indices], "ordem_indices": ordem_indices,
                 "km": km_total, "duracao_min": duracao_total_min, "pernas_minutos": pernas_minutos,
                 "pernas_km": pernas_km}
-    except Exception:
+    except Exception as e:
+        print(f"[logistica] falha ao pedir o trajeto para \"{origem}\" com {len(moradas)} paragem(ns): {e!r}")
         return vazio
 
 def _otimizar_ordem_paragens(origem: str, moradas: list[str]) -> list[str]:
@@ -386,10 +409,25 @@ def _morada_reconhecida(morada: str, origem: str = MORADA_ARMAZEM) -> bool:
     """Verifica se `morada` é reconhecida pelo Google Maps — usando a
     própria Directions API (não a Geocoding API, que é uma API separada
     e a chave configurada só tem a Directions API autorizada, por pedido
-    explícito de restringi-la assim). Pede um trajeto trivial de
-    `origem` até `morada`; se a Google responder que não conseguiu
-    geocodificar ou não encontrou rota nenhuma (NOT_FOUND/ZERO_RESULTS),
-    é sinal de que esta morada específica é o problema.
+    explícito de restringi-la assim).
+
+    Pede um trajeto trivial de `morada` para ela própria (origem =
+    destino = `morada`) em vez de `origem` (o armazém) até `morada` —
+    bug real reportado em produção (2026-07-29): com origem=armazém, um
+    NOT_FOUND pode ser causado pela geocodificação do PRÓPRIO ARMAZÉM
+    falhar (ex: "Ecos Largos" é só um nome de local, não uma morada
+    completa — reconhecido pela pesquisa da app do Google Maps, mas nem
+    sempre pelo geocoder mais estrito da Directions API), não da morada a
+    testar — e nesse caso TODAS as moradas seriam sinalizadas como más de
+    uma só vez, mesmo as corretas (foi exatamente o que aconteceu: uma
+    morada já confirmada a funcionar diretamente no Google Maps continuou
+    a ser excluída). Testar `morada` contra ela própria isola o teste a
+    "esta morada geocodifica?", sem depender de o armazém também
+    geocodificar bem.
+
+    Se a Google responder que não conseguiu geocodificar ou não encontrou
+    rota nenhuma (NOT_FOUND/ZERO_RESULTS), é sinal de que esta morada
+    específica é o problema.
 
     Devolve True se não houver chave configurada, ou se a chamada falhar
     por qualquer razão que não seja claramente sobre a morada em si (ex:
@@ -400,11 +438,13 @@ def _morada_reconhecida(morada: str, origem: str = MORADA_ARMAZEM) -> bool:
     try:
         resposta = httpx.get(
             "https://maps.googleapis.com/maps/api/directions/json",
-            params={"origin": origem, "destination": morada, "key": GOOGLE_MAPS_API_KEY},
+            params={"origin": morada, "destination": morada, "region": "pt", "key": GOOGLE_MAPS_API_KEY},
             timeout=10,
         )
         dados = resposta.json()
         if dados.get("status") in ("NOT_FOUND", "ZERO_RESULTS"):
+            print(f"[logistica] morada não reconhecida pela Google: \"{morada}\" "
+                 f"(status={dados.get('status')!r})")
             return False
         return True
     except Exception:
