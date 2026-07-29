@@ -756,14 +756,23 @@ def pessoas_projeto(projeto: str) -> list[dict]:
     quem pertence a que equipa (ex: Ecos Largos, uma equipa parceira
     gerida no mesmo Basecamp mas à parte da Interior Guider), sem
     precisar de uma lista de nomes fixa no código, e para resolver
-    menções "@Nome" (ver _resolver_mencoes)."""
+    menções "@Nome" (ver _resolver_mencoes).
+
+    Bug real reportado em produção (2026-07-29), confirmado ao vivo contra
+    a API real: "/buckets/{id}/people.json" NÃO é um endpoint válido do
+    Basecamp — devolve 404 para QUALQUER projeto (testado e confirmado
+    tanto em "Entregas" como em "Marketing Interior Guider", o mesmo 404
+    nos dois). Isto significa que NENHUMA menção alguma vez resolveu de
+    facto (não era só um projeto específico) — o endpoint certo é
+    "/projects/{id}/people.json" (confirmado ao vivo: devolve as pessoas
+    certas, com attachable_sgid presente)."""
     chave = f"pessoas_{projeto.lower().strip()}"
     if chave in _cache:
         ts, pessoas = _cache[chave]
         if time.time() - ts < TTL_PESSOAS_PROJETO:
             return pessoas
     p = _encontrar_projeto(projeto)
-    pessoas = _get_paginado(f"{_base_url()}/buckets/{p['id']}/people.json") if p else []
+    pessoas = _get_paginado(f"{_base_url()}/projects/{p['id']}/people.json") if p else []
     _cache[chave] = (time.time(), pessoas)
     return pessoas
 
