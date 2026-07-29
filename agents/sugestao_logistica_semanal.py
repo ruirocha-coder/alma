@@ -563,17 +563,25 @@ def _texto_tempo_montagem_resumido(rendimento: dict, minutos_conta_a: float) -> 
     return minutos_texto
 
 def _celula_tabela(texto: str) -> str:
-    """Escapa "|" dentro de uma célula de tabela markdown — bug real
-    reportado em produção (2026-07-29): os títulos dos cards no Basecamp
-    usam "|" como separador interno (ex: "II | Anália Vasconcelos
-    18052026 | €1 467"), e um "|" não escapado dentro de uma célula
-    parte a linha da tabela em colunas a mais — o tempo estimado e o
-    custo reais (viagem/montagem) ficavam empurrados para fora da
-    tabela, e fragmentos do próprio título (incluindo o valor da
-    encomenda) apareciam por engano nas colunas "Tempo estimado"/"Custo".
-    Nunca usar um título ou nome bruto diretamente numa célula sem passar
-    por aqui primeiro."""
-    return (texto or "").replace("|", "\\|")
+    """Substitui "|" por " – " dentro de uma célula de tabela markdown —
+    os títulos dos cards no Basecamp usam "|" como separador interno
+    (ex: "II | Anália Vasconcelos 18052026 | €1 467"), e um "|" cru
+    dentro de uma célula parte a linha da tabela em colunas a mais.
+
+    Bug real reportado em produção (2026-07-29), em duas tentativas: a
+    primeira versão escapava com "\\|" (a convenção do CommonMark/GFM) —
+    mas o Basecamp NÃO respeita esse escape ao renderizar a tabela, só o
+    ignora ao dividir as colunas (fica com o número certo de colunas),
+    sem NUNCA reconstruir o "|" original (o "\\" fica visível como texto,
+    e o "|" simplesmente desaparece) — como a linha continuava a ter mais
+    campos separados por "|" do que colunas no cabeçalho, os campos a
+    mais (o tempo/custo REAIS) eram descartados silenciosamente pelo
+    renderizador, e só sobravam fragmentos do título nas primeiras
+    colunas. A única forma fiável de nunca partir uma linha, com este
+    renderizador, é nunca deixar passar um "|" cru para dentro de uma
+    célula — escapado ou não — por isso substituímos o caráter em vez de
+    o escapar."""
+    return (texto or "").replace("|", " – ")
 
 def _construir_tabela_agendamento(agendamento_por_regiao: dict) -> str:
     """Tabela preparatória de agendamento, pedida explicitamente pelo Rui
