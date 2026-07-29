@@ -492,6 +492,31 @@ def _markdown_para_basecamp(bruto: str) -> str:
 # conteúdo, onde o sgid vem do próprio registo da pessoa (attachable_sgid).
 _PADRAO_MENCAO = re.compile(r"@([A-ZÀ-ÖØ-Þ][^\s@,.!?;:()]*(?:\s+[A-ZÀ-ÖØ-Þ][^\s@,.!?;:()]*){0,3})")
 
+def _adicionar_arroba_em_nomes_conhecidos(texto: str, pessoas: list) -> str:
+    """Antes de resolver "@Nome" para uma menção real, garante que o nome
+    de QUALQUER pessoa com acesso a este projeto que apareça no texto
+    SEM "@" à frente passa a ter — pedido explícito do Rui (2026-07-29):
+    "sempre que nomeia um elemento da equipa ele é sempre tagado, em
+    qualquer parte do texto". Nunca depende de o LLM se lembrar de
+    escrever o "@" sozinho (o mesmo princípio de sempre nesta aplicação:
+    o que tem de ser sempre certo fica garantido em código, não confiado
+    à IA) — aqui a garantia cobre TODAS as formas de texto que a Alma
+    publica no Basecamp (comentários, mural), pois todas passam por
+    _markdown_para_basecamp_com_mencoes.
+
+    Substitui todas as ocorrências (não só a primeira) do nome completo
+    de cada pessoa, tal como está registado no Basecamp — comparação sem
+    distinguir maiúsculas, mas preservando a escrita exata usada no
+    texto. Nomes mais longos são tentados primeiro, para "Rui Rocha" não
+    ficar só parcialmente tagado por causa de outra pessoa chamada só
+    "Rui". Uma ocorrência já precedida de "@" nunca é tocada (evita
+    "@@Nome")."""
+    nomes = sorted({p["name"] for p in pessoas if p.get("name")}, key=len, reverse=True)
+    for nome in nomes:
+        padrao = re.compile(r"(?<!@)\b" + re.escape(nome) + r"\b", re.IGNORECASE)
+        texto = padrao.sub(lambda m: "@" + m.group(0), texto)
+    return texto
+
 def _resolver_mencoes(texto: str, projeto: str) -> tuple:
     """Substitui cada "@Nome" por um marcador de posição, para cada pessoa
     encontrada que tenha acesso ao projeto indicado — devolve o texto com
@@ -499,12 +524,19 @@ def _resolver_mencoes(texto: str, projeto: str) -> tuple:
     trocar pela tag real da menção depois da conversão para HTML (tal como
     os blocos de código, para o "<" e ">" da tag não serem escapados).
     Um "@Nome" que não corresponda a ninguém fica só o nome, sem o "@", em
-    vez de um símbolo pendurado sem menção nenhuma."""
+    vez de um símbolo pendurado sem menção nenhuma.
+
+    Antes disso, qualquer nome de pessoa (com acesso a este projeto) que
+    apareça no texto sem "@" já é corrigido por
+    _adicionar_arroba_em_nomes_conhecidos — para nunca depender de a Alma
+    se lembrar de escrever o "@" sozinha."""
     try:
         pessoas = pessoas_projeto(projeto) if projeto else []
     except Exception as e:
         print(f"[basecamp] não consegui obter pessoas do projeto para resolver menções: {e!r}")
         pessoas = []
+
+    texto = _adicionar_arroba_em_nomes_conhecidos(texto, pessoas)
 
     sgids = []
 
