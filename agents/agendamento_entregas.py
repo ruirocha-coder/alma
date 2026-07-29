@@ -36,6 +36,12 @@ def criar_eventos_calendario_entregas_restrito(utilizador: str, eventos: list) -
     agents/ceo.py para a instrução de nunca chamar isto sem confirmação
     explícita).
 
+    `eventos` deve incluir sempre um item por entrega E um item por cada
+    viagem entre paragens (pedido explícito do Rui, 2026-07-29) — esta
+    função em si é genérica, não distingue os dois tipos, trata qualquer
+    item da mesma forma (é a missão do CEO que garante que os dois tipos
+    são sempre incluídos, ver agents/ceo.py).
+
     Restrito a quem pode confirmar este agendamento (ver
     _AUTORIZADOS_CRIAR_EVENTOS) — verificado aqui, não só pela missão do
     modelo, à semelhança de atualizar_empresa_pessoa/
