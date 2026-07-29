@@ -562,6 +562,19 @@ def _texto_tempo_montagem_resumido(rendimento: dict, minutos_conta_a: float) -> 
         minutos_texto += f" · Conta B: {rendimento['euros_hora']:.0f} €/h, banda \"{rendimento['banda']}\""
     return minutos_texto
 
+def _celula_tabela(texto: str) -> str:
+    """Escapa "|" dentro de uma célula de tabela markdown — bug real
+    reportado em produção (2026-07-29): os títulos dos cards no Basecamp
+    usam "|" como separador interno (ex: "II | Anália Vasconcelos
+    18052026 | €1 467"), e um "|" não escapado dentro de uma célula
+    parte a linha da tabela em colunas a mais — o tempo estimado e o
+    custo reais (viagem/montagem) ficavam empurrados para fora da
+    tabela, e fragmentos do próprio título (incluindo o valor da
+    encomenda) apareciam por engano nas colunas "Tempo estimado"/"Custo".
+    Nunca usar um título ou nome bruto diretamente numa célula sem passar
+    por aqui primeiro."""
+    return (texto or "").replace("|", "\\|")
+
 def _construir_tabela_agendamento(agendamento_por_regiao: dict) -> str:
     """Tabela preparatória de agendamento, pedida explicitamente pelo Rui
     (2026-07-29), para rever ANTES de pedir a criação dos eventos no
@@ -602,14 +615,17 @@ def _construir_tabela_agendamento(agendamento_por_regiao: dict) -> str:
                     custo_texto = f"{custo['tempo_equipa']:.0f} € equipa (sem km — só duração disponível)"
                 else:
                     custo_texto = "—"
-                linhas.append(f"| Viagem: {evento['de']} → {evento['para']} | {evento['minutos']:.0f} min | {custo_texto} |")
+                de_texto = _celula_tabela(evento["de"])
+                para_texto = _celula_tabela(evento["para"])
+                linhas.append(f"| Viagem: {de_texto} → {para_texto} | {evento['minutos']:.0f} min | {custo_texto} |")
             elif evento["tipo"] == "cliente":
                 custo_montagem = tempos_montagem.custo_montagem_paragem(evento["minutos"], parametros)
                 total_montagem_min += evento["minutos"]
                 total_custo += custo_montagem or 0
                 tempo_texto = _texto_tempo_montagem_resumido(evento.get("rendimento"), evento["minutos"])
-                cliente_texto = evento.get("cliente") or "(cliente não identificado)"
-                linhas.append(f"| Cliente: {evento['titulo']} — {cliente_texto} | {tempo_texto} | {custo_montagem:.0f} € |")
+                titulo_texto = _celula_tabela(evento["titulo"])
+                cliente_texto = _celula_tabela(evento.get("cliente") or "(cliente não identificado)")
+                linhas.append(f"| Cliente: {titulo_texto} — {cliente_texto} | {tempo_texto} | {custo_montagem:.0f} € |")
             else:  # almoço
                 linhas.append(f"| Almoço | {evento['minutos']:.0f} min | — |")
 
