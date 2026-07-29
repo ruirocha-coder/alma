@@ -53,6 +53,16 @@ def _estado_atual(entrada: dict) -> tuple:
     return (entrada.get("summary") or "", entrada.get("starts_at") or "", entrada.get("ends_at") or "")
 
 
+def _cor_do_evento(titulo: str) -> str:
+    """Os eventos de deslocação (título "Viagem: X -> Y", ver
+    agents/ceo.py e a tool criar_eventos_calendario_entregas) ficam a azul
+    no Google Calendar, para se distinguirem visualmente das entregas em
+    si — pedido do Rui (2026-07-29)."""
+    if titulo.startswith("Viagem:"):
+        return google_calendar.COR_AZUL_VIAGEM
+    return None
+
+
 def _dentro_da_janela_de_sincronizacao(entrada: dict, hoje: date) -> bool:
     inicio = entrada.get("starts_at")
     if not inicio:
@@ -99,11 +109,12 @@ def correr_sincronizacao_calendario() -> dict:
                     if not _dentro_da_janela_de_sincronizacao(entrada, hoje):
                         ignorados_historico += 1
                         continue
-                    evento = google_calendar.criar_evento(titulo, inicio, fim, descricao)
+                    evento = google_calendar.criar_evento(titulo, inicio, fim, descricao, _cor_do_evento(titulo))
                     db.registar_mapeamento_calendario_google(entry_id, evento["id"], titulo, inicio, fim)
                     criados += 1
                 elif (mapeamento["titulo"], mapeamento["inicio"], mapeamento["fim"]) != (titulo, inicio, fim):
-                    google_calendar.atualizar_evento(mapeamento["google_event_id"], titulo, inicio, fim, descricao)
+                    google_calendar.atualizar_evento(mapeamento["google_event_id"], titulo, inicio, fim, descricao,
+                                                     _cor_do_evento(titulo))
                     db.atualizar_mapeamento_calendario_google(entry_id, titulo, inicio, fim)
                     atualizados += 1
             except Exception as e:
