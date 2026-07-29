@@ -63,6 +63,23 @@ CREATE TABLE IF NOT EXISTS basecamp_eventos_processados (
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
+-- mapeamento id da Agenda (Schedule) do Basecamp, projeto Entregas -> id do
+-- evento no Google Calendar (ver tools/google_calendar.py e
+-- agents/sincronizacao_calendario.py) — sincronização unidirecional
+-- (Basecamp -> Google, nunca ao contrário), pedido do Rui (2026-07-29).
+-- titulo/inicio/fim guardam o último estado sincronizado, para detetar
+-- alterações num próximo ciclo sem ter de voltar a pedir o evento ao
+-- Google Calendar só para comparar.
+CREATE TABLE IF NOT EXISTS basecamp_google_calendar_sync (
+    entry_id BIGINT PRIMARY KEY,     -- id da entrada na Agenda do Basecamp
+    google_event_id TEXT NOT NULL,
+    titulo TEXT,
+    inicio TEXT,
+    fim TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    atualizado_em TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS reunioes_em_curso (
     sessao TEXT PRIMARY KEY,
     excertos JSONB NOT NULL DEFAULT '{}'::jsonb,  -- {"indice": "texto transcrito"}
@@ -597,6 +614,49 @@ def registar_evento_processado(comment_id: int, resposta: str):
                    VALUES (%s, %s) ON CONFLICT (comment_id) DO NOTHING""",
                 (comment_id, resposta)
             )
+        conn.commit()
+
+def mapeamentos_calendario_google() -> dict:
+    """Todo o mapeamento atual entrada da Agenda do Basecamp -> evento do
+    Google Calendar (ver agents/sincronizacao_calendario.py), indexado por
+    entry_id — usado para decidir, a cada ciclo de sincronização, o que é
+    novo, alterado ou removido no Basecamp desde o último ciclo."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM basecamp_google_calendar_sync")
+            return {linha["entry_id"]: linha for linha in cur.fetchall()}
+
+def registar_mapeamento_calendario_google(entry_id: int, google_event_id: str,
+                                          titulo: str, inicio: str, fim: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO basecamp_google_calendar_sync
+                       (entry_id, google_event_id, titulo, inicio, fim)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (entry_id) DO UPDATE
+                       SET google_event_id = EXCLUDED.google_event_id,
+                           titulo = EXCLUDED.titulo, inicio = EXCLUDED.inicio,
+                           fim = EXCLUDED.fim, atualizado_em = now()""",
+                (entry_id, google_event_id, titulo, inicio, fim)
+            )
+        conn.commit()
+
+def atualizar_mapeamento_calendario_google(entry_id: int, titulo: str, inicio: str, fim: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE basecamp_google_calendar_sync
+                   SET titulo = %s, inicio = %s, fim = %s, atualizado_em = now()
+                   WHERE entry_id = %s""",
+                (titulo, inicio, fim, entry_id)
+            )
+        conn.commit()
+
+def remover_mapeamento_calendario_google(entry_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM basecamp_google_calendar_sync WHERE entry_id = %s", (entry_id,))
         conn.commit()
 
 def alertas_recentes(limite: int = 30) -> list[dict]:

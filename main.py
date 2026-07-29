@@ -17,7 +17,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
                     sugestao_logistica_semanal, estimativa_montagem,
-                    avisos_gestao_agendas)
+                    avisos_gestao_agendas, sincronizacao_calendario)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
@@ -69,6 +69,11 @@ scheduler.add_job(estimativa_montagem.correr_calibracao_estimativa, "cron",
 # agents/avisos_gestao_agendas.py), por isso corre sozinha todos os dias
 # sem custo extra na maioria deles.
 scheduler.add_job(avisos_gestao_agendas.correr_avisos_gestao_agendas, "cron", hour=8, minute=0)
+# sincronização unidirecional Basecamp (Agenda do projeto Entregas) ->
+# Google Calendar: de 2 em 2 minutos, pedido do Rui (2026-07-29) — o único
+# job por intervalo (não "cron") desta aplicação, porque aqui o objetivo é
+# mesmo "quase em tempo real" e não um horário fixo do dia.
+scheduler.add_job(sincronizacao_calendario.correr_sincronizacao_calendario, "interval", minutes=2)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -612,6 +617,15 @@ def avisos_gestao_agendas_agora():
     no Mural do projeto Entregas se hoje for mesmo um desses dias. Útil
     para testar sem esperar pelo dia certo da semana."""
     threading.Thread(target=avisos_gestao_agendas.correr_avisos_gestao_agendas, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/logistica/sincronizar-calendario")
+def sincronizar_calendario_agora():
+    """Dispara já um ciclo da sincronização unidirecional da Agenda do
+    projeto Entregas (Basecamp) para o Google Calendar, em segundo plano —
+    útil para testar sem esperar pelo próximo ciclo automático (a cada 2
+    minutos)."""
+    threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/ecos-largos/resumo-diario")
