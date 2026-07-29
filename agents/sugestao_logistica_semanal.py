@@ -469,12 +469,24 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
     Entregas sem morada, cuja morada não é reconhecida pelo Google Maps
     (ver _separar_moradas_por_regiao — nunca entram no cálculo do
     trajeto, para uma só morada má não fazer perder a proposta da região
-    inteira), cujo tempo de montagem ainda não foi calculado, ou que
-    ainda não estavam prontas em armazém dentro do prazo desta semana
+    inteira), cujo tempo de montagem ainda não foi calculado, ou cuja
+    data de entrada em armazém CONFIRMADA é depois do prazo desta semana
     (ver _prazo_armazem_semana — ficam para a semana seguinte,
     naturalmente, sem nenhuma ação extra: o prazo avança 7 dias a cada
     corrida), ficam de fora e são devolvidas à parte, para serem
     sinalizadas para inclusão manual — nunca com um horário inventado.
+
+    IMPORTANTE (bug real reportado em produção, 2026-07-29): um card em
+    "On Hold" por trás de uma região já confirma ESTRUTURALMENTE que a
+    encomenda chegou ao armazém (ver tools.logistica.fase_encomenda) —
+    "data_entrada_armazem" é só uma data em texto livre nas notas,
+    best-effort, que nem toda a equipa escreve lá (o próprio estado do
+    card já diz "chegou"). Por isso, quando essa data não é conhecida, a
+    entrega continua agendável (nunca tratada como "fora do prazo" só por
+    falta de uma data em texto) — fica só sinalizada à parte
+    ("sem_data_armazem"), para a equipa confirmar a data exata se quiser.
+    Só uma data CONFIRMADA e depois do prazo exclui mesmo a entrega desta
+    semana.
 
     O dia da semana usado é o fixo do documento "GESTÃO DAS AGENDAS"
     quando a região o tiver (ver DIA_SEMANA_FIXO_POR_REGIAO); as
@@ -485,8 +497,8 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
     calcular_horario_dia — None se não houver entregas agendáveis, ou se
     o trajeto real não puder ser calculado), "sem_morada": [titulos],
     "sem_morada_reconhecida": [titulos], "sem_estimativa": [titulos],
-    "fora_do_prazo": [titulos]}} — só para regiões com pelo menos uma
-    entrega pronta a entregar."""
+    "fora_do_prazo": [titulos], "sem_data_armazem": [titulos]}} — só
+    para regiões com pelo menos uma entrega pronta a entregar."""
     resultado = {}
     indice_dia = 0
     for regiao, entregas in entregas_por_regiao.items():
@@ -501,15 +513,31 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
         sem_estimativa = [e["titulo"] for e in entregas
                           if e["morada"] in moradas_reconhecidas and e["id"] not in estimativas_por_id]
 
+        # bug real reportado em produção (2026-07-29): um card em "On
+        # Hold" por trás de uma região já confirma estruturalmente que a
+        # encomenda chegou ao armazém (ver tools.logistica.fase_encomenda
+        # — é exatamente essa a semântica de "On Hold" atrás de Lisboa/
+        # Porto/Outro). "data_entrada_armazem" é só uma data em texto
+        # livre nas notas, best-effort (nem toda a equipa a escreve lá,
+        # já que o próprio estado do Kanban já diz "chegou") — por isso
+        # NÃO ter essa data não pode ser tratado como "confirmado fora do
+        # prazo": isso atrasava por engano encomendas genuinamente
+        # prontas uma semana inteira, só por a equipa não ter escrito a
+        # data nas notas. Só uma data CONFIRMADA e depois do prazo conta
+        # como "fora_do_prazo"; sem data nenhuma, a encomenda continua
+        # agendável (o On Hold já a confirma pronta), mas fica sinalizada
+        # à parte para a equipa confirmar a data exata se quiser.
         prazo_armazem = _prazo_armazem_semana(regiao, inicio_semana)
         if prazo_armazem is not None:
-            agendaveis = [e for e in candidatas
-                         if e.get("data_entrada_armazem") and e["data_entrada_armazem"] <= prazo_armazem]
             fora_do_prazo = [e["titulo"] for e in candidatas
-                            if not e.get("data_entrada_armazem") or e["data_entrada_armazem"] > prazo_armazem]
+                            if e.get("data_entrada_armazem") and e["data_entrada_armazem"] > prazo_armazem]
+            sem_data_armazem = [e["titulo"] for e in candidatas if not e.get("data_entrada_armazem")]
+            agendaveis = [e for e in candidatas
+                         if not (e.get("data_entrada_armazem") and e["data_entrada_armazem"] > prazo_armazem)]
         else:
             agendaveis = candidatas
             fora_do_prazo = []
+            sem_data_armazem = []
 
         dia = None
         horario = None
@@ -531,7 +559,8 @@ def _calcular_agendamento_por_regiao(entregas_por_regiao: dict, estimativas_por_
 
         resultado[regiao] = {"dia": dia, "horario": horario, "sem_morada": sem_morada,
                              "sem_morada_reconhecida": sem_morada_reconhecida,
-                             "sem_estimativa": sem_estimativa, "fora_do_prazo": fora_do_prazo}
+                             "sem_estimativa": sem_estimativa, "fora_do_prazo": fora_do_prazo,
+                             "sem_data_armazem": sem_data_armazem}
     return resultado
 
 def _construir_texto_proposta_agendamento(agendamento_por_regiao: dict) -> str:
@@ -570,6 +599,11 @@ def _construir_texto_proposta_agendamento(agendamento_por_regiao: dict) -> str:
                 linhas.append(f"  - ⚠️ ultrapassa o turno normal (17:30) — a logística tem de decidir "
                               "manualmente que paragem(ns) passar para outro dia (as horas extra são a "
                               "margem para o imprevisto, não para planear)")
+            if info["sem_data_armazem"]:
+                linhas.append("ℹ️ Já incluída(s) acima (o card já está On Hold, confirmando que chegou ao "
+                              "armazém) mas sem data exata de entrada confirmada nas notas — confirma se "
+                              "quiseres ter a certeza de quando chegou: "
+                              + ", ".join(info["sem_data_armazem"]))
 
         if info["sem_morada"]:
             linhas.append("⚠️ Sem morada identificada, fora da proposta: " + ", ".join(info["sem_morada"]))
