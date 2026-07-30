@@ -54,11 +54,12 @@ def sintetizar(texto: str) -> bytes:
         },
         json={
             "model": "gpt-4o-mini-tts",
-            "voice": "shimmer",
+            "voice": "marin",
             "input": texto,
             "instructions": (
-                "Voz calorosa, natural e alegre, em português europeu — "
-                "como alguém a falar à vontade, não a ler um texto."
+                "Português europeu, nunca do Brasil. Tom direto, tecnicamente "
+                "preciso e calmo — sem entusiasmo artificial, sem exclamações, "
+                "como alguém a falar com conhecimento de causa, não a vender algo."
             ),
             "response_format": "mp3",
         },
