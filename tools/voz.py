@@ -1,13 +1,15 @@
-# tools/voz.py — voz para a Alma: transcrição (STT) e síntese de fala (TTS).
+# tools/voz.py — voz para a Alma: síntese de fala (TTS) e o token efémero que
+# dá acesso ao browser à Realtime API da OpenAI para transcrever ao vivo (a
+# transcrição em si já não passa por aqui — ver tools/reuniao.py e o modo
+# reunião em main.py: o browser liga-se diretamente à OpenAI por WebRTC e só
+# envia o texto já transcrito para o servidor).
 #
-# A Anthropic não tem estas capacidades, por isso é preciso recorrer a
-# fornecedores externos: OpenAI (Whisper) para transcrever, e a ElevenLabs
-# para sintetizar — com a voz personalizada da empresa, em vez de uma voz
-# genérica. Ambos por pedidos HTTP simples (sem SDK nem streaming do lado do
-# fornecedor: uma chamada por gravação/frase chega, porque quem faz o
+# A Anthropic não tem síntese de fala, por isso recorre-se à OpenAI
+# (`/v1/audio/speech`) — por pedido HTTP simples (sem SDK nem streaming do
+# lado do fornecedor: uma chamada por frase chega, porque quem faz o
 # "streaming" percebido é o troceamento em frases feito aqui, não a API
 # externa).
-import os, re, time
+import os, re
 import httpx
 
 _FIM_DE_FRASE = re.compile(r"(?<=[.!?…])\s+")
@@ -42,80 +44,53 @@ def limpar_para_fala(texto: str) -> str:
     texto = _MD_PIPE.sub(" ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
-# limiares típicos para detetar um segmento "alucinado" pelo Whisper — texto
-# inventado (ex: "subscreve o canal", créditos de legendagem tipo "Amara.org")
-# quando o áudio é só silêncio/ruído, em vez de devolver vazio. Os dois
-# sinais têm de aparecer juntos: no_speech_prob alto sozinho também acontece
-# em fala real mas muito baixa/curta, por isso exige-se também pouca
-# confiança no texto gerado (avg_logprob baixo).
-_LIMIAR_SEM_FALA = 0.6
-_LIMIAR_CONFIANCA = -1.0
-
-def _parece_alucinacao(segmento: dict) -> bool:
-    return (segmento.get("no_speech_prob", 0) > _LIMIAR_SEM_FALA
-            and segmento.get("avg_logprob", 0) < _LIMIAR_CONFIANCA)
-
-def transcrever(bruto: bytes, filename: str = "audio.webm", content_type: str = "audio/webm") -> str:
-    """Transcreve uma gravação (ex: da consola de chat, ou um excerto de
-    reunião) para texto, via Whisper. Pede o resultado em segmentos
-    (verbose_json) e descarta os que parecem alucinações sobre
-    silêncio/ruído — sem isto, um excerto sem fala real por vezes volta com
-    texto inventado (frases comuns nos vídeos com que o Whisper foi
-    treinado) em vez de vazio, poluindo a transcrição com conteúdo que
-    ninguém disse.
-
-    Tem retry ligeiro (como os pedidos ao Basecamp) — sem isto, uma falha
-    pontual de rede/API neste pedido perdia o excerto por completo e, se
-    calhar de ser o excerto em que alguém a chamou pelo nome numa reunião,
-    a Alma nunca chegava sequer a saber que fora chamada."""
-    for tentativa in range(3):
-        try:
-            r = httpx.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                data={"model": "whisper-1", "language": "pt", "response_format": "verbose_json"},
-                files={"file": (filename, bruto, content_type)},
-                timeout=60,
-            )
-            r.raise_for_status()
-            break
-        except httpx.HTTPError as e:
-            if tentativa == 2:
-                raise
-            print(f"[voz] transcrição falhou ({e!r}), tentativa {tentativa + 1}/3")
-            time.sleep(2 * (tentativa + 1))
-    dados = r.json()
-    segmentos = dados.get("segments")
-    if segmentos is None:
-        return (dados.get("text") or "").strip()
-    partes = [s["text"].strip() for s in segmentos if s.get("text") and not _parece_alucinacao(s)]
-    return " ".join(partes).strip()
-
 def sintetizar(texto: str) -> bytes:
-    """Sintetiza texto em voz (mp3), com a voz personalizada da empresa."""
+    """Sintetiza texto em voz (mp3), via OpenAI."""
     r = httpx.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{os.environ['ELEVENLABS_VOICE_ID']}",
+        "https://api.openai.com/v1/audio/speech",
         headers={
-            "xi-api-key": os.environ["ELEVENLABS_API_KEY"],
+            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
             "Content-Type": "application/json",
         },
         json={
-            "text": texto,
-            "model_id": "eleven_flash_v2_5",  # multilingue (inclui português) e o mais rápido
-            "voice_settings": {
-                # stability mais baixa dá mais variação de entoação (menos "monótono
-                # e sério"); style acrescenta um pouco de exagero expressivo — o
-                # resultado é um tom mais alegre, sem exagerar ao ponto de soar instável.
-                "stability": 0.35,
-                "similarity_boost": 0.8,
-                "style": 0.45,
-                "use_speaker_boost": True,
-            },
+            "model": "gpt-4o-mini-tts",
+            "voice": "marin",
+            "input": texto,
+            "instructions": (
+                "Português europeu, nunca do Brasil. Tom direto, tecnicamente "
+                "preciso e calmo — sem entusiasmo artificial, sem exclamações, "
+                "como alguém a falar com conhecimento de causa, não a vender algo."
+            ),
+            "response_format": "mp3",
         },
         timeout=60,
     )
     r.raise_for_status()
     return r.content
+
+def emprestar_token_transcricao() -> dict:
+    """Pede à OpenAI um token efémero (dura poucos minutos/horas, nunca é a
+    chave principal da API) para o browser abrir, ele próprio, uma sessão de
+    transcrição contínua da Realtime API por WebRTC — sem o nosso servidor
+    ter de reencaminhar áudio. Devolve o token e a hora a que expira, para o
+    browser saber quando pedir um novo (ver reconexão no modo reunião)."""
+    r = httpx.post(
+        "https://api.openai.com/v1/realtime/client_secrets",
+        headers={
+            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "session": {
+                "type": "transcription",
+                "audio": {"input": {"transcription": {"model": "gpt-live-transcribe"}}},
+            },
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    dados = r.json()
+    return {"token": dados["value"], "expira_em": dados["expires_at"]}
 
 # quando a primeira frase da resposta é muito longa (uma introdução sem
 # pontuação a fechar tão cedo), esperar por ela tal e qual faz a voz demorar

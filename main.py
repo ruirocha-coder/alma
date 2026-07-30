@@ -262,35 +262,44 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
 
 @app.post("/alma/reuniao/iniciar")
 def reuniao_iniciar(sessao: str = Form(...)):
-    """Começa o modo reunião: a Alma passa a ouvir em contínuo (excertos
-    curtos, um após o outro) e só responde quando for chamada pelo nome."""
+    """Começa o modo reunião: a Alma passa a ouvir em contínuo (o browser liga-se
+    diretamente à Realtime API da OpenAI para transcrever, ver token abaixo) e
+    só responde quando for chamada pelo nome."""
     reuniao.iniciar(sessao)
-    return {"ok": True}
+    try:
+        token = voz.emprestar_token_transcricao()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao obter acesso à transcrição: {e}")
+    return {"ok": True, **token}
+
+@app.post("/alma/reuniao/token")
+def reuniao_token(sessao: str = Form(...)):
+    """Empresta um novo token efémero de transcrição para uma reunião já em
+    curso (ex: depois de uma queda de rede a meio) — ao contrário de
+    /alma/reuniao/iniciar, não reinicia a transcrição acumulada até agora."""
+    if not reuniao.em_curso(sessao):
+        raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
+    try:
+        return voz.emprestar_token_transcricao()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao obter acesso à transcrição: {e}")
 
 @app.post("/alma/reuniao/chunk")
-async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
-                        indice: int = Form(...), audio: UploadFile = File(...)):
-    """Recebe mais um excerto curto da reunião em curso (indice identifica a
-    posição deste excerto na ordem de gravação, para a transcrição acumulada
-    ficar sempre correta mesmo que os pedidos cheguem trocados). Transcreve-o
-    e acrescenta-o ao que já se ouviu; o áudio em si nunca é guardado. Se o
-    excerto não mencionar a Alma, devolve só a transcrição (para uma legenda
-    ao vivo, se a consola quiser mostrar). Se mencionar, devolve um stream
-    com a resposta (texto + voz) — e se já havia uma resposta anterior em
-    curso nesta sessão, essa é interrompida na hora (a Alma para de falar a
-    meio para ouvir e responder à nova chamada)."""
+def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
+                  indice: int = Form(...), texto: str = Form(...)):
+    """Recebe mais um turno já transcrito da reunião em curso pelo browser
+    (indice identifica a posição deste turno na ordem em que foi dito, para a
+    transcrição acumulada ficar sempre correta mesmo que os pedidos cheguem
+    trocados). Acrescenta-o ao que já se ouviu. Se o turno não mencionar a
+    Alma, devolve só a transcrição (para uma legenda ao vivo, se a consola
+    quiser mostrar). Se mencionar, devolve um stream com a resposta (texto +
+    voz) — e se já havia uma resposta anterior em curso nesta sessão, essa é
+    interrompida na hora (a Alma para de falar a meio para ouvir e responder
+    à nova chamada)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
-    bruto = await audio.read()
-    if len(bruto) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Áudio demasiado grande (máx. 15 MB)")
-
-    try:
-        texto = voz.transcrever(bruto, audio.filename or "audio.webm", audio.content_type or "audio/webm")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Falha ao transcrever o áudio: {e}")
-
+    texto = texto.strip()
     if not texto:
         return {"transcricao": "", "acionado": False,
                 "processados": reuniao.excertos_processados(sessao)}
@@ -298,26 +307,9 @@ async def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     reuniao.registar(sessao, indice, texto)
     processados = reuniao.excertos_processados(sessao)
 
-    pendente = reuniao.chamada_pendente(sessao)
-    if pendente is not None:
-        # já estávamos à espera da continuação de uma chamada anterior (o
-        # nome apareceu perto do fim de um excerto, a meio de frase) — este
-        # excerto é essa continuação; responde já com os dois juntos, sem
-        # voltar a esperar mais um (nunca mais do que um excerto de atraso)
-        reuniao.limpar_chamada_pendente(sessao)
-        texto_chamada = f"{pendente} {texto}".strip()
-    elif reuniao.foi_chamada(texto) and not reuniao.parece_completa(texto):
-        # foi chamada, mas o excerto acaba a meio de frase — o bloco de
-        # gravação de duração fixa cortou-a, não foi uma pausa real da
-        # pessoa. Espera pelo excerto seguinte antes de responder, em vez
-        # de reagir já só ao bocado da pergunta que apanhou (era isto que
-        # fazia a Alma dizer que não tinha ouvido).
-        reuniao.registar_chamada_pendente(sessao, texto)
+    if not reuniao.foi_chamada(texto):
         return {"transcricao": texto, "acionado": False, "processados": processados}
-    elif reuniao.foi_chamada(texto):
-        texto_chamada = texto
-    else:
-        return {"transcricao": texto, "acionado": False, "processados": processados}
+    texto_chamada = texto
 
     # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
     # que interrompe, de imediato, qualquer resposta anterior ainda em curso
@@ -470,7 +462,7 @@ def health_config():
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
                  "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
                  "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET", "OPENAI_API_KEY",
-                 "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ECOS_LARGOS_DASHBOARD_API_URL"]
+                 "ECOS_LARGOS_DASHBOARD_API_URL"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
