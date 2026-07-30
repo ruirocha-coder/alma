@@ -93,6 +93,17 @@ faturação, ou uma morada sem essa etiqueta) — usa null, NUNCA uses esse
 outro endereço, e nunca o vás procurar no PDF, no título, ou em qualquer
 outro texto. "morada" vem sempre e só das NOTAS do card, nunca do PDF.
 
+REGRA ESPECIAL para "data_entrega_cliente" (pedido explícito do Rui,
+2026-07-30, depois de a Alma pedir esta data num comentário quando ela já
+estava nas notas): as notas do card têm quase sempre um campo destacado
+rotulado "DATA PREVISTA ENTREGA" (tolera variações óbvias de maiúsculas/
+espaçamento/pontuação, ex: "Data prevista entrega:", "DATA PREVISTA
+ENTREGA:&nbsp;", e por vezes com uma palavra extra antes da data, ex:
+"DATA PREVISTA ENTREGA: PRODUTOS 1/10/2026") — usa SEMPRE a data que
+aparece a seguir a essa etiqueta como "data_entrega_cliente". Procura
+sempre por essa etiqueta primeiro, antes de concluir que a data não está
+presente; só uses null se ela genuinamente não existir nas notas.
+
 "produtos_encomendados" resume, em poucas palavras, o que foi
 encomendado — o orçamento/PDF da encomenda, quando fornecido a seguir às
 notas, tem quase sempre a lista de produtos completa, por isso usa-o
