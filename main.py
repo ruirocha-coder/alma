@@ -214,6 +214,7 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
             log_routing(mensagem_agente[:500], agente)
             gerador = AGENTES_STREAM[agente](utilizador, mensagens)
     except Exception as e:
+        print(f"[voz] falha ao encaminhar/gerar resposta em modo reunião: {e!r}")
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
 
@@ -247,6 +248,7 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
         if not interrompida and buffer_frase.strip():
             yield _evento_audio(buffer_frase)
     except Exception as e:
+        print(f"[voz] falha a meio da resposta em modo reunião: {e!r}")
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
 
@@ -308,7 +310,9 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     processados = reuniao.excertos_processados(sessao)
 
     if not reuniao.foi_chamada(texto):
+        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
         return {"transcricao": texto, "acionado": False, "processados": processados}
+    print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA detetada, a responder")
     texto_chamada = texto
 
     # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
