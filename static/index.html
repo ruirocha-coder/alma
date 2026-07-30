@@ -756,27 +756,28 @@
     aTocarAudio = false;
   }
 
-  // modo reunião — em vez de push-to-talk, a Alma ouve em excertos curtos e
-  // contínuos; só entra na conversa quando alguém a chama pelo nome. O
-  // excerto seguinte começa a gravar logo que o anterior termina (sem
-  // esperar pela resposta de rede), para não perder o que se diz entretanto.
+  // modo reunião — em vez de push-to-talk, a Alma ouve em contínuo e só
+  // entra na conversa quando alguém a chama pelo nome. O áudio nunca passa
+  // pelo nosso servidor: o browser liga-se diretamente à Realtime API da
+  // OpenAI por WebRTC (com um token efémero emprestado por
+  // /alma/reuniao/iniciar) e recebe dela, pelo data channel, a transcrição
+  // já feita de cada turno — cada turno transcrito é então enviado ao nosso
+  // servidor (só o texto, nunca o áudio), que decide se foi ou não uma
+  // chamada e, se foi, devolve a resposta em streaming (texto + voz), tal
+  // como já fazia antes desta mudança.
   const reuniaoBtn = document.getElementById("reuniao-btn");
   const reuniaoBanner = document.getElementById("reuniao-banner");
   const reuniaoStatusEl = document.getElementById("reuniao-status");
   const reuniaoTerminarBtn = document.getElementById("reuniao-terminar");
   let reuniaoAtiva = false;
   let reuniaoStreamMic = null;
-  let reuniaoRecorder = null;
-  const DURACAO_EXCERTO_REUNIAO_MS = 8000;
-  // enquanto está a falar, grava em excertos mais curtos — é o que permite
-  // detetar rapidamente que foi chamada de novo (para interromper), em vez
-  // de só ao fim dos 8 segundos habituais
-  const DURACAO_EXCERTO_A_RESPONDER_MS = 2500;
-  // cada excerto é enviado ao servidor assim que fica pronto (em paralelo,
-  // sem esperar pelos anteriores) — uma reunião longa ou muito faladora não
-  // pode ficar à espera de uma resposta lenta antes de processar o que se
-  // disse a seguir. A ordem correta na transcrição acumulada é garantida
-  // por um índice (não pela ordem de chegada da rede).
+  let reuniaoPC = null;
+  let reuniaoDC = null;
+  // cada turno transcrito é enviado ao servidor assim que chega (em
+  // paralelo, sem esperar pelos anteriores) — uma reunião longa ou muito
+  // faladora não pode ficar à espera de uma resposta lenta antes de
+  // processar o que se disse a seguir. A ordem correta na transcrição
+  // acumulada é garantida por um índice (não pela ordem de chegada da rede).
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
@@ -784,6 +785,10 @@
   // de áudio tardio de uma resposta já interrompida não voltar a tocar
   // depois de a fala ter sido cortada
   let geracaoRespostaCliente = 0;
+  // uma queda de rede a meio da reunião tenta reconectar a transcrição uma
+  // vez (novo token + nova ligação WebRTC) antes de desistir — uma queda
+  // momentânea não deve obrigar a reiniciar a reunião toda
+  let reconexaoTranscricaoTentada = false;
 
   function atualizarEstadoReuniao() {
     reuniaoStatusEl.textContent = respondendoAtivo
@@ -809,19 +814,35 @@
         pararModoReuniao();
       }
     });
+
+    let token;
     try {
-      await fetch("/alma/reuniao/iniciar", {
+      const resp = await fetch("/alma/reuniao/iniciar", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ sessao })
       });
+      if (!resp.ok) throw new Error(`${resp.status}`);
+      token = (await resp.json()).token;
     } catch (_) {
       addMessage("error", "Não consegui começar o modo reunião — falha de rede.");
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
       return;
     }
+
+    try {
+      await ligarTranscricaoReuniao(token);
+    } catch (e) {
+      console.error("Falha ao ligar à transcrição da reunião:", e);
+      addMessage("error", "Não consegui ligar à transcrição da reunião.");
+      reuniaoStreamMic.getTracks().forEach((t) => t.stop());
+      reuniaoStreamMic = null;
+      return;
+    }
+
     reuniaoAtiva = true;
+    reconexaoTranscricaoTentada = false;
     proximoIndiceExcerto = 0;
     excertosProcessados = 0;
     respondendoAtivo = false;
@@ -829,51 +850,76 @@
     reuniaoBtn.textContent = "🔴";
     reuniaoBanner.hidden = false;
     atualizarEstadoReuniao();
-    gravarProximoExcertoReuniao();
   }
 
-  function gravarProximoExcertoReuniao() {
-    if (!reuniaoAtiva || !reuniaoStreamMic) return;
-    const indice = proximoIndiceExcerto++;
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
-               : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-    const rec = new MediaRecorder(reuniaoStreamMic, { mimeType: mime });
-    const pedacos = [];
-    rec.addEventListener("dataavailable", (e) => { if (e.data && e.data.size > 0) pedacos.push(e.data); });
-    rec.addEventListener("stop", () => {
-      const blob = new Blob(pedacos, { type: rec.mimeType });
-      if (reuniaoAtiva) {
-        gravarProximoExcertoReuniao();  // continua a ouvir já, sem esperar pelo envio deste excerto
-      } else if (reuniaoStreamMic) {
-        reuniaoStreamMic.getTracks().forEach((t) => t.stop());
-        reuniaoStreamMic = null;
+  // liga-se diretamente à Realtime API da OpenAI por WebRTC (o áudio nunca
+  // passa pelo nosso servidor) — segue o fluxo documentado pela OpenAI:
+  // oferta SDP local, troca por uma ligação HTTP autenticada com o token
+  // efémero, resposta SDP aplicada à ligação.
+  async function ligarTranscricaoReuniao(token) {
+    const pc = new RTCPeerConnection();
+    pc.addTrack(reuniaoStreamMic.getAudioTracks()[0], reuniaoStreamMic);
+    const dc = pc.createDataChannel("oai-events");
+    dc.addEventListener("message", (e) => {
+      let ev;
+      try { ev = JSON.parse(e.data); } catch (_) { return; }
+      if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
+        enviarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
       }
-      enviarExcertoReuniao(blob, indice);  // enviado logo, em paralelo com o próximo excerto
     });
-    rec.addEventListener("error", (e) => {
-      console.error("Erro no MediaRecorder do modo reunião:", e.error || e);
-      if (reuniaoAtiva) gravarProximoExcertoReuniao();  // não deixa a escuta morrer em silêncio
+    pc.addEventListener("connectionstatechange", () => {
+      if (reuniaoAtiva && (pc.connectionState === "failed" || pc.connectionState === "disconnected")) {
+        reconectarTranscricaoReuniao();
+      }
     });
-    reuniaoRecorder = rec;
-    try {
-      rec.start();
-    } catch (e) {
-      console.error("Falha ao iniciar a gravação de um excerto:", e);
-      if (reuniaoAtiva) setTimeout(gravarProximoExcertoReuniao, 500);
-      return;
-    }
-    const duracao = respondendoAtivo ? DURACAO_EXCERTO_A_RESPONDER_MS : DURACAO_EXCERTO_REUNIAO_MS;
-    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, duracao);
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const resp = await fetch("https://api.openai.com/v1/realtime/calls", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/sdp" },
+      body: offer.sdp
+    });
+    if (!resp.ok) throw new Error(`Troca de SDP falhou: ${resp.status}`);
+    await pc.setRemoteDescription({ type: "answer", sdp: await resp.text() });
+
+    fecharTranscricaoReuniao();  // fecha a ligação anterior, se houver (ex: reconexão)
+    reuniaoPC = pc;
+    reuniaoDC = dc;
   }
 
-  async function enviarExcertoReuniao(blob, indice) {
-    if (blob.size < 500) return;  // excerto demasiado curto/silêncio, ignora
+  function fecharTranscricaoReuniao() {
+    if (reuniaoDC) { reuniaoDC.close(); reuniaoDC = null; }
+    if (reuniaoPC) { reuniaoPC.close(); reuniaoPC = null; }
+  }
+
+  async function reconectarTranscricaoReuniao() {
+    if (!reuniaoAtiva || reconexaoTranscricaoTentada) return;
+    reconexaoTranscricaoTentada = true;
+    try {
+      const resp = await fetch("/alma/reuniao/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sessao })
+      });
+      if (!resp.ok) throw new Error(`${resp.status}`);
+      const { token } = await resp.json();
+      await ligarTranscricaoReuniao(token);
+    } catch (e) {
+      console.error("Falha ao reconectar a transcrição da reunião:", e);
+      addMessage("error", "Perdi a ligação à transcrição da reunião — termina e começa de novo o modo reunião.");
+    }
+  }
+
+  async function enviarTurnoReuniao(texto, indice) {
+    texto = texto.trim();
+    if (!texto) return;
     try {
       const dados = new FormData();
       dados.append("utilizador", UTILIZADOR);
       dados.append("sessao", sessao);
       dados.append("indice", indice);
-      dados.append("audio", blob, "excerto.webm");
+      dados.append("texto", texto);
       const resp = await fetch("/alma/reuniao/chunk", { method: "POST", body: dados });
 
       if (resp.status === 409) return;  // a reunião já terminou entretanto
@@ -950,8 +996,8 @@
   function pararModoReuniao() {
     if (!reuniaoAtiva) return;
     reuniaoAtiva = false;
-    if (reuniaoRecorder && reuniaoRecorder.state === "recording") reuniaoRecorder.stop();
-    else if (reuniaoStreamMic) {
+    fecharTranscricaoReuniao();
+    if (reuniaoStreamMic) {
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
     }
