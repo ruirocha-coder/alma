@@ -4,11 +4,14 @@
 # reunião em main.py: o browser liga-se diretamente à OpenAI por WebRTC e só
 # envia o texto já transcrito para o servidor).
 #
-# A Anthropic não tem síntese de fala, por isso recorre-se à OpenAI
-# (`/v1/audio/speech`) — por pedido HTTP simples (sem SDK nem streaming do
-# lado do fornecedor: uma chamada por frase chega, porque quem faz o
-# "streaming" percebido é o troceamento em frases feito aqui, não a API
-# externa).
+# A Anthropic não tem síntese de fala, por isso recorre-se à ElevenLabs —
+# medido ao vivo (pedido do Rui, 2026-07-30): a API de TTS da OpenAI demora
+# 2-4s por frase, a ElevenLabs Flash (escolhida por ser a mais rápida do seu
+# catálogo) bem menos de 1s — a diferença sente-se muito numa conversa em
+# tempo real, onde cada frase da resposta espera por isto antes de tocar.
+# Por pedido HTTP simples (sem SDK nem streaming do lado do fornecedor: uma
+# chamada por frase chega, porque quem faz o "streaming" percebido é o
+# troceamento em frases feito aqui, não a API externa).
 import os, re
 import httpx
 
@@ -45,23 +48,25 @@ def limpar_para_fala(texto: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 def sintetizar(texto: str) -> bytes:
-    """Sintetiza texto em voz (mp3), via OpenAI."""
+    """Sintetiza texto em voz (mp3), com a voz personalizada da empresa."""
     r = httpx.post(
-        "https://api.openai.com/v1/audio/speech",
+        f"https://api.elevenlabs.io/v1/text-to-speech/{os.environ['ELEVENLABS_VOICE_ID']}",
         headers={
-            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "xi-api-key": os.environ["ELEVENLABS_API_KEY"],
             "Content-Type": "application/json",
         },
         json={
-            "model": "gpt-4o-mini-tts",
-            "voice": "marin",
-            "input": texto,
-            "instructions": (
-                "Português europeu, nunca do Brasil. Tom direto, tecnicamente "
-                "preciso e calmo — sem entusiasmo artificial, sem exclamações, "
-                "como alguém a falar com conhecimento de causa, não a vender algo."
-            ),
-            "response_format": "mp3",
+            "text": texto,
+            "model_id": "eleven_flash_v2_5",  # multilingue (inclui português) e o mais rápido
+            "voice_settings": {
+                # stability mais baixa dá mais variação de entoação (menos "monótono
+                # e sério"); style acrescenta um pouco de exagero expressivo — o
+                # resultado é um tom mais alegre, sem exagerar ao ponto de soar instável.
+                "stability": 0.35,
+                "similarity_boost": 0.8,
+                "style": 0.45,
+                "use_speaker_boost": True,
+            },
         },
         timeout=60,
     )
@@ -80,8 +85,14 @@ def emprestar_token_transcricao() -> dict:
     is not supported for this transcription model" — e sem turn_detection o
     servidor nunca deteta o fim de uma frase, por isso nunca chega nenhuma
     transcrição (era o bug de "não ouve nada"). "gpt-4o-mini-transcribe"
-    suporta-o; semantic_vad entende pausas naturais da fala (em vez de um
-    silêncio fixo), mais adequado a uma reunião com várias pessoas a falar."""
+    suporta-o.
+
+    server_vad (em vez de semantic_vad): semantic_vad tenta ter a certeza de
+    que a pessoa terminou mesmo o pensamento antes de fechar o turno, o que
+    se sente como um atraso a mais antes de a Alma sequer começar a pensar
+    na resposta — pedido do Rui (2026-07-30), depois de sentir a reunião
+    lenta. server_vad fecha o turno logo após um breve silêncio real
+    (prefix_padding_ms/silence_duration_ms por omissão), reage mais rápido."""
     r = httpx.post(
         "https://api.openai.com/v1/realtime/client_secrets",
         headers={
@@ -93,7 +104,7 @@ def emprestar_token_transcricao() -> dict:
                 "type": "transcription",
                 "audio": {"input": {
                     "transcription": {"model": "gpt-4o-mini-transcribe", "language": "pt"},
-                    "turn_detection": {"type": "semantic_vad"},
+                    "turn_detection": {"type": "server_vad"},
                 }},
             },
         },
