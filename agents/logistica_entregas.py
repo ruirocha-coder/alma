@@ -73,7 +73,9 @@ Boa Safra. Responde APENAS com um objeto JSON, sem mais nenhum texto
 antes ou depois, com exatamente estas chaves:
 {"cliente": string ou null, "numero_encomenda": string ou null,
 "fornecedor": string ou null, "designer": string ou null,
-"morada": string ou null, "produtos_encomendados": string ou null,
+"morada": string ou null, "morada_entrega": string ou null,
+"telefone": string ou null, "valor_a_receber": string ou null,
+"lembrete": string ou null, "produtos_encomendados": string ou null,
 "data_entrada_armazem": "AAAA-MM-DD" ou null,
 "data_entrega_cliente": "AAAA-MM-DD" ou null}
 Usa null sempre que a informação não estiver mesmo presente no texto —
@@ -92,6 +94,31 @@ que outro endereço apareça noutro sítio do texto (ex: uma morada de
 faturação, ou uma morada sem essa etiqueta) — usa null, NUNCA uses esse
 outro endereço, e nunca o vás procurar no PDF, no título, ou em qualquer
 outro texto. "morada" vem sempre e só das NOTAS do card, nunca do PDF.
+NUNCA confundas isto com "morada_entrega" (ver abaixo) — são campos
+independentes, com regras diferentes.
+
+"morada_entrega" (pedido do Rui, 2026-07-30, para aparecer no campo
+"Localização" do Google Calendar — nunca usado para cálculos de rota,
+só para mostrar/abrir no mapa): ao contrário de "morada", NÃO exige a
+etiqueta "Morada GPS" — usa o endereço rotulado "Morada de entrega" (ou
+variação óbvia, ex: "Morada de Entrega:", "MORADA DE ENTREGA -") se
+existir, senão usa "Morada GPS" se essa existir, senão null. Nunca vás
+buscar isto ao PDF.
+
+"telefone": o número de telemóvel/telefone de contacto do cliente, tal
+como está escrito nas notas (não reformates).
+
+REGRA ESPECIAL E ABSOLUTA para "valor_a_receber" e "lembrete" (pedido do
+Rui, 2026-07-30): a equipa vai passar a acrescentar, a partir de agora,
+campos rotulados explicitamente "Valor a receber" e "Lembrete" nas notas
+dos cards (tolera variações óbvias de maiúsculas/espaçamento/pontuação,
+ex: "Valor a Receber:", "VALOR A RECEBER -", "Lembrete:"). Usa nestes dois
+campos SÓ E APENAS o texto que vier a seguir a essas etiquetas específicas
+— nunca um valor ou observação inferidos de outro sítio das notas (ex:
+"Valor a pagar", "OBS." ou qualquer outro texto solto NÃO contam, mesmo
+que pareçam semelhantes). Hoje a maioria dos cards ainda não tem estas
+etiquetas — usa null sempre que não existirem, isso é o esperado e
+normal, não é um erro.
 
 REGRA ESPECIAL para "data_entrega_cliente" (pedido explícito do Rui,
 2026-07-30, depois de a Alma pedir esta data num comentário quando ela já

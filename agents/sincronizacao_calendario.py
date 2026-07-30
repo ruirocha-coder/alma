@@ -40,6 +40,7 @@
 # independentemente da idade — só a criação inicial é filtrada por data.
 import threading
 from datetime import date, timedelta
+from bs4 import BeautifulSoup
 from tools import basecamp, google_calendar
 import db
 
@@ -61,6 +62,65 @@ def _cor_do_evento(titulo: str) -> str:
     if titulo.startswith("Viagem:"):
         return google_calendar.COR_AZUL_VIAGEM
     return None
+
+
+def _texto_simples(html: str) -> str:
+    return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
+
+
+def _card_correspondente(titulo_evento: str, cards: list):
+    """Não existe nenhuma ligação guardada entre uma entrada 'Entrega' da
+    Agenda e o card de origem — encontra-a por semelhança de título: o
+    título de um card segue sempre o padrão "REGIÃO | Nome Cliente
+    DDMMAAAA | Valor€" (ver agents.sugestao_logistica_semanal), e o
+    título da entrada da Agenda inclui sempre o mesmo fragmento "REGIÃO |
+    Nome Cliente DDMMAAAA" (tudo antes do último "|", sem o valor). Em
+    caso de mais do que um candidato, fica com o fragmento mais longo
+    (mais específico). Devolve None se nenhum corresponder."""
+    melhor, melhor_tamanho = None, 0
+    for card in cards:
+        titulo_card = card.get("title") or ""
+        if "|" not in titulo_card:
+            continue
+        fragmento = titulo_card.rsplit("|", 1)[0].strip()
+        if fragmento and fragmento in titulo_evento and len(fragmento) > melhor_tamanho:
+            melhor, melhor_tamanho = card, len(fragmento)
+    return melhor
+
+
+def _titulo_e_localizacao_entrega(titulo_bruto: str) -> tuple:
+    """Para uma entrada 'Entrega' da Agenda (nunca para "Viagem:"/
+    "Almoço"), tenta encontrar o card de origem (ver _card_correspondente)
+    e usa os dados das notas desse card para construir o título "nº
+    encomenda - cliente - telefone - valor a receber - lembrete" (pedido
+    do Rui, 2026-07-30) e a morada para o campo "Localização" do Google
+    Calendar (ver agents.logistica_entregas._MISSAO_EXTRACAO,
+    "morada_entrega"). Nunca levanta erro — devolve (titulo_bruto, None)
+    se não encontrar o card ou a extração falhar, para a sincronização
+    nunca parar por causa disto."""
+    if not titulo_bruto.startswith("Entrega"):
+        return titulo_bruto, None
+    try:
+        from agents import logistica_entregas
+        itens = basecamp._itens_ativos()
+        cards = [i for i in itens if i.get("type") == "Kanban::Card"
+                and ((i.get("bucket") or {}).get("name") or "").strip().lower() == PROJETO_ENTREGAS.lower()]
+        card = _card_correspondente(titulo_bruto, cards)
+        if not card:
+            print(f"[sincronizacao_calendario] não encontrei o card de origem de {titulo_bruto!r} "
+                 "— título mantido tal como está na Agenda")
+            return titulo_bruto, None
+        notas = _texto_simples(card.get("content"))
+        dados = logistica_entregas._extrair_dados_encomenda(card.get("title") or "", notas)
+        partes = [dados.get("numero_encomenda"), dados.get("cliente"), dados.get("telefone"),
+                 dados.get("valor_a_receber"), dados.get("lembrete")]
+        partes_validas = [p for p in partes if p]
+        titulo_final = " - ".join(partes_validas) if partes_validas else titulo_bruto
+        return titulo_final, dados.get("morada_entrega")
+    except Exception as e:
+        print(f"[sincronizacao_calendario] não consegui enriquecer o título/localização de "
+             f"{titulo_bruto!r}: {e!r}")
+        return titulo_bruto, None
 
 
 def _dentro_da_janela_de_sincronizacao(entrada: dict, hoje: date) -> bool:
@@ -109,12 +169,15 @@ def correr_sincronizacao_calendario() -> dict:
                     if not _dentro_da_janela_de_sincronizacao(entrada, hoje):
                         ignorados_historico += 1
                         continue
-                    evento = google_calendar.criar_evento(titulo, inicio, fim, descricao, _cor_do_evento(titulo))
+                    titulo_final, localizacao = _titulo_e_localizacao_entrega(titulo)
+                    evento = google_calendar.criar_evento(titulo_final, inicio, fim, descricao,
+                                                          _cor_do_evento(titulo), localizacao)
                     db.registar_mapeamento_calendario_google(entry_id, evento["id"], titulo, inicio, fim)
                     criados += 1
                 elif (mapeamento["titulo"], mapeamento["inicio"], mapeamento["fim"]) != (titulo, inicio, fim):
-                    google_calendar.atualizar_evento(mapeamento["google_event_id"], titulo, inicio, fim, descricao,
-                                                     _cor_do_evento(titulo))
+                    titulo_final, localizacao = _titulo_e_localizacao_entrega(titulo)
+                    google_calendar.atualizar_evento(mapeamento["google_event_id"], titulo_final, inicio, fim,
+                                                     descricao, _cor_do_evento(titulo), localizacao)
                     db.atualizar_mapeamento_calendario_google(entry_id, titulo, inicio, fim)
                     atualizados += 1
             except Exception as e:
