@@ -67,7 +67,8 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {_access_token()}", "Content-Type": "application/json"}
 
 
-def _corpo_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str, cor_id: str = None) -> dict:
+def _corpo_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str, cor_id: str = None,
+                  localizacao: str = None) -> dict:
     # inicio_iso/fim_iso já vêm com o fuso horário incluído (ver
     # tools.agendamento_logistica.horario_para_iso) — o Calendar API aceita
     # "dateTime" em RFC3339 com offset diretamente, sem "timeZone" à parte.
@@ -79,23 +80,28 @@ def _corpo_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str, co
     }
     if cor_id:
         corpo["colorId"] = cor_id
+    if localizacao:
+        corpo["location"] = localizacao
     return corpo
 
 
-def criar_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str = "", cor_id: str = None) -> dict:
+def criar_evento(titulo: str, inicio_iso: str, fim_iso: str, descricao: str = "", cor_id: str = None,
+                 localizacao: str = None) -> dict:
     r = httpx.post(
         EVENTOS_URL.format(calendario_id=_calendario_id()),
-        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id), timeout=30,
+        headers=_headers(),
+        json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id, localizacao), timeout=30,
     )
     r.raise_for_status()
     return r.json()
 
 
 def atualizar_evento(google_event_id: str, titulo: str, inicio_iso: str, fim_iso: str,
-                     descricao: str = "", cor_id: str = None) -> dict:
+                     descricao: str = "", cor_id: str = None, localizacao: str = None) -> dict:
     r = httpx.patch(
         f"{EVENTOS_URL.format(calendario_id=_calendario_id())}/{google_event_id}",
-        headers=_headers(), json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id), timeout=30,
+        headers=_headers(),
+        json=_corpo_evento(titulo, inicio_iso, fim_iso, descricao, cor_id, localizacao), timeout=30,
     )
     r.raise_for_status()
     return r.json()
