@@ -73,7 +73,15 @@ def emprestar_token_transcricao() -> dict:
     chave principal da API) para o browser abrir, ele próprio, uma sessão de
     transcrição contínua da Realtime API por WebRTC — sem o nosso servidor
     ter de reencaminhar áudio. Devolve o token e a hora a que expira, para o
-    browser saber quando pedir um novo (ver reconexão no modo reunião)."""
+    browser saber quando pedir um novo (ver reconexão no modo reunião).
+
+    O modelo "gpt-live-transcribe" (mais indicado para legendas em contínuo)
+    não suporta turn_detection — a API rejeita o pedido com "Turn detection
+    is not supported for this transcription model" — e sem turn_detection o
+    servidor nunca deteta o fim de uma frase, por isso nunca chega nenhuma
+    transcrição (era o bug de "não ouve nada"). "gpt-4o-mini-transcribe"
+    suporta-o; semantic_vad entende pausas naturais da fala (em vez de um
+    silêncio fixo), mais adequado a uma reunião com várias pessoas a falar."""
     r = httpx.post(
         "https://api.openai.com/v1/realtime/client_secrets",
         headers={
@@ -83,7 +91,10 @@ def emprestar_token_transcricao() -> dict:
         json={
             "session": {
                 "type": "transcription",
-                "audio": {"input": {"transcription": {"model": "gpt-live-transcribe"}}},
+                "audio": {"input": {
+                    "transcription": {"model": "gpt-4o-mini-transcribe", "language": "pt"},
+                    "turn_detection": {"type": "semantic_vad"},
+                }},
             },
         },
         timeout=30,
