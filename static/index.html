@@ -906,14 +906,26 @@
     if (!resp.ok) throw new Error(`Troca de SDP falhou: ${resp.status}`);
     await pc.setRemoteDescription({ type: "answer", sdp: await resp.text() });
 
-    fecharConversaReuniao();  // fecha a ligação anterior, se houver (ex: reconexão)
+    fecharLigacaoAnterior();  // fecha a ligação anterior, se houver (ex: reconexão)
     reuniaoPC = pc;
     reuniaoDC = dc;
   }
 
-  function fecharConversaReuniao() {
+  // só fecha a ligação WebRTC anterior (pc/dc) — NUNCA mexe no audioPlayerEl
+  // aqui. Bug real (Rui, 2026-07-31): isto chamava audioPlayerEl.pause() logo
+  // a seguir a CADA ligação nova (mesmo a primeira, sem nenhuma anterior a
+  // fechar), interrompendo o próprio play() que pc.ontrack acabara de
+  // começar (AbortError: "interrupted by a call to pause()") — a Alma nunca
+  // se ouvia, mesmo com a faixa de áudio a chegar bem.
+  function fecharLigacaoAnterior() {
     if (reuniaoDC) { reuniaoDC.close(); reuniaoDC = null; }
     if (reuniaoPC) { reuniaoPC.close(); reuniaoPC = null; }
+  }
+
+  // fecha tudo, incluindo a reprodução — só deve ser chamado a terminar a
+  // reunião (ver pararModoReuniao), nunca ao estabelecer uma ligação nova
+  function fecharConversaReuniao() {
+    fecharLigacaoAnterior();
     audioPlayerEl.pause();
     audioPlayerEl.srcObject = null;
   }
