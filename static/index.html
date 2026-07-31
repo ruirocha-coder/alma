@@ -741,6 +741,16 @@
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
+  // rede de segurança determinística (Rui, 2026-07-31): a instrução para
+  // ela chamar mostrar_na_consola antes de falar nem sempre é seguida à
+  // letra — isto garante, por código, que tudo o que ela diz em voz
+  // acaba sempre escrito na consola, mesmo quando ela ignora essa
+  // instrução (ver response.output_audio_transcript.done abaixo). true
+  // só enquanto se espera a fala que dá seguimento a uma função já
+  // tratada (mostrar_na_consola ou perguntar_dados_empresa), cujo
+  // conteúdo já foi escrito por outro caminho — sem isto, essa fala
+  // apareceria duplicada.
+  let suprimirEcoProximaFala = false;
   // uma queda de rede a meio da reunião tenta reconectar uma vez (novo
   // token + nova ligação WebRTC) antes de desistir — uma queda momentânea
   // não deve obrigar a reiniciar a reunião toda
@@ -866,6 +876,16 @@
         // (versão anterior) forçava sempre uma resposta em voz mesmo
         // quando "Alma" só passava numa frase que não lhe era dirigida,
         // já que response.create não dá à sessão a opção de ficar calada.
+      } else if (ev.type === "response.output_audio_transcript.done" && ev.transcript) {
+        // rede de segurança determinística — ver suprimirEcoProximaFala.
+        // Nome do evento ainda não confirmado ao vivo (API nova neste
+        // projeto): o log de diagnóstico acima mostra o ev.type real se
+        // isto nunca disparar.
+        if (suprimirEcoProximaFala) {
+          suprimirEcoProximaFala = false;
+        } else {
+          addMessage("assistant", ev.transcript);
+        }
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
@@ -1009,6 +1029,9 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: "mostrado na consola" }
     }));
+    // já escrevemos o conteúdo acima — suprime o eco automático da fala de
+    // seguimento (ver suprimirEcoProximaFala), para não aparecer duplicado
+    suprimirEcoProximaFala = true;
     reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
 
@@ -1054,6 +1077,11 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: respostaFalada }
     }));
+    // já escrevemos "resposta" acima — suprime o eco automático da fala de
+    // seguimento (ver suprimirEcoProximaFala), para não duplicar como uma
+    // segunda mensagem (era esse duplicado, voz vs. texto sem relação
+    // direta, que já tinha sido revertido antes, ver histórico deste ficheiro)
+    suprimirEcoProximaFala = true;
     reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
 
