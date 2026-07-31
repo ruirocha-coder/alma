@@ -3,6 +3,7 @@ load_dotenv()
 
 import asyncio, base64, json, os
 import threading
+import concurrent.futures
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
@@ -180,6 +181,14 @@ def _evento_audio(frase: str) -> str:
         print(f"[voz] falha ao sintetizar frase: {e!r}")
         return ""
 
+# síntese de cada frase corre num destes threads em segundo plano, em vez de
+# bloquear a leitura do resto da resposta enquanto espera pela voz de uma
+# frase anterior (bug real, Rui 2026-07-31: cada síntese bloqueante atrasava
+# a chegada do texto seguinte, e o lag entre texto e voz crescia ao longo da
+# resposta). max_workers=4 chega para as poucas frases em voo ao mesmo tempo
+# numa resposta normal, sem abrir demasiadas ligações em simultâneo à OpenAI.
+_executor_voz = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tts")
+
 def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
                             mensagem_visivel: str = None, texto_transcricao: str = None,
                             minha_geracao: int = None):
@@ -221,6 +230,24 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
     def _interrompida() -> bool:
         return minha_geracao is not None and reuniao.foi_interrompida(sessao, minha_geracao)
 
+    # cada frase é sintetizada em segundo plano (_executor_voz) assim que
+    # fecha, em vez de bloquear aqui à espera — sem isto, o resto da resposta
+    # só continuava a chegar depois de cada síntese terminar (2-4s por
+    # frase), e o lag entre o texto (que não esperava por nada) e a voz
+    # crescia ao longo da resposta (bug real, Rui 2026-07-31: "deveria falar
+    # ao mesmo tempo que escreve, há um lag grande"). futuros_audio mantém a
+    # ordem certa das frases (a síntese pode terminar fora de ordem — a
+    # frase 2 pode ficar pronta antes da 1 — mas o cliente toca-as pela
+    # ordem em que os eventos chegam, por isso só se liberta o próximo da
+    # fila quando ele estiver mesmo pronto, nunca fora de ordem).
+    futuros_audio = []
+
+    def _drenar_prontos(bloquear_tudo=False):
+        eventos = []
+        while futuros_audio and (bloquear_tudo or futuros_audio[0].done()):
+            eventos.append(futuros_audio.pop(0).result())
+        return eventos
+
     partes, buffer_frase, interrompida = [], "", False
     try:
         for pedaco in gerador:
@@ -241,16 +268,24 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
                     interrompida = True
                     break
                 if frase.strip():
-                    yield _evento_audio(frase)
+                    futuros_audio.append(_executor_voz.submit(_evento_audio, frase))
+            for evento in _drenar_prontos():
+                yield evento
             if interrompida:
                 gerador.close()
                 break
         if not interrompida and buffer_frase.strip():
-            yield _evento_audio(buffer_frase)
+            futuros_audio.append(_executor_voz.submit(_evento_audio, buffer_frase))
     except Exception as e:
         print(f"[voz] falha a meio da resposta em modo reunião: {e!r}")
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
+
+    # o que faltar já vinha a sintetizar em paralelo desde que cada frase
+    # fechou — isto só espera pelo que ainda não tinha ficado pronto, não
+    # começa a síntese só agora
+    for evento in _drenar_prontos(bloquear_tudo=True):
+        yield evento
 
     if interrompida:
         nota = "\n\n_(interrompida — foi chamada de novo)_"

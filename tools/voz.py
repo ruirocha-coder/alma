@@ -48,14 +48,15 @@ def limpar_para_fala(texto: str) -> str:
     texto = _MD_PIPE.sub(" ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
-# pedido do Rui (2026-07-31): cadência mais rápida que o normal (1.0). A
-# primeira tentativa (1.2) não se sentiu mais rápida ao vivo — provável
-# causa: as "instructions" abaixo pediam um tom "calmo", e este modelo segue
-# as instruções de prosódia com mais peso do que o multiplicador "speed",
-# por isso "calmo" competia com o pedido de velocidade. Subiu-se para 1.35
-# e as instructions passaram a pedir explicitamente um ritmo rápido, em vez
-# de só "calmo", para os dois pedirem a mesma coisa em vez de se anularem.
-_VELOCIDADE_FALA = 1.35
+# pedido do Rui (2026-07-31): cadência mais rápida que o normal (1.0), sem
+# soar robótica. 1.2 não se sentiu mais rápido (as instructions pediam
+# "calmo", a competir com o pedido de velocidade); 1.35 já soou rápido
+# demais e robótico — sobretudo porque as instructions também pediam
+# "ritmo rápido e ágil, sem pausas", duplicando o pedido de velocidade por
+# duas vias ao mesmo tempo (o número e o texto). 1.15 fica mais perto de um
+# meio-termo, e as instructions voltam a pedir só o tom, não a cadência —
+# só uma via a pedir velocidade, não as duas a somarem-se.
+_VELOCIDADE_FALA = 1.15
 
 def sintetizar(texto: str) -> bytes:
     """Sintetiza texto em voz (mp3), via OpenAI — voz "marin", recomendada
