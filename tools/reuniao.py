@@ -25,6 +25,18 @@ RETENCAO_DIAS = 3
 
 _MENCAO_ALMA = re.compile(r"\balma\b", re.IGNORECASE)
 
+# pedido para a Alma só se calar, sem gerar resposta nova — distinto de a
+# chamarem outra vez pelo nome (isso já interrompe e responde de novo). Sem
+# isto, a única forma de a interromper era chamá-la de novo, o que também
+# disparava sempre uma resposta nova, mesmo quando só se queria que ela
+# parasse de falar. Exige o nome dela por perto (não só "para" sozinho, que
+# é uma palavra comum de mais em português para servir de gatilho sozinha).
+_PEDIDO_PARAR = re.compile(
+    r"\balma\b.{0,20}\b(para|pára|chega|cala[- ]?te|obrigad[ao])\b"
+    r"|\b(para|pára|chega|cala[- ]?te|obrigad[ao])\b.{0,20}\balma\b",
+    re.IGNORECASE,
+)
+
 # quando a Alma responde "ao vivo" a uma chamada, usar a transcrição toda
 # desde o início da reunião tornaria cada resposta mais lenta à medida que a
 # reunião cresce (mais texto a enviar ao modelo) — o que se sente como
@@ -104,6 +116,11 @@ def foi_interrompida(sessao: str, minha_geracao: int) -> bool:
 def foi_chamada(texto: str) -> bool:
     """Verifica se este excerto menciona a Alma diretamente (ex: "Alma, o que achas...")."""
     return bool(_MENCAO_ALMA.search(texto))
+
+def foi_pedido_para_parar(texto: str) -> bool:
+    """Verifica se este excerto pede à Alma para se calar (ex: "Alma, para",
+    "chega, Alma") — só deve interromper, nunca gerar uma resposta nova."""
+    return bool(_PEDIDO_PARAR.search(texto))
 
 def _ordenada(sessao: str) -> list[str]:
     mapa = _transcricoes.get(sessao, {})
