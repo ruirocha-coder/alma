@@ -230,8 +230,10 @@ def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...
         f"erros ou sobreposição de vozes):\n\n{contexto}\n\n"
         f'Alguém acabou de te perguntar (sobre a empresa): "{pergunta}"\n\n'
         "Responde diretamente a essa pessoa, como se estivesses presente na "
-        "sala — a tua resposta vai ser dita em voz alta por outra parte do "
-        "sistema, por isso sê clara e direta, sem formatação em markdown."
+        "sala. Podes usar a formatação (tabelas, listas, etc.) que fizer "
+        "sentido para os dados — a versão dita em voz é limpa à parte "
+        "(ver tools/voz.py:limpar_para_fala), a consola em texto mostra "
+        "esta resposta tal como a escreveres."
     )
     try:
         resultado = _responder_e_guardar(
