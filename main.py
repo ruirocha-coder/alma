@@ -292,12 +292,14 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     """Recebe mais um turno já transcrito da reunião em curso pelo browser
     (indice identifica a posição deste turno na ordem em que foi dito, para a
     transcrição acumulada ficar sempre correta mesmo que os pedidos cheguem
-    trocados). Acrescenta-o ao que já se ouviu. Se o turno não mencionar a
-    Alma, devolve só a transcrição (para uma legenda ao vivo, se a consola
-    quiser mostrar). Se mencionar, devolve um stream com a resposta (texto +
-    voz) — e se já havia uma resposta anterior em curso nesta sessão, essa é
-    interrompida na hora (a Alma para de falar a meio para ouvir e responder
-    à nova chamada)."""
+    trocados). Acrescenta-o ao que já se ouviu, e este turno, por si só, já
+    interrompe uma resposta anterior ainda em curso nesta sessão (a Alma
+    para de falar a meio para ouvir, mesmo que este turno não a chame pelo
+    nome — ver nova_geracao). Depois disso: se for um pedido para se calar
+    (ex: "Alma, para"), fica só interrompida, sem responder de novo. Se não
+    mencionar a Alma, devolve só a transcrição (para uma legenda ao vivo, se
+    a consola quiser mostrar). Se mencionar (e não for um pedido para
+    parar), devolve um stream com a resposta nova (texto + voz)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
@@ -316,6 +318,12 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     # 2026-07-30). Se este turno também for uma chamada, a mesma geração
     # serve já para a resposta nova a seguir.
     minha_geracao = reuniao.nova_geracao(sessao)
+
+    if reuniao.foi_pedido_para_parar(texto):
+        # só cala — a geração já avançou acima, o que já chega para
+        # interromper; não gera nenhuma resposta nova a este pedido
+        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — pedido para parar, sem responder")
+        return {"transcricao": texto, "acionado": False, "processados": processados}
 
     if not reuniao.foi_chamada(texto):
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
