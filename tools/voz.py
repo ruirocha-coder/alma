@@ -90,6 +90,39 @@ TOOL_PERGUNTAR_EMPRESA = {
     },
 }
 
+# a sessão de conversação só tem "boca" (áudio) — sem isto, uma resposta
+# dada por ela própria (não vinda do Claude) nunca aparece escrita na
+# consola, mesmo quando é uma tabela ou lista que se lê muito melhor do
+# que se ouve. Espelha o mesmo padrão de function calling que
+# perguntar_dados_empresa já usa: o browser recebe a chamada e escreve o
+# conteúdo na consola (ver tratarMostrarNaConsola em static/index.html),
+# devolvendo de seguida um response.create para ela continuar a falar.
+TOOL_MOSTRAR_NA_CONSOLA = {
+    "type": "function",
+    "name": "mostrar_na_consola",
+    "description": (
+        "Usa esta função sempre que a TUA PRÓPRIA resposta (a que dás "
+        "diretamente, sem passar pelo Claude) tiver uma tabela, lista, ou "
+        "outra informação estruturada que fique mais clara escrita do que "
+        "dita. Chama-a com o conteúdo em markdown (usa | para tabelas, - "
+        "para listas) — isso aparece escrito na consola para a pessoa ler. "
+        "Continua depois a falar normalmente um resumo breve em voz, sem "
+        "ler a tabela/lista à letra (não digas 'pipe', 'asterisco', etc.). "
+        "Para respostas curtas e simples, sem tabelas nem listas, não uses "
+        "esta função."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "conteudo": {
+                "type": "string",
+                "description": "O conteúdo formatado em markdown a escrever na consola.",
+            },
+        },
+        "required": ["conteudo"],
+    },
+}
+
 INSTRUCOES_MODO_REUNIAO = (
     "Português europeu, nunca do Brasil. És a Alma, assistente da Boa Safra "
     "/ Interior Guider, numa reunião de trabalho em modo de escuta contínua "
@@ -115,6 +148,11 @@ INSTRUCOES_MODO_REUNIAO = (
     "breve e direta. Se for sobre a empresa (Basecamp, produção, "
     "encomendas, entregas, calendário, documentos, equipas), usa sempre a "
     "função perguntar_dados_empresa — nunca inventes esses dados.\n\n"
+    "Se, ao responderes tu mesma (sem ser pelo perguntar_dados_empresa), a "
+    "resposta tiver uma tabela, lista, ou dados estruturados que fiquem "
+    "mais claros escritos do que ditos, chama a função mostrar_na_consola "
+    "com esse conteúdo em markdown — a pessoa vê isso escrito, e tu "
+    "continuas a falar um resumo breve em voz.\n\n"
     "Se alguém te chamar de novo enquanto ainda estás a falar, pára "
     "imediatamente e ouve o que disserem a seguir.\n\n"
     "Repetindo, porque é a regra mais importante: se não foste chamada "
@@ -198,7 +236,7 @@ def emprestar_token_conversa() -> dict:
                     },
                     "output": {"voice": "marin"},
                 },
-                "tools": [TOOL_PERGUNTAR_EMPRESA],
+                "tools": [TOOL_PERGUNTAR_EMPRESA, TOOL_MOSTRAR_NA_CONSOLA],
             },
         },
         timeout=30,

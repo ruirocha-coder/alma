@@ -871,7 +871,7 @@
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
         if (!chamadasFuncaoTratadas.has(ev.call_id)) {
           chamadasFuncaoTratadas.add(ev.call_id);
-          tratarPerguntaEmpresa(ev.call_id, ev.arguments);
+          despacharChamadaFuncao(ev.name, ev.call_id, ev.arguments);
         }
       } else if (ev.type === "response.done") {
         respondendoAtivo = false;
@@ -885,7 +885,7 @@
           for (const item of saida) {
             if (item.type === "function_call" && item.call_id && !chamadasFuncaoTratadas.has(item.call_id)) {
               chamadasFuncaoTratadas.add(item.call_id);
-              tratarPerguntaEmpresa(item.call_id, item.arguments);
+              despacharChamadaFuncao(item.name, item.call_id, item.arguments);
             }
           }
         }
@@ -980,6 +980,36 @@
     } catch (err) {
       console.error("Falha de rede a registar um excerto da reunião:", err);
     }
+  }
+
+  // encaminha uma chamada de função da sessão de conversação pelo nome —
+  // ver tools/voz.py para as definições das duas funções disponíveis
+  function despacharChamadaFuncao(nome, callId, argumentosJson) {
+    if (nome === "mostrar_na_consola") {
+      mostrarNaConsola(callId, argumentosJson);
+    } else {
+      tratarPerguntaEmpresa(callId, argumentosJson);
+    }
+  }
+
+  // chamado quando a sessão de conversação decide que uma resposta dada por
+  // ela própria (não vinda do Claude) tem uma tabela/lista que fica mais
+  // clara escrita — função mostrar_na_consola, definida em tools/voz.py.
+  // Ao contrário de tratarPerguntaEmpresa, o conteúdo já vem pronto nos
+  // argumentos (não há nada a ir buscar ao Claude); só escrevemos na
+  // consola e devolvemos o ack para ela continuar a falar o resumo em voz.
+  function mostrarNaConsola(callId, argumentosJson) {
+    let args = {};
+    try { args = JSON.parse(argumentosJson || "{}"); } catch (_) { /* usa {} */ }
+    const conteudo = (args.conteudo || "").trim();
+    if (conteudo) addMessage("assistant", conteudo);
+    fetchSessions();
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "mostrado na consola" }
+    }));
+    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
 
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
