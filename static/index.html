@@ -876,15 +876,18 @@
         // (versão anterior) forçava sempre uma resposta em voz mesmo
         // quando "Alma" só passava numa frase que não lhe era dirigida,
         // já que response.create não dá à sessão a opção de ficar calada.
-      } else if (ev.type === "response.output_audio_transcript.done" && ev.transcript) {
+      } else if (ev.type === "response.output_audio_transcript.done") {
         // rede de segurança determinística — ver suprimirEcoProximaFala.
-        // Nome do evento ainda não confirmado ao vivo (API nova neste
-        // projeto): o log de diagnóstico acima mostra o ev.type real se
-        // isto nunca disparar.
-        if (suprimirEcoProximaFala) {
-          suprimirEcoProximaFala = false;
-        } else {
-          addMessage("assistant", ev.transcript);
+        // log dedicado (não só o preview do objeto acima, que o Chrome corta
+        // em "…" antes de mostrar campos como este) — confirma ao vivo se
+        // ev.transcript vem mesmo preenchido
+        console.log("[reuniao] transcript da fala:", JSON.stringify(ev.transcript));
+        if (ev.transcript) {
+          if (suprimirEcoProximaFala) {
+            suprimirEcoProximaFala = false;
+          } else {
+            addMessage("assistant", ev.transcript);
+          }
         }
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
