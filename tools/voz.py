@@ -100,6 +100,9 @@ def emprestar_token_conversa() -> dict:
                 "type": "realtime",
                 "model": "gpt-realtime",
                 "instructions": INSTRUCOES_MODO_REUNIAO,
+                # por omissão já seria ["audio"], mas explícito não deixa
+                # nada a depender de um valor por omissão não confirmado
+                "output_modalities": ["audio"],
                 "audio": {
                     "input": {
                         "transcription": {
@@ -113,7 +116,16 @@ def emprestar_token_conversa() -> dict:
                                        "Assuntos comuns: produção, encomendas, entregas, logística, "
                                        "Basecamp, calendário."),
                         },
-                        "turn_detection": {"type": "semantic_vad", "eagerness": "high"},
+                        "turn_detection": {
+                            "type": "semantic_vad",
+                            "eagerness": "high",
+                            # explícito, para não depender de nenhum valor por
+                            # omissão não confirmado: gerar resposta sozinha
+                            # quando deteta o fim de um turno, e a pessoa poder
+                            # interrompê-la a falar de novo
+                            "create_response": True,
+                            "interrupt_response": True,
+                        },
                         "noise_reduction": {"type": "far_field"},
                     },
                     "output": {"voice": "marin"},
