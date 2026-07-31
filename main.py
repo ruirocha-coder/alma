@@ -313,10 +313,15 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
 
     if reuniao.foi_pedido_para_parar(texto):
         # interrompe (a única forma de a calar sem a chamar de novo pelo
-        # nome); não gera nenhuma resposta nova a este pedido
+        # nome); não gera nenhuma resposta nova a este pedido. "parar_audio"
+        # avisa o cliente para calar já o que estiver a tocar — esta resposta
+        # é JSON, não um stream, por isso não passa pelo caminho normal que
+        # já corta o áudio quando chega uma resposta nova (bug real, Rui
+        # 2026-07-31: o pedido de parar interrompia a geração no servidor,
+        # mas a Alma continuava a tocar o áudio já em fila no browser).
         reuniao.nova_geracao(sessao)
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — pedido para parar, sem responder")
-        return {"transcricao": texto, "acionado": False, "processados": processados}
+        return {"transcricao": texto, "acionado": False, "parar_audio": True, "processados": processados}
 
     if not reuniao.foi_chamada(texto):
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")

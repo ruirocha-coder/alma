@@ -106,7 +106,15 @@ def emprestar_token_transcricao() -> dict:
     coerente mas errado em idiomas aleatórios (russo, turco) a partir de
     ruído de fundo/silêncio numa sala com várias pessoas — o mesmo tipo de
     alucinação que o Whisper tinha antes (a razão de existir
-    _parece_alucinacao no código antigo, ver histórico deste ficheiro)."""
+    _parece_alucinacao no código antigo, ver histórico deste ficheiro).
+
+    O "prompt" tem de mencionar "Alma" explicitamente: bug real (Rui,
+    2026-07-31, visto nos logs) — a pessoa disse "Alma" para a interromper a
+    meio de uma resposta e o modelo ouviu "Alba" e depois "Alberto" (a
+    própria voz da Alma a tocar nas colunas, apanhada pelo microfone ao
+    mesmo tempo, não ajuda a clareza do som); sem o nome no prompt, o
+    modelo não tinha razão nenhuma para preferir "Alma" a um nome parecido
+    foneticamente."""
     r = httpx.post(
         "https://api.openai.com/v1/realtime/client_secrets",
         headers={
@@ -121,9 +129,14 @@ def emprestar_token_transcricao() -> dict:
                         "model": "gpt-4o-mini-transcribe",
                         "language": "pt",
                         "prompt": ("Reunião de trabalho em português europeu, na empresa "
-                                   "Boa Safra / Interior Guider. Assuntos comuns: produção, "
-                                   "encomendas, entregas, logística, Basecamp, calendário. "
-                                   "Pode haver silêncio ou ruído de fundo entre falas."),
+                                   "Boa Safra / Interior Guider, com a assistente Alma a "
+                                   "participar por voz. As pessoas dizem o nome \"Alma\" com "
+                                   "frequência para lhe chamar a atenção ou a interromper "
+                                   "(mesmo enquanto ela está a falar) — nunca transcrever "
+                                   "\"Alma\" como um nome parecido (ex: Alba, Alberto, Ana). "
+                                   "Assuntos comuns: produção, encomendas, entregas, logística, "
+                                   "Basecamp, calendário. Pode haver silêncio ou ruído de fundo "
+                                   "entre falas."),
                     },
                     "turn_detection": {"type": "semantic_vad", "eagerness": "high"},
                     "noise_reduction": {"type": "far_field"},

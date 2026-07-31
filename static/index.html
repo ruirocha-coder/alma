@@ -803,7 +803,14 @@
     // clique no botão) que o iOS Safari exige para desbloquear autoplay
     desbloquearAudio();
     try {
-      reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // pede explicitamente cancelamento de eco — a voz da própria Alma a
+      // tocar nas colunas é apanhada pelo mesmo microfone que ouve a
+      // reunião, e sem isto contamina a transcrição exatamente quando
+      // alguém tenta chamá-la a meio de uma resposta (ver o "prompt" em
+      // tools/voz.py:emprestar_token_transcricao)
+      reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
     } catch (_) {
       addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
       return;
@@ -930,8 +937,18 @@
 
       const tipo = resp.headers.get("content-type") || "";
       if (tipo.startsWith("application/json")) {
-        // não foi chamada (ou a Alma já estava a responder a outra chamada)
-        // — nada a mostrar, mas conta como sinal de vida
+        // não foi chamada (ou é um pedido explícito para se calar, ex:
+        // "Alma, para") — nada a mostrar, mas conta como sinal de vida.
+        // "parar_audio": um pedido de parar não gera resposta nova, por
+        // isso nunca passa pelo caminho normal (abaixo) que já corta o
+        // áudio quando chega um stream novo — sem isto, a Alma continuava a
+        // falar mesmo depois de lhe pedirem para parar.
+        const dadosJson = await resp.json().catch(() => null);
+        if (dadosJson && dadosJson.parar_audio) {
+          pararReproducaoAudio();
+          respondendoAtivo = false;
+          geracaoRespostaCliente++;
+        }
         excertosProcessados++;
         atualizarEstadoReuniao();
         return;
@@ -996,6 +1013,12 @@
   function pararModoReuniao() {
     if (!reuniaoAtiva) return;
     reuniaoAtiva = false;
+    // se a Alma estava a meio de uma resposta, tem de parar de falar já —
+    // sem isto, terminar a reunião não a calava e ela continuava a tocar o
+    // áudio já em fila (bug real, Rui 2026-07-31)
+    pararReproducaoAudio();
+    respondendoAtivo = false;
+    geracaoRespostaCliente++;  // invalida áudio tardio de uma resposta ainda em voo
     fecharTranscricaoReuniao();
     if (reuniaoStreamMic) {
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
