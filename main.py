@@ -208,14 +208,20 @@ def reuniao_chunk(sessao: str = Form(...), indice: int = Form(...), texto: str =
     return {"processados": reuniao.excertos_processados(sessao)}
 
 @app.post("/alma/reuniao/pergunta_empresa")
-def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...), pergunta: str = Form(...)):
+def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...), pergunta: str = Form(...),
+                             indice_recente: int = Form(0)):
     """Chamado pelo browser quando a sessão de conversação decide que uma
     pergunta é sobre a empresa (função perguntar_dados_empresa definida em
     tools/voz.py) — corre o Claude, com as ferramentas de sempre (Basecamp,
     calendário, documentos, dashboards), e devolve a resposta em texto para
     a Alma dizer com a sua própria voz. Ao contrário do resto do modo
     reunião, isto não decide SE deve responder — isso já foi decidido pela
-    sessão de conversação; aqui só se obtém a resposta."""
+    sessão de conversação; aqui só se obtém a resposta.
+
+    indice_recente: o próximo índice que o cliente vai atribuir a um turno
+    transcrito, no momento desta chamada — usado só para posicionar a
+    resposta da Alma no sítio certo da transcrição acumulada (ver
+    reuniao.registar_resposta_alma)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
     pergunta = pergunta.strip()
@@ -258,6 +264,9 @@ def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...
     # tabelas/marcadores de markdown chegavam à Alma tal e qual e ou eram
     # lidos à letra (pipes, asteriscos) ou parafraseados de forma estranha.
     resposta = resultado["resposta"]
+    # entra também na transcrição acumulada, para a ata final refletir o que
+    # a Alma respondeu, não só o que lhe perguntaram (pedido do Rui, 2026-07-31)
+    reuniao.registar_resposta_alma(sessao, resposta, indice_recente)
     return {"resposta": resposta, "resposta_falada": voz.limpar_para_fala(resposta)}
 
 @app.post("/alma/reuniao/terminar")

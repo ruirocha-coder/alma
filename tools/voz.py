@@ -153,11 +153,20 @@ def emprestar_token_conversa() -> dict:
                         "turn_detection": {
                             "type": "semantic_vad",
                             "eagerness": "high",
-                            # explícito, para não depender de nenhum valor por
-                            # omissão não confirmado: gerar resposta sozinha
-                            # quando deteta o fim de um turno, e a pessoa poder
-                            # interrompê-la a falar de novo
-                            "create_response": True,
+                            # create_response: false — bug real (Rui,
+                            # 2026-07-31): com true (omissão da API), a Alma
+                            # respondia sozinha a qualquer turno detetado,
+                            # mesmo sem ser chamada pelo nome — a instrução
+                            # "só respondes quando chamada" não chegava para
+                            # garantir isso com fiabilidade. Passa a ser o
+                            # browser a decidir quando disparar response.create
+                            # (só quando a transcrição do turno menciona
+                            # "Alma" — ver static/index.html), voltando a uma
+                            # verificação determinística em vez de confiar só
+                            # no juízo do modelo. interrupt_response continua
+                            # true: mesmo sem criar resposta nova sozinha, uma
+                            # nova fala deteta-se e corta a que estiver em curso.
+                            "create_response": False,
                             "interrupt_response": True,
                         },
                         "noise_reduction": {"type": "far_field"},

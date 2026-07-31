@@ -97,6 +97,24 @@ def excertos_processados(sessao: str) -> int:
     consola (para se perceber que a transcrição continua ativa)."""
     return _processados.get(sessao, 0)
 
+def registar_resposta_alma(sessao: str, texto: str, apos_indice: float) -> None:
+    """Regista o que a própria Alma respondeu (ex: a uma pergunta sobre a
+    empresa, via perguntar_dados_empresa) na transcrição acumulada — pedido
+    do Rui (2026-07-31): a ata final só refletia o que as pessoas diziam,
+    nunca o que ela respondia.
+
+    apos_indice é o índice mais recente conhecido do lado do cliente nesse
+    momento (o próximo índice que ele vai atribuir a um turno humano) —
+    regista-se em apos_indice - 0.5, um índice fracionário que fica sempre
+    entre o turno mais recente e o seguinte. Bug evitado: usar só
+    "o índice mais alto + 1" colide mais cedo ou mais tarde com um índice
+    inteiro que o cliente ainda vai atribuir (ele não sabe desta inserção
+    do lado do servidor), sobrescrevendo essa resposta silenciosamente."""
+    mapa = _transcricoes.setdefault(sessao, {})
+    mapa[apos_indice - 0.5] = f"[Alma respondeu] {texto.strip()}"
+    _processados[sessao] = _processados.get(sessao, 0) + 1
+    db.guardar_estado_reuniao(sessao, mapa, _processados[sessao])
+
 def _ordenada(sessao: str) -> list[str]:
     mapa = _transcricoes.get(sessao, {})
     return [mapa[i] for i in sorted(mapa)]
