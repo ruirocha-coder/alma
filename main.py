@@ -3,7 +3,6 @@ load_dotenv()
 
 import asyncio, base64, json, os
 import threading
-import concurrent.futures
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
@@ -181,14 +180,6 @@ def _evento_audio(frase: str) -> str:
         print(f"[voz] falha ao sintetizar frase: {e!r}")
         return ""
 
-# síntese de cada frase corre num destes threads em segundo plano, em vez de
-# bloquear a leitura do resto da resposta enquanto espera pela voz de uma
-# frase anterior (bug real, Rui 2026-07-31: cada síntese bloqueante atrasava
-# a chegada do texto seguinte, e o lag entre texto e voz crescia ao longo da
-# resposta). max_workers=4 chega para as poucas frases em voo ao mesmo tempo
-# numa resposta normal, sem abrir demasiadas ligações em simultâneo à OpenAI.
-_executor_voz = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tts")
-
 def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
                             mensagem_visivel: str = None, texto_transcricao: str = None,
                             minha_geracao: int = None):
@@ -230,24 +221,6 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
     def _interrompida() -> bool:
         return minha_geracao is not None and reuniao.foi_interrompida(sessao, minha_geracao)
 
-    # cada frase é sintetizada em segundo plano (_executor_voz) assim que
-    # fecha, em vez de bloquear aqui à espera — sem isto, o resto da resposta
-    # só continuava a chegar depois de cada síntese terminar (2-4s por
-    # frase), e o lag entre o texto (que não esperava por nada) e a voz
-    # crescia ao longo da resposta (bug real, Rui 2026-07-31: "deveria falar
-    # ao mesmo tempo que escreve, há um lag grande"). futuros_audio mantém a
-    # ordem certa das frases (a síntese pode terminar fora de ordem — a
-    # frase 2 pode ficar pronta antes da 1 — mas o cliente toca-as pela
-    # ordem em que os eventos chegam, por isso só se liberta o próximo da
-    # fila quando ele estiver mesmo pronto, nunca fora de ordem).
-    futuros_audio = []
-
-    def _drenar_prontos(bloquear_tudo=False):
-        eventos = []
-        while futuros_audio and (bloquear_tudo or futuros_audio[0].done()):
-            eventos.append(futuros_audio.pop(0).result())
-        return eventos
-
     partes, buffer_frase, interrompida = [], "", False
     try:
         for pedaco in gerador:
@@ -268,24 +241,16 @@ def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
                     interrompida = True
                     break
                 if frase.strip():
-                    futuros_audio.append(_executor_voz.submit(_evento_audio, frase))
-            for evento in _drenar_prontos():
-                yield evento
+                    yield _evento_audio(frase)
             if interrompida:
                 gerador.close()
                 break
         if not interrompida and buffer_frase.strip():
-            futuros_audio.append(_executor_voz.submit(_evento_audio, buffer_frase))
+            yield _evento_audio(buffer_frase)
     except Exception as e:
         print(f"[voz] falha a meio da resposta em modo reunião: {e!r}")
         yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
         return
-
-    # o que faltar já vinha a sintetizar em paralelo desde que cada frase
-    # fechou — isto só espera pelo que ainda não tinha ficado pronto, não
-    # começa a síntese só agora
-    for evento in _drenar_prontos(bloquear_tudo=True):
-        yield evento
 
     if interrompida:
         nota = "\n\n_(interrompida — foi chamada de novo)_"
@@ -333,11 +298,14 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     — nunca por qualquer fala, mesmo sem mencionar a Alma (pedido do Rui,
     2026-07-31: essa versão mais ampla interrompia com ruído de fundo/
     conversa não dirigida a ela, cortando-a a meio sem ninguém a ter
-    chamado nem pedido para parar). Uma chamada sem pergunta nenhuma a
-    seguir (só "Alma", ou "Alma, espera") também interrompe, mas não gera
-    resposta nova — só uma chamada com conteúdo real dispara uma resposta
-    (ver foi_chamada_sem_conteudo). Se não mencionar a Alma, devolve só a
-    transcrição (para uma legenda ao vivo, se a consola quiser mostrar)."""
+    chamado nem pedido para parar). Qualquer chamada pelo nome dispara
+    sempre uma resposta nova — foi tentada uma distinção entre "chamada com
+    pergunta" e "só pedir atenção" (sem responder), mas revertida no mesmo
+    dia: qualquer menção incidental a "Alma" (ex: alguém a mencionar na
+    conversa, não a chamá-la) cortava uma resposta em curso em silêncio,
+    sem nenhum sinal do que aconteceu — pior do que responder a mais. Se
+    não mencionar a Alma, devolve só a transcrição (para uma legenda ao
+    vivo, se a consola quiser mostrar)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
 
@@ -364,17 +332,6 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     if not reuniao.foi_chamada(texto):
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
         return {"transcricao": texto, "acionado": False, "processados": processados}
-
-    if reuniao.foi_chamada_sem_conteudo(texto):
-        # só o nome dela (ou nome + preenchimento tipo "espera"), sem
-        # pergunta nenhuma a seguir — interrompe (é um pedido de atenção/
-        # pausa) mas não gera resposta nova, senão a mesma palavra "Alma"
-        # significava sempre as duas coisas ao mesmo tempo (pedido do Rui,
-        # 2026-07-31): interromper E lançar uma resposta nova, mesmo quando
-        # só se queria a atenção dela.
-        reuniao.nova_geracao(sessao)
-        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA sem conteúdo, só interrompe")
-        return {"transcricao": texto, "acionado": False, "parar_audio": True, "processados": processados}
 
     print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA detetada, a responder")
     texto_chamada = texto
