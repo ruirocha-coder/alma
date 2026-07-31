@@ -333,7 +333,10 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     — nunca por qualquer fala, mesmo sem mencionar a Alma (pedido do Rui,
     2026-07-31: essa versão mais ampla interrompia com ruído de fundo/
     conversa não dirigida a ela, cortando-a a meio sem ninguém a ter
-    chamado nem pedido para parar). Se não mencionar a Alma, devolve só a
+    chamado nem pedido para parar). Uma chamada sem pergunta nenhuma a
+    seguir (só "Alma", ou "Alma, espera") também interrompe, mas não gera
+    resposta nova — só uma chamada com conteúdo real dispara uma resposta
+    (ver foi_chamada_sem_conteudo). Se não mencionar a Alma, devolve só a
     transcrição (para uma legenda ao vivo, se a consola quiser mostrar)."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
@@ -361,6 +364,18 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     if not reuniao.foi_chamada(texto):
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
         return {"transcricao": texto, "acionado": False, "processados": processados}
+
+    if reuniao.foi_chamada_sem_conteudo(texto):
+        # só o nome dela (ou nome + preenchimento tipo "espera"), sem
+        # pergunta nenhuma a seguir — interrompe (é um pedido de atenção/
+        # pausa) mas não gera resposta nova, senão a mesma palavra "Alma"
+        # significava sempre as duas coisas ao mesmo tempo (pedido do Rui,
+        # 2026-07-31): interromper E lançar uma resposta nova, mesmo quando
+        # só se queria a atenção dela.
+        reuniao.nova_geracao(sessao)
+        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA sem conteúdo, só interrompe")
+        return {"transcricao": texto, "acionado": False, "parar_audio": True, "processados": processados}
+
     print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA detetada, a responder")
     texto_chamada = texto
 

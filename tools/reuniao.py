@@ -37,6 +37,27 @@ _PEDIDO_PARAR = re.compile(
     re.IGNORECASE,
 )
 
+# palavras de preenchimento comuns quando se chama a Alma só para lhe pedir
+# atenção/pausa, sem uma pergunta a seguir (ex: "Alma, espera", "Alma, calma")
+_PREENCHIMENTO = re.compile(
+    r"\b(espera|esperas|calma|ok|então|entao|olha|pera[íi]?|desculpa)\b",
+    re.IGNORECASE,
+)
+_PONTUACAO_E_ESPACO = re.compile(r"[\s.,!?…\-–—]+")
+
+def foi_chamada_sem_conteudo(texto: str) -> bool:
+    """Distingue chamar a Alma com uma pergunta nova de só lhe chamar a
+    atenção/pedir uma pausa (ex: só "Alma", "Alma!", "Alma, espera") — sem
+    isto, a mesma palavra "Alma" interrompe sempre E tenta gerar uma
+    resposta nova, mesmo quando não há pergunta nenhuma a seguir (pedido do
+    Rui, 2026-07-31: "a mesma palavra 'alma' ativa e desativa", queria uma
+    forma mais natural de distinguir). Remove o nome e preenchimento comum;
+    se não sobrar nada com conteúdo, é só um pedido de atenção/pausa."""
+    resto = _MENCAO_ALMA.sub("", texto)
+    resto = _PREENCHIMENTO.sub("", resto)
+    resto = _PONTUACAO_E_ESPACO.sub("", resto)
+    return resto == ""
+
 # quando a Alma responde "ao vivo" a uma chamada, usar a transcrição toda
 # desde o início da reunião tornaria cada resposta mais lenta à medida que a
 # reunião cresce (mais texto a enviar ao modelo) — o que se sente como
