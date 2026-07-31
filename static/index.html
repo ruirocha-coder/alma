@@ -986,7 +986,11 @@
 
     addMessage("user", `🎙️ (reunião) ${pergunta || "(pergunta sobre a empresa)"}`);
     addTyping();
-    let resposta;
+    // "resposta" (com markdown, para a consola) e "respostaFalada" (limpa,
+    // sem tabelas/marcadores — ver tools/voz.py:limpar_para_fala) são
+    // devolvidas separadamente: mostrar uma coisa e dizer outra evita que a
+    // Alma leia pipes de tabela ou asteriscos à letra
+    let resposta, respostaFalada;
     try {
       const dados = new FormData();
       dados.append("utilizador", UTILIZADOR);
@@ -994,10 +998,12 @@
       dados.append("pergunta", pergunta);
       const resp = await fetch("/alma/reuniao/pergunta_empresa", { method: "POST", body: dados });
       if (!resp.ok) throw new Error(`${resp.status}`);
-      resposta = (await resp.json()).resposta;
+      const dadosResp = await resp.json();
+      resposta = dadosResp.resposta;
+      respostaFalada = dadosResp.resposta_falada || resposta;
     } catch (err) {
       console.error("Falha ao obter resposta do Claude no modo reunião:", err);
-      resposta = "Não consegui obter essa informação agora — houve uma falha de rede.";
+      resposta = respostaFalada = "Não consegui obter essa informação agora — houve uma falha de rede.";
     }
     removeTyping();
     addMessage("assistant", resposta);
@@ -1008,7 +1014,7 @@
     if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
     reuniaoDC.send(JSON.stringify({
       type: "conversation.item.create",
-      item: { type: "function_call_output", call_id: callId, output: resposta }
+      item: { type: "function_call_output", call_id: callId, output: respostaFalada }
     }));
     reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }

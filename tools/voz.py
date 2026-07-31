@@ -26,8 +26,42 @@
 # voz, não lê o texto do Claude à letra), e a regra "só responde quando
 # chamada pelo nome" passa a ser uma instrução dada ao modelo, não uma
 # verificação de código determinística.
-import os
+import os, re
 import httpx
+
+# a resposta do Claude vem em markdown (para a consola em texto), mas isso
+# não deve chegar tal e qual à voz — a Realtime API, ao receber isto como
+# resultado da função perguntar_dados_empresa, ou tentaria "ler" os
+# marcadores (asteriscos, pipes de tabela) ou parafraseava-os de forma
+# estranha. Isto limpa a formatação antes de devolver o texto para a Alma
+# dizer; a consola em texto continua a mostrar o markdown original (ver
+# main.py:reuniao_pergunta_empresa, que devolve os dois separadamente).
+_MD_BLOCO_CODIGO = re.compile(r"```.*?```", re.DOTALL)
+_MD_CODIGO_LINHA = re.compile(r"`([^`]*)`")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_ENFASE = re.compile(r"(\*\*\*|\*\*|\*|___|__|_)(.+?)\1")
+_MD_TITULO = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_MD_LISTA = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+_MD_LISTA_NUM = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)
+_MD_CITACAO = re.compile(r"^>\s?", re.MULTILINE)
+_MD_LINHA_HORIZONTAL = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
+_MD_PIPE = re.compile(r"\|")
+
+def limpar_para_fala(texto: str) -> str:
+    """Remove marcação markdown (incluindo tabelas) de um texto antes de o
+    devolver para a Alma dizer em voz — a consola em texto continua a
+    receber o markdown original, sem passar por aqui."""
+    texto = _MD_BLOCO_CODIGO.sub(" ", texto)
+    texto = _MD_LINHA_HORIZONTAL.sub(" ", texto)
+    texto = _MD_LINK.sub(r"\1", texto)
+    texto = _MD_CODIGO_LINHA.sub(r"\1", texto)
+    texto = _MD_ENFASE.sub(r"\2", texto)
+    texto = _MD_TITULO.sub("", texto)
+    texto = _MD_LISTA.sub("", texto)
+    texto = _MD_LISTA_NUM.sub("", texto)
+    texto = _MD_CITACAO.sub("", texto)
+    texto = _MD_PIPE.sub(" ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
 
 # a Alma só deve chamar esta função para assuntos concretos da empresa —
 # para conversa geral responde diretamente, com a sua própria voz
