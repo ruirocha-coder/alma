@@ -701,7 +701,12 @@ def carregar_estado_reuniao(sessao: str):
             linha = cur.fetchone()
     if not linha:
         return None
-    excertos = {int(indice): texto for indice, texto in linha["excertos"].items()}
+    # float, não int — uma resposta da Alma regista-se num índice fracionário
+    # (ver tools/reuniao.py:registar_resposta_alma), para ficar sempre entre
+    # o turno que a desencadeou e o seguinte, sem colidir com índices
+    # inteiros futuros atribuídos pelo cliente (que não sabe desta inserção
+    # do lado do servidor)
+    excertos = {float(indice): texto for indice, texto in linha["excertos"].items()}
     return {"excertos": excertos, "processados": linha["processados"]}
 
 def eliminar_estado_reuniao(sessao: str):

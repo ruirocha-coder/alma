@@ -859,6 +859,14 @@
       console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
+        // create_response:false na sessão (ver tools/voz.py) — é este
+        // código, não o juízo do modelo, que decide se este turno merece
+        // resposta. Bug real (Rui, 2026-07-31): confiar só na instrução
+        // "só respondes quando chamada" fazia a Alma intervir demasiadas
+        // vezes em conversa não dirigida a ela.
+        if (/\balma\b/i.test(ev.transcript) && dc.readyState === "open") {
+          dc.send(JSON.stringify({ type: "response.create" }));
+        }
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
@@ -996,6 +1004,7 @@
       dados.append("utilizador", UTILIZADOR);
       dados.append("sessao", sessao);
       dados.append("pergunta", pergunta);
+      dados.append("indice_recente", proximoIndiceExcerto);
       const resp = await fetch("/alma/reuniao/pergunta_empresa", { method: "POST", body: dados });
       if (!resp.ok) throw new Error(`${resp.status}`);
       const dadosResp = await resp.json();
