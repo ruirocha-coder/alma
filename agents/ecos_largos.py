@@ -1,14 +1,17 @@
 from persona import PERSONA
-from agents.base import correr_agente, correr_agente_stream
+from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET
 from tools import documentos_empresa, basecamp, ecos_largos
 
 # Ecos Largos é uma equipa industrial parceira, gerida no mesmo Basecamp mas
 # com o seu próprio projeto, inteiramente à parte da Interior Guider — por
 # isso as ferramentas de vendas/site/documentos de referência da Interior
-# Guider ficam de fora: só o que faz sentido para o projeto deles.
+# Guider ficam de fora: só o que faz sentido para o projeto deles. A
+# pesquisa/leitura da internet (TOOLS_INTERNET) é uma exceção — não é
+# específica de nenhuma das duas equipas, por isso entra aqui na mesma.
 TOOLS_ECOS_LARGOS = (documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                      + basecamp.TOOLS_ESTADO_PROJETO
-                     + ecos_largos.TOOLS_DASHBOARD_PRODUCAO)
+                     + ecos_largos.TOOLS_DASHBOARD_PRODUCAO
+                     + TOOLS_INTERNET)
 
 MISSAO_ECOS_LARGOS = PERSONA + """
 

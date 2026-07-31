@@ -19,12 +19,25 @@ MAX_TOKENS_RESPOSTA = 8192
 
 client = anthropic.Anthropic()
 
+# Pesquisa e leitura da internet: tools do lado do servidor da Anthropic — a
+# própria Claude executa a pesquisa/leitura, sem nenhuma função nossa a
+# correr (por isso não aparecem em FUNCOES). Pedido do Rui (2026-07-31):
+# questões gerais, fora do que a Alma já sabe pelas suas ferramentas da
+# empresa. Nunca declarar "code_execution" ao lado destas — a filtragem
+# dinâmica já corre por baixo destas duas, e uma segunda ferramenta de
+# execução de código só confundia o modelo.
+TOOLS_INTERNET = [
+    {"type": "web_search_20260209", "name": "web_search"},
+    {"type": "web_fetch_20260209", "name": "web_fetch"},
+]
+
 # Tools que qualquer agente pode incluir — quem adicionar um agente novo só
 # precisa de fazer TOOLS_X = TOOLS_COMUNS + [tools específicas do agente].
 TOOLS_COMUNS = (bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE
                 + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                 + documentos_referencia.TOOLS_DOCUMENTOS_REFERENCIA
-                + basecamp.TOOLS_ESTADO_PROJETO)
+                + basecamp.TOOLS_ESTADO_PROJETO
+                + TOOLS_INTERNET)
 
 def _disparar_sugestao_semanal_logistica():
     # import feito aqui dentro (não no topo do módulo) de propósito:
@@ -343,6 +356,14 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
         texto_ronda = "".join(b.text for b in resposta.content if b.type == "text")
         if texto_ronda:
             partes_resposta.append(texto_ronda)
+
+        if resposta.stop_reason == "pause_turn":
+            # o próprio servidor atingiu o limite de rondas de uma tool sua
+            # (ex: várias pesquisas na internet seguidas, ver TOOLS_INTERNET)
+            # — reenviar a mesma conversa retoma sozinho, sem repetir nada
+            mensagens.append({"role": "assistant", "content": resposta.content})
+            continue
+
         if resposta.stop_reason != "tool_use":
             return "".join(partes_resposta)
 
@@ -375,6 +396,12 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utili
             for texto in stream.text_stream:
                 yield texto
             resposta = stream.get_final_message()
+
+        if resposta.stop_reason == "pause_turn":
+            # ver correr_agente: o servidor atingiu o limite de rondas de uma
+            # tool sua — reenviar a mesma conversa retoma sozinho
+            mensagens.append({"role": "assistant", "content": resposta.content})
+            continue
 
         if resposta.stop_reason != "tool_use":
             return
