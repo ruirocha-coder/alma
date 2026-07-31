@@ -48,6 +48,9 @@ def limpar_para_fala(texto: str) -> str:
     texto = _MD_PIPE.sub(" ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
+# pedido do Rui (2026-07-31): cadência 20% mais rápida que o normal (1.0)
+_VELOCIDADE_FALA = 1.2
+
 def sintetizar(texto: str) -> bytes:
     """Sintetiza texto em voz (mp3), via OpenAI — voz "marin", recomendada
     pela própria OpenAI como a de melhor qualidade."""
@@ -67,6 +70,7 @@ def sintetizar(texto: str) -> bytes:
                 "como alguém a falar com conhecimento de causa, não a vender algo."
             ),
             "response_format": "mp3",
+            "speed": _VELOCIDADE_FALA,
         },
         timeout=60,
     )
