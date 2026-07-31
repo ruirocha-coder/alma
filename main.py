@@ -242,7 +242,13 @@ def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao obter resposta do agente: {e}")
-    return {"resposta": resultado["resposta"]}
+    # "resposta" fica com o markdown original, para a consola em texto
+    # mostrar formatado (ex: tabelas do Basecamp); "resposta_falada" é o
+    # texto limpo que a sessão de conversação recebe para dizer — sem isto,
+    # tabelas/marcadores de markdown chegavam à Alma tal e qual e ou eram
+    # lidos à letra (pipes, asteriscos) ou parafraseados de forma estranha.
+    resposta = resultado["resposta"]
+    return {"resposta": resposta, "resposta_falada": voz.limpar_para_fala(resposta)}
 
 @app.post("/alma/reuniao/terminar")
 def reuniao_terminar(utilizador: str = Form(...), sessao: str = Form(...)):
