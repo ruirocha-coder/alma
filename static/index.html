@@ -859,14 +859,13 @@
       console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
-        // create_response:false na sessão (ver tools/voz.py) — é este
-        // código, não o juízo do modelo, que decide se este turno merece
-        // resposta. Bug real (Rui, 2026-07-31): confiar só na instrução
-        // "só respondes quando chamada" fazia a Alma intervir demasiadas
-        // vezes em conversa não dirigida a ela.
-        if (/\balma\b/i.test(ev.transcript) && dc.readyState === "open") {
-          dc.send(JSON.stringify({ type: "response.create" }));
-        }
+        // create_response:true na sessão (ver tools/voz.py) — é a própria
+        // sessão que decide, a cada turno, se responde ou fica calada
+        // (regra reforçada em INSTRUCOES_MODO_REUNIAO). Não precisamos de
+        // disparar response.create aqui: um regex a decidir isso à parte
+        // (versão anterior) forçava sempre uma resposta em voz mesmo
+        // quando "Alma" só passava numa frase que não lhe era dirigida,
+        // já que response.create não dá à sessão a opção de ficar calada.
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
