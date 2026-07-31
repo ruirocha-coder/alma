@@ -859,13 +859,6 @@
       console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
-      } else if (ev.type === "response.output_audio_transcript.done" && ev.transcript) {
-        // tudo o que a Alma diz em voz (conversa geral incluída, que antes
-        // não deixava nenhum registo em texto — só as respostas passadas
-        // pelo Claude, via perguntar_dados_empresa, apareciam na consola).
-        // Pedido do Rui (2026-07-31): manter tudo o que ela diz na consola,
-        // para se poder copiar depois.
-        addMessage("assistant", ev.transcript);
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
