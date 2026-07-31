@@ -87,12 +87,17 @@ def emprestar_token_transcricao() -> dict:
     transcrição (era o bug de "não ouve nada"). "gpt-4o-mini-transcribe"
     suporta-o.
 
-    server_vad (em vez de semantic_vad): semantic_vad tenta ter a certeza de
-    que a pessoa terminou mesmo o pensamento antes de fechar o turno, o que
-    se sente como um atraso a mais antes de a Alma sequer começar a pensar
-    na resposta — pedido do Rui (2026-07-30), depois de sentir a reunião
-    lenta. server_vad fecha o turno logo após um breve silêncio real
-    (prefix_padding_ms/silence_duration_ms por omissão), reage mais rápido."""
+    semantic_vad (não server_vad): testado ao vivo (pedido do Rui,
+    2026-07-30) — server_vad fecha o turno logo após um breve silêncio fixo
+    (~200ms por omissão), o que na prática cortava frases inteiras em
+    pedaços minúsculos ("Hm.", "OK.", "Alma" sozinha sem a pergunta a
+    seguir) sempre que havia a mínima pausa a meio de uma frase. Cada
+    fragmento com "Alma" disparava uma resposta nova e cortava a anterior a
+    meio (ver nova_geracao em tools/reuniao.py), por isso a Alma nunca
+    chegava a terminar uma resposta completa — sentia-se pior e mais lenta,
+    não melhor. semantic_vad só fecha o turno quando entende que a pessoa
+    terminou mesmo o pensamento, a um custo de latência que, na prática,
+    compensa por dar turnos inteiros e coerentes em vez de fragmentados."""
     r = httpx.post(
         "https://api.openai.com/v1/realtime/client_secrets",
         headers={
@@ -104,7 +109,7 @@ def emprestar_token_transcricao() -> dict:
                 "type": "transcription",
                 "audio": {"input": {
                     "transcription": {"model": "gpt-4o-mini-transcribe", "language": "pt"},
-                    "turn_detection": {"type": "server_vad"},
+                    "turn_detection": {"type": "semantic_vad"},
                 }},
             },
         },
