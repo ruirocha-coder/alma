@@ -837,18 +837,47 @@
       audioPlayerEl.play().catch(() => {});
     };
     const dc = pc.createDataChannel("oai-events");
+    // chamadas de função já tratadas (por call_id) — response.done inclui o
+    // mesmo function_call que um response.function_call_arguments.done
+    // anterior pode já ter disparado; sem isto arriscava tratar a mesma
+    // chamada duas vezes
+    const chamadasFuncaoTratadas = new Set();
     dc.addEventListener("message", (e) => {
       let ev;
       try { ev = JSON.parse(e.data); } catch (_) { return; }
+      // log de diagnóstico — a Realtime API é nova neste projeto e o nome
+      // exato de alguns eventos ainda não foi confirmado ao vivo; isto dá
+      // visibilidade imediata na consola do browser sobre o que a sessão
+      // está mesmo a fazer (ex: gerou uma resposta? chamou uma função? deu
+      // erro?), sem termos de adivinhar às cegas outra vez
+      console.debug("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
-      } else if (ev.type === "response.function_call_arguments.done") {
-        tratarPerguntaEmpresa(ev);
-      } else if (ev.type === "response.created") {
-        respondendoAtivo = true;
-        atualizarEstadoReuniao();
+      } else if (ev.type === "error") {
+        console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
+      } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
+        if (!chamadasFuncaoTratadas.has(ev.call_id)) {
+          chamadasFuncaoTratadas.add(ev.call_id);
+          tratarPerguntaEmpresa(ev.call_id, ev.arguments);
+        }
       } else if (ev.type === "response.done") {
         respondendoAtivo = false;
+        atualizarEstadoReuniao();
+        // fonte mais fiável para chamadas de função: cada item de saída com
+        // type "function_call" tem call_id/name/arguments (ver
+        // response.function_call_arguments.done acima, que pode chegar
+        // primeiro — daí a verificação de chamadasFuncaoTratadas)
+        const saida = ev.response && ev.response.output;
+        if (Array.isArray(saida)) {
+          for (const item of saida) {
+            if (item.type === "function_call" && item.call_id && !chamadasFuncaoTratadas.has(item.call_id)) {
+              chamadasFuncaoTratadas.add(item.call_id);
+              tratarPerguntaEmpresa(item.call_id, item.arguments);
+            }
+          }
+        }
+      } else if (ev.type === "response.created") {
+        respondendoAtivo = true;
         atualizarEstadoReuniao();
       }
     });
@@ -929,9 +958,9 @@
   // a empresa (função perguntar_dados_empresa, definida em tools/voz.py) —
   // corre o Claude e devolve o resultado à sessão, que continua a falar com
   // a sua própria voz
-  async function tratarPerguntaEmpresa(ev) {
+  async function tratarPerguntaEmpresa(callId, argumentosJson) {
     let args = {};
-    try { args = JSON.parse(ev.arguments || "{}"); } catch (_) { /* usa {} */ }
+    try { args = JSON.parse(argumentosJson || "{}"); } catch (_) { /* usa {} */ }
     const pergunta = (args.pergunta || "").trim();
 
     addMessage("user", `🎙️ (reunião) ${pergunta || "(pergunta sobre a empresa)"}`);
@@ -958,7 +987,7 @@
     if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
     reuniaoDC.send(JSON.stringify({
       type: "conversation.item.create",
-      item: { type: "function_call_output", call_id: ev.call_id, output: resposta }
+      item: { type: "function_call_output", call_id: callId, output: resposta }
     }));
     reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
