@@ -1,5 +1,25 @@
-# tools/reuniao.py — modo reunião: a Alma "ouve" continuamente (em vez de
-# push-to-talk) e só entra na conversa quando é chamada pelo nome.
+# tools/reuniao.py — modo reunião: a Alma "ouve" e conversa em contínuo por
+# voz, através de uma sessão de conversação completa da Realtime API da
+# OpenAI (ver tools/voz.py:emprestar_token_conversa) — é essa sessão que
+# decide, pelas suas próprias instruções, quando responder (só quando
+# chamada pelo nome) e quando chamar de volta ao Claude para assuntos da
+# empresa (ver a função "perguntar_dados_empresa" e o endpoint
+# /alma/reuniao/pergunta_empresa em main.py). Este módulo já não decide se
+# a Alma deve responder — só acumula a transcrição de tudo o que foi dito,
+# para servir de contexto a essas respostas e para o resumo/ata final.
+#
+# Histórico (2026-07-31): esta lógica de "chamada"/interrupção existiu aqui
+# em código (regex a detetar "Alma" no texto, um contador de "geração" para
+# saber se uma resposta anterior devia parar a meio) enquanto a sessão da
+# OpenAI só transcrevia, sem falar nem decidir nada. Essa arquitetura
+# revelou-se frágil: a voz da própria Alma, apanhada de volta pelo
+# microfone (eco imperfeito, sem a mesma ligação WebRTC a servir de
+# referência para o cancelamento), por vezes continha "Alma" e disparava
+# uma resposta nova sobre a que estava em curso — um ciclo de arrancar/
+# parar. Numa sessão de conversação a sério, o cancelamento de eco e a
+# deteção de turno/interrupção são geridos nativamente pela própria OpenAI
+# sobre a mesma ligação que reproduz a voz da Alma, em vez de recriados à
+# mão a partir de texto transcrito.
 #
 # O áudio nunca chega a este servidor — o browser liga-se diretamente à
 # Realtime API da OpenAI (por WebRTC, ver /alma/reuniao/iniciar em main.py) e
@@ -14,7 +34,6 @@
 # uma reunião longa (ex: um deploy novo), não como registo permanente: ver
 # RETENCAO_DIAS. Se o estado em memória desaparecer (reinício), é recuperado
 # da BD de forma transparente da próxima vez que a sessão for usada.
-import re
 import db
 
 # quanto tempo o estado de uma reunião persistido na BD sobrevive antes de
@@ -23,29 +42,7 @@ import db
 # um reinício do servidor a meio de uma reunião ainda em curso.
 RETENCAO_DIAS = 3
 
-_MENCAO_ALMA = re.compile(r"\balma\b", re.IGNORECASE)
-
-# pedido para a Alma só se calar, sem gerar resposta nova — distinto de a
-# chamarem outra vez pelo nome (isso já interrompe e responde de novo). Sem
-# isto, a única forma de a interromper era chamá-la de novo, o que também
-# disparava sempre uma resposta nova, mesmo quando só se queria que ela
-# parasse de falar. Exige o nome dela por perto (não só "para" sozinho, que
-# é uma palavra comum de mais em português para servir de gatilho sozinha).
-_PEDIDO_PARAR = re.compile(
-    r"\balma\b.{0,20}\b(para|pára|chega|cala[- ]?te|obrigad[ao])\b"
-    r"|\b(para|pára|chega|cala[- ]?te|obrigad[ao])\b.{0,20}\balma\b",
-    re.IGNORECASE,
-)
-
-# foi tentada uma distinção entre "chamar com uma pergunta nova" e "só pedir
-# atenção/pausa" (ex: só "Alma", "Alma, espera" não geravam resposta) —
-# revertida no mesmo dia (Rui, 2026-07-31): qualquer menção incidental a
-# "Alma" (alguém a mencionar na conversa, sem a chamar de propósito) cortava
-# uma resposta em curso em silêncio, sem nenhum sinal do que tinha
-# acontecido — sentiu-se como "interrupções a mais" e pior do que o
-# comportamento anterior (responder sempre, mesmo a mais).
-
-# quando a Alma responde "ao vivo" a uma chamada, usar a transcrição toda
+# quando a Alma responde "ao vivo" a uma pergunta, usar a transcrição toda
 # desde o início da reunião tornaria cada resposta mais lenta à medida que a
 # reunião cresce (mais texto a enviar ao modelo) — o que se sente como
 # "bloquear" numa reunião longa ou muito faladora. Só o fim recente da
@@ -61,12 +58,6 @@ _LIMITE_CONTEXTO_AO_VIVO = 32000
 
 _transcricoes: dict[str, dict[int, str]] = {}
 _processados: dict[str, int] = {}
-# número da "geração" de resposta em curso nesta sessão — sempre que uma
-# nova chamada chega, a geração avança, e qualquer resposta ainda a decorrer
-# de uma geração anterior sabe que deve parar (interrompida): é assim que a
-# Alma para de falar assim que é chamada de novo, em vez de acabar a frase
-# toda primeiro.
-_geracao: dict[str, int] = {}
 
 def iniciar(sessao: str) -> None:
     """Começa (ou reinicia) a escuta de uma reunião para esta sessão — limpa
@@ -74,7 +65,6 @@ def iniciar(sessao: str) -> None:
     herdar a transcrição de uma reunião anterior."""
     _transcricoes[sessao] = {}
     _processados[sessao] = 0
-    _geracao[sessao] = 0
     db.eliminar_estado_reuniao(sessao)
 
 def em_curso(sessao: str) -> bool:
@@ -88,7 +78,6 @@ def em_curso(sessao: str) -> bool:
         return False
     _transcricoes[sessao] = estado["excertos"]
     _processados[sessao] = estado["processados"]
-    _geracao.setdefault(sessao, 0)
     return True
 
 def registar(sessao: str, indice: int, texto: str) -> None:
@@ -104,31 +93,9 @@ def registar(sessao: str, indice: int, texto: str) -> None:
     db.guardar_estado_reuniao(sessao, _transcricoes.get(sessao, {}), _processados[sessao])
 
 def excertos_processados(sessao: str) -> int:
-    """Contagem de excertos já respondidos pelo servidor — serve de sinal de
-    vida para a consola (para se perceber que a Alma continua ativa, mesmo
-    quando não há nada para responder)."""
+    """Contagem de excertos já registados — serve de sinal de vida para a
+    consola (para se perceber que a transcrição continua ativa)."""
     return _processados.get(sessao, 0)
-
-def nova_geracao(sessao: str) -> int:
-    """Chamar sempre que se vai começar a responder a uma nova chamada —
-    invalida (interrompe) qualquer resposta anterior ainda em curso nesta
-    sessão. Devolve o número que a nova resposta deve usar para, por sua
-    vez, saber se foi interrompida por uma chamada ainda mais recente."""
-    nova = _geracao.get(sessao, 0) + 1
-    _geracao[sessao] = nova
-    return nova
-
-def foi_interrompida(sessao: str, minha_geracao: int) -> bool:
-    return _geracao.get(sessao, 0) != minha_geracao
-
-def foi_chamada(texto: str) -> bool:
-    """Verifica se este excerto menciona a Alma diretamente (ex: "Alma, o que achas...")."""
-    return bool(_MENCAO_ALMA.search(texto))
-
-def foi_pedido_para_parar(texto: str) -> bool:
-    """Verifica se este excerto pede à Alma para se calar (ex: "Alma, para",
-    "chega, Alma") — só deve interromper, nunca gerar uma resposta nova."""
-    return bool(_PEDIDO_PARAR.search(texto))
 
 def _ordenada(sessao: str) -> list[str]:
     mapa = _transcricoes.get(sessao, {})
@@ -139,7 +106,7 @@ def transcricao_ate_agora(sessao: str) -> str:
 
 def contexto_ao_vivo(sessao: str) -> str:
     """Como transcricao_ate_agora, mas limitado ao fim mais recente — usado
-    para responder a uma chamada sem a resposta ficar cada vez mais lenta
+    para responder a uma pergunta sem a resposta ficar cada vez mais lenta
     numa reunião longa."""
     return transcricao_ate_agora(sessao)[-_LIMITE_CONTEXTO_AO_VIVO:]
 
@@ -149,7 +116,6 @@ def terminar(sessao: str) -> str:
     texto = transcricao_ate_agora(sessao)
     _transcricoes.pop(sessao, None)
     _processados.pop(sessao, None)
-    _geracao.pop(sessao, None)
     db.eliminar_estado_reuniao(sessao)
     return texto
 
