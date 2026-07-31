@@ -92,31 +92,33 @@ TOOL_PERGUNTAR_EMPRESA = {
 
 # a sessão de conversação só tem "boca" (áudio) — sem isto, uma resposta
 # dada por ela própria (não vinda do Claude) nunca aparece escrita na
-# consola, mesmo quando é uma tabela ou lista que se lê muito melhor do
-# que se ouve. Espelha o mesmo padrão de function calling que
-# perguntar_dados_empresa já usa: o browser recebe a chamada e escreve o
-# conteúdo na consola (ver tratarMostrarNaConsola em static/index.html),
-# devolvendo de seguida um response.create para ela continuar a falar.
+# consola, seja texto simples, tabela ou lista. Pedido do Rui (2026-07-31):
+# "não sós tabelas — texto normal também, com a mesma formatação do
+# Claude, sempre que não vier do Claude" — por isso deixa de ser condicional
+# ("só se tiver tabela"), passa a ser chamada em TODA resposta direta.
+# Espelha o mesmo padrão de function calling que perguntar_dados_empresa já
+# usa: o browser recebe a chamada e escreve o conteúdo na consola (ver
+# mostrarNaConsola em static/index.html), devolvendo de seguida um
+# response.create para ela continuar a falar.
 TOOL_MOSTRAR_NA_CONSOLA = {
     "type": "function",
     "name": "mostrar_na_consola",
     "description": (
-        "Usa esta função sempre que a TUA PRÓPRIA resposta (a que dás "
-        "diretamente, sem passar pelo Claude) tiver uma tabela, lista, ou "
-        "outra informação estruturada que fique mais clara escrita do que "
-        "dita. Chama-a com o conteúdo em markdown (usa | para tabelas, - "
-        "para listas) — isso aparece escrito na consola para a pessoa ler. "
-        "Continua depois a falar normalmente um resumo breve em voz, sem "
-        "ler a tabela/lista à letra (não digas 'pipe', 'asterisco', etc.). "
-        "Para respostas curtas e simples, sem tabelas nem listas, não uses "
-        "esta função."
+        "Chama SEMPRE esta função em primeiro lugar, antes de falares, em "
+        "TODA resposta que dás diretamente (sem passar pelo Claude) — "
+        "mesmo uma frase simples, não só tabelas. Passa o texto completo "
+        "da tua resposta formatado em markdown, exatamente como o Claude "
+        "escreveria (** para ênfase, - para listas, | para tabelas, etc.) "
+        "— isso aparece escrito na consola para a pessoa ler. Só depois "
+        "fala a mesma resposta em voz, de forma natural e breve, sem ler "
+        "a formatação à letra (não digas 'pipe', 'asterisco', etc.)."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "conteudo": {
                 "type": "string",
-                "description": "O conteúdo formatado em markdown a escrever na consola.",
+                "description": "O texto completo da resposta, formatado em markdown, a escrever na consola.",
             },
         },
         "required": ["conteudo"],
@@ -148,11 +150,13 @@ INSTRUCOES_MODO_REUNIAO = (
     "breve e direta. Se for sobre a empresa (Basecamp, produção, "
     "encomendas, entregas, calendário, documentos, equipas), usa sempre a "
     "função perguntar_dados_empresa — nunca inventes esses dados.\n\n"
-    "Se, ao responderes tu mesma (sem ser pelo perguntar_dados_empresa), a "
-    "resposta tiver uma tabela, lista, ou dados estruturados que fiquem "
-    "mais claros escritos do que ditos, chama a função mostrar_na_consola "
-    "com esse conteúdo em markdown — a pessoa vê isso escrito, e tu "
-    "continuas a falar um resumo breve em voz.\n\n"
+    "Sempre que respondes tu mesma (sem ser pelo perguntar_dados_empresa), "
+    "chama SEMPRE primeiro a função mostrar_na_consola com o texto "
+    "completo dessa resposta em markdown — texto simples, tabela, lista, "
+    "o que for — antes de falares. Não é só para tabelas: é para toda "
+    "resposta tua, mesmo uma frase curta. Só depois de chamares essa "
+    "função é que falas a resposta em voz, de forma natural e breve, sem "
+    "ler a formatação (markdown) à letra.\n\n"
     "Se alguém te chamar de novo enquanto ainda estás a falar, pára "
     "imediatamente e ouve o que disserem a seguir.\n\n"
     "Repetindo, porque é a regra mais importante: se não foste chamada "
