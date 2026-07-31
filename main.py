@@ -309,15 +309,19 @@ def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
     reuniao.registar(sessao, indice, texto)
     processados = reuniao.excertos_processados(sessao)
 
+    # qualquer turno novo avança a geração — mesmo que não chame a Alma pelo
+    # nome — o que interrompe de imediato uma resposta anterior ainda em
+    # curso: se alguém começa a falar enquanto ela está a responder, ela
+    # para e ouve, como aconteceria numa conversa real (pedido do Rui,
+    # 2026-07-30). Se este turno também for uma chamada, a mesma geração
+    # serve já para a resposta nova a seguir.
+    minha_geracao = reuniao.nova_geracao(sessao)
+
     if not reuniao.foi_chamada(texto):
         print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
         return {"transcricao": texto, "acionado": False, "processados": processados}
     print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA detetada, a responder")
     texto_chamada = texto
-
-    # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
-    # que interrompe, de imediato, qualquer resposta anterior ainda em curso
-    minha_geracao = reuniao.nova_geracao(sessao)
     contexto = reuniao.contexto_ao_vivo(sessao)
     mensagem_agente = (
         "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
