@@ -802,17 +802,26 @@
     // await — é o que mantém isto dentro do mesmo gesto do utilizador (o
     // clique no botão) que o iOS Safari exige para desbloquear autoplay
     desbloquearAudio();
+    // ligar-se (permissão do microfone + rede + negociação WebRTC com a
+    // OpenAI) demora um a poucos segundos, e até aqui não havia nenhum
+    // sinal no ecrã — dava a entender que a Alma já estava a ouvir quando
+    // ainda não estava (bug relatado pelo Rui, 2026-07-31). Esta mensagem
+    // fica a marcar o tempo de preparação e é atualizada quando terminar.
+    const msgPreparacao = addMessage("assistant", "🎙️ Um momento — a ligar-me à reunião...");
     try {
       // pede explicitamente cancelamento de eco — a voz da própria Alma a
       // tocar nas colunas é apanhada pelo mesmo microfone que ouve a
       // reunião, e sem isto contamina a transcrição exatamente quando
       // alguém tenta chamá-la a meio de uma resposta (ver o "prompt" em
-      // tools/voz.py:emprestar_token_transcricao)
+      // tools/voz.py:emprestar_token_transcricao). Sem noiseSuppression: o
+      // browser já a combinava com o noise_reduction "far_field" do lado da
+      // OpenAI, e as duas juntas atenuavam demais a voz normal (bug real,
+      // Rui 2026-07-31: "temos que falar mais alto para ela ouvir").
       reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        audio: { echoCancellation: true, autoGainControl: true }
       });
     } catch (_) {
-      addMessage("error", "Não consegui aceder ao microfone — verifica as permissões do browser.");
+      msgPreparacao.atualizar("Não consegui aceder ao microfone — verifica as permissões do browser.");
       return;
     }
     reuniaoStreamMic.getAudioTracks()[0].addEventListener("ended", () => {
@@ -832,7 +841,7 @@
       if (!resp.ok) throw new Error(`${resp.status}`);
       token = (await resp.json()).token;
     } catch (_) {
-      addMessage("error", "Não consegui começar o modo reunião — falha de rede.");
+      msgPreparacao.atualizar("Não consegui começar o modo reunião — falha de rede.");
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
       return;
@@ -842,7 +851,7 @@
       await ligarTranscricaoReuniao(token);
     } catch (e) {
       console.error("Falha ao ligar à transcrição da reunião:", e);
-      addMessage("error", "Não consegui ligar à transcrição da reunião.");
+      msgPreparacao.atualizar("Não consegui ligar à transcrição da reunião.");
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
       return;
@@ -853,6 +862,7 @@
     proximoIndiceExcerto = 0;
     excertosProcessados = 0;
     respondendoAtivo = false;
+    msgPreparacao.atualizar("🎙️ Já estou a ouvir — podes falar à vontade, só respondo se me chamares pelo nome.");
     reuniaoBtn.classList.add("a-gravar");
     reuniaoBtn.textContent = "🔴";
     reuniaoBanner.hidden = false;
