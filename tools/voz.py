@@ -48,19 +48,19 @@ def limpar_para_fala(texto: str) -> str:
     texto = _MD_PIPE.sub(" ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
-# pedido do Rui (2026-07-31): cadência mais rápida que o normal (1.0), sem
-# soar robótica. 1.2 não se sentiu mais rápido (as instructions pediam
-# "calmo", a competir com o pedido de velocidade); 1.35 já soou rápido
-# demais e robótico — sobretudo porque as instructions também pediam
-# "ritmo rápido e ágil, sem pausas", duplicando o pedido de velocidade por
-# duas vias ao mesmo tempo (o número e o texto). 1.15 fica mais perto de um
-# meio-termo, e as instructions voltam a pedir só o tom, não a cadência —
-# só uma via a pedir velocidade, não as duas a somarem-se.
-_VELOCIDADE_FALA = 1.15
+# pedido do Rui (2026-07-31): depois de várias voltas na cadência (1.2,
+# depois 1.35, depois 1.15) e nas instructions (pedindo calma, depois
+# ritmo rápido), o resultado ficou pior a cada afinação — soou lento,
+# depois rápido e robótico. Volta-se aos valores por omissão da própria
+# voz "marin" (sem "speed" — a API assume 1.0 — e instructions reduzidas
+# só ao essencial funcional: português europeu, não do Brasil), deixando o
+# modelo usar a sua prosódia natural em vez de a forçarmos por duas vias
+# (número + texto) que competiam entre si.
 
 def sintetizar(texto: str) -> bytes:
     """Sintetiza texto em voz (mp3), via OpenAI — voz "marin", recomendada
-    pela própria OpenAI como a de melhor qualidade."""
+    pela própria OpenAI como a de melhor qualidade. Sem afinação de
+    velocidade/tom — usa os valores por omissão da voz."""
     r = httpx.post(
         "https://api.openai.com/v1/audio/speech",
         headers={
@@ -71,14 +71,8 @@ def sintetizar(texto: str) -> bytes:
             "model": "gpt-4o-mini-tts",
             "voice": "marin",
             "input": texto,
-            "instructions": (
-                "Português europeu, nunca do Brasil. Tom direto e tecnicamente "
-                "preciso, sem entusiasmo artificial nem exclamações — como "
-                "alguém a falar com conhecimento de causa, não a vender algo. "
-                "Ritmo rápido e ágil, sem pausas desnecessárias entre frases."
-            ),
+            "instructions": "Português europeu, nunca do Brasil.",
             "response_format": "mp3",
-            "speed": _VELOCIDADE_FALA,
         },
         timeout=60,
     )
