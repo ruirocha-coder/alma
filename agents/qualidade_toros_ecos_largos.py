@@ -1,5 +1,5 @@
 from persona import PERSONA
-from agents.base import correr_agente, correr_agente_stream
+from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET
 from tools import documentos_empresa, ecos_largos
 
 # Subagente dedicado às regras de qualidade de cargas de toros da Ecos
@@ -17,7 +17,8 @@ from tools import documentos_empresa, ecos_largos
 # produção ou vendas, isso não é desta missão.
 TOOLS_QUALIDADE_TOROS = (ecos_largos.TOOLS_MANUAL_QUALIDADE_TOROS
                          + ecos_largos.TOOLS_AVALIACOES_CARGAS_TOROS
-                         + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA)
+                         + documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
+                         + TOOLS_INTERNET)
 
 MISSAO_QUALIDADE_TOROS = PERSONA + """
 
