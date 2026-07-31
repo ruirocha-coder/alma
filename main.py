@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import asyncio, base64, json, os
+import asyncio, json, os
 import threading
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
@@ -166,194 +166,83 @@ def alma_stream(p: Pedido):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
-def _evento_audio(frase: str) -> str:
-    """Sintetiza uma frase já fechada em voz e devolve-a como evento SSE — se
-    falhar, não interrompe a resposta, só fica sem áudio para essa frase (o
-    texto já chegou por 'delta' de qualquer forma)."""
-    frase_limpa = voz.limpar_para_fala(frase)
-    if not frase_limpa:
-        return ""
-    try:
-        audio_b64 = base64.b64encode(voz.sintetizar(frase_limpa)).decode()
-        return f"data: {json.dumps({'audio': audio_b64}, ensure_ascii=False)}\n\n"
-    except Exception as e:
-        print(f"[voz] falha ao sintetizar frase: {e!r}")
-        return ""
-
-def _fluxo_resposta_por_voz(utilizador: str, sessao: str, mensagem_agente: str,
-                            mensagem_visivel: str = None, texto_transcricao: str = None,
-                            minha_geracao: int = None):
-    """Como _fluxo_resposta_agente, mas sintetiza voz frase a frase à medida
-    que o texto da resposta vai chegando — a Alma começa a falar sem esperar
-    pela resposta toda estar pronta.
-
-    mensagem_agente é o que o modelo recebe (pode incluir contexto extra, ex:
-    a transcrição de uma reunião em curso); mensagem_visivel e
-    texto_transcricao (por omissão, iguais a mensagem_agente) são o que fica
-    no histórico e o que é mostrado como "ouvi isto", respetivamente — úteis
-    quando o que se ouviu não deve ser, ao mesmo tempo, o texto todo enviado
-    ao modelo.
-
-    minha_geracao (modo reunião): se dado, a resposta para assim que reuniao
-    marcar uma geração mais recente para esta sessão — é o que permite
-    interromper a Alma a meio quando alguém a chama de novo antes de ela
-    acabar de responder."""
-    mensagem_visivel = mensagem_visivel or mensagem_agente
-    texto_transcricao = texto_transcricao if texto_transcricao is not None else mensagem_agente
-    yield f"data: {json.dumps({'transcricao': texto_transcricao}, ensure_ascii=False)}\n\n"
-
-    mensagens = historico_sessao(sessao, utilizador)
-    mensagens.append({"role": "user", "content": mensagem_agente})
-
-    try:
-        if not perfil_existe(utilizador):
-            gerador = acolhimento.responder_stream(utilizador, mensagens)
-            agente = "acolhimento"
-        else:
-            agente = encaminhar(contexto_para_encaminhar(mensagens), utilizador)
-            log_routing(mensagem_agente[:500], agente)
-            gerador = AGENTES_STREAM[agente](utilizador, mensagens)
-    except Exception as e:
-        print(f"[voz] falha ao encaminhar/gerar resposta em modo reunião: {e!r}")
-        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
-        return
-
-    def _interrompida() -> bool:
-        return minha_geracao is not None and reuniao.foi_interrompida(sessao, minha_geracao)
-
-    partes, buffer_frase, interrompida = [], "", False
-    try:
-        for pedaco in gerador:
-            if _interrompida():
-                interrompida = True
-                gerador.close()
-                break
-            if pedaco is None:
-                # sinal de vida (ex: a meio de uma tool a demorar) — não é texto
-                yield f"data: {json.dumps({'a_processar': True})}\n\n"
-                continue
-            partes.append(pedaco)
-            yield f"data: {json.dumps({'delta': pedaco}, ensure_ascii=False)}\n\n"
-            buffer_frase += pedaco
-            frases_prontas, buffer_frase = voz.dividir_em_frases_prontas(buffer_frase)
-            for frase in frases_prontas:
-                if _interrompida():
-                    interrompida = True
-                    break
-                if frase.strip():
-                    yield _evento_audio(frase)
-            if interrompida:
-                gerador.close()
-                break
-        if not interrompida and buffer_frase.strip():
-            yield _evento_audio(buffer_frase)
-    except Exception as e:
-        print(f"[voz] falha a meio da resposta em modo reunião: {e!r}")
-        yield f"data: {json.dumps({'erro': str(e)}, ensure_ascii=False)}\n\n"
-        return
-
-    if interrompida:
-        nota = "\n\n_(interrompida — foi chamada de novo)_"
-        partes.append(nota)
-        yield f"data: {json.dumps({'delta': nota}, ensure_ascii=False)}\n\n"
-
-    resposta = "".join(partes)
-    guardar_mensagem(utilizador, sessao, "user", mensagem_visivel)
-    guardar_mensagem(utilizador, sessao, "assistant", resposta, agente)
-    yield f"data: {json.dumps({'done': True, 'interrompida': interrompida}, ensure_ascii=False)}\n\n"
-
 @app.post("/alma/reuniao/iniciar")
 def reuniao_iniciar(sessao: str = Form(...)):
-    """Começa o modo reunião: a Alma passa a ouvir em contínuo (o browser liga-se
-    diretamente à Realtime API da OpenAI para transcrever, ver token abaixo) e
-    só responde quando for chamada pelo nome."""
+    """Começa o modo reunião: o browser liga-se diretamente a uma sessão de
+    conversação completa da Realtime API da OpenAI (ouve, fala e decide por
+    si quando responder — ver tools/voz.py:emprestar_token_conversa)."""
     reuniao.iniciar(sessao)
     try:
-        token = voz.emprestar_token_transcricao()
+        token = voz.emprestar_token_conversa()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Falha ao obter acesso à transcrição: {e}")
+        raise HTTPException(status_code=502, detail=f"Falha ao ligar à conversação: {e}")
     return {"ok": True, **token}
 
 @app.post("/alma/reuniao/token")
 def reuniao_token(sessao: str = Form(...)):
-    """Empresta um novo token efémero de transcrição para uma reunião já em
+    """Empresta um novo token efémero de conversação para uma reunião já em
     curso (ex: depois de uma queda de rede a meio) — ao contrário de
     /alma/reuniao/iniciar, não reinicia a transcrição acumulada até agora."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
     try:
-        return voz.emprestar_token_transcricao()
+        return voz.emprestar_token_conversa()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Falha ao obter acesso à transcrição: {e}")
+        raise HTTPException(status_code=502, detail=f"Falha ao ligar à conversação: {e}")
 
 @app.post("/alma/reuniao/chunk")
-def reuniao_chunk(utilizador: str = Form(...), sessao: str = Form(...),
-                  indice: int = Form(...), texto: str = Form(...)):
+def reuniao_chunk(sessao: str = Form(...), indice: int = Form(...), texto: str = Form(...)):
     """Recebe mais um turno já transcrito da reunião em curso pelo browser
     (indice identifica a posição deste turno na ordem em que foi dito, para a
     transcrição acumulada ficar sempre correta mesmo que os pedidos cheguem
-    trocados). Acrescenta-o ao que já se ouviu. Só interrompe uma resposta
-    anterior ainda em curso nesta sessão quando o turno for um pedido
-    explícito para se calar (ex: "Alma, para") ou uma nova chamada pelo nome
-    — nunca por qualquer fala, mesmo sem mencionar a Alma (pedido do Rui,
-    2026-07-31: essa versão mais ampla interrompia com ruído de fundo/
-    conversa não dirigida a ela, cortando-a a meio sem ninguém a ter
-    chamado nem pedido para parar). Qualquer chamada pelo nome dispara
-    sempre uma resposta nova — foi tentada uma distinção entre "chamada com
-    pergunta" e "só pedir atenção" (sem responder), mas revertida no mesmo
-    dia: qualquer menção incidental a "Alma" (ex: alguém a mencionar na
-    conversa, não a chamá-la) cortava uma resposta em curso em silêncio,
-    sem nenhum sinal do que aconteceu — pior do que responder a mais. Se
-    não mencionar a Alma, devolve só a transcrição (para uma legenda ao
-    vivo, se a consola quiser mostrar)."""
+    trocados) — só para alimentar o resumo/ata final e o contexto dado ao
+    Claude quando for preciso (ver /alma/reuniao/pergunta_empresa). A
+    decisão de responder ou não já não é tomada aqui: é da própria sessão
+    de conversação da Realtime API, pelas instruções em
+    tools/voz.py:INSTRUCOES_MODO_REUNIAO."""
     if not reuniao.em_curso(sessao):
         raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
-
     texto = texto.strip()
-    if not texto:
-        return {"transcricao": "", "acionado": False,
-                "processados": reuniao.excertos_processados(sessao)}
+    if texto:
+        reuniao.registar(sessao, indice, texto)
+    return {"processados": reuniao.excertos_processados(sessao)}
 
-    reuniao.registar(sessao, indice, texto)
-    processados = reuniao.excertos_processados(sessao)
+@app.post("/alma/reuniao/pergunta_empresa")
+def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...), pergunta: str = Form(...)):
+    """Chamado pelo browser quando a sessão de conversação decide que uma
+    pergunta é sobre a empresa (função perguntar_dados_empresa definida em
+    tools/voz.py) — corre o Claude, com as ferramentas de sempre (Basecamp,
+    calendário, documentos, dashboards), e devolve a resposta em texto para
+    a Alma dizer com a sua própria voz. Ao contrário do resto do modo
+    reunião, isto não decide SE deve responder — isso já foi decidido pela
+    sessão de conversação; aqui só se obtém a resposta."""
+    if not reuniao.em_curso(sessao):
+        raise HTTPException(status_code=409, detail="Não há nenhuma reunião em curso nesta sessão.")
+    pergunta = pergunta.strip()
+    if not pergunta:
+        raise HTTPException(status_code=400, detail="Pergunta vazia.")
 
-    if reuniao.foi_pedido_para_parar(texto):
-        # interrompe (a única forma de a calar sem a chamar de novo pelo
-        # nome); não gera nenhuma resposta nova a este pedido. "parar_audio"
-        # avisa o cliente para calar já o que estiver a tocar — esta resposta
-        # é JSON, não um stream, por isso não passa pelo caminho normal que
-        # já corta o áudio quando chega uma resposta nova (bug real, Rui
-        # 2026-07-31: o pedido de parar interrompia a geração no servidor,
-        # mas a Alma continuava a tocar o áudio já em fila no browser).
-        reuniao.nova_geracao(sessao)
-        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — pedido para parar, sem responder")
-        return {"transcricao": texto, "acionado": False, "parar_audio": True, "processados": processados}
-
-    if not reuniao.foi_chamada(texto):
-        print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — sem menção à Alma")
-        return {"transcricao": texto, "acionado": False, "processados": processados}
-
-    print(f"[reuniao] turno #{indice} (sessao={sessao}): {texto!r} — CHAMADA detetada, a responder")
-    texto_chamada = texto
-
-    # nova chamada: avança a geração já (antes de gerar a resposta) — é isto
-    # que interrompe, de imediato, qualquer resposta anterior ainda em curso
-    minha_geracao = reuniao.nova_geracao(sessao)
+    print(f"[reuniao] (sessao={sessao}): pergunta_empresa {pergunta!r}")
     contexto = reuniao.contexto_ao_vivo(sessao)
     mensagem_agente = (
-        "Estás numa reunião em curso, a ouvir em modo contínuo (não é uma pergunta "
-        "direta como de costume). Isto é o mais recente que se disse, transcrito "
-        f"automaticamente (pode ter erros ou sobreposição de vozes):\n\n{contexto}\n\n"
-        f'Alguém acabou de te chamar pelo nome. O que disseram foi: "{texto_chamada}"\n\n'
-        "Responde diretamente a essa pessoa, como se estivesses presente na sala."
+        "Estás numa reunião em curso, em modo de conversação por voz. Isto é "
+        "o mais recente que se disse, transcrito automaticamente (pode ter "
+        f"erros ou sobreposição de vozes):\n\n{contexto}\n\n"
+        f'Alguém acabou de te perguntar (sobre a empresa): "{pergunta}"\n\n'
+        "Responde diretamente a essa pessoa, como se estivesses presente na "
+        "sala — a tua resposta vai ser dita em voz alta por outra parte do "
+        "sistema, por isso sê clara e direta, sem formatação em markdown."
     )
-    return StreamingResponse(
-        _fluxo_resposta_por_voz(utilizador, sessao, mensagem_agente,
-                                mensagem_visivel=f"🎙️ (reunião) {texto_chamada}",
-                                texto_transcricao=texto_chamada, minha_geracao=minha_geracao),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    )
+    try:
+        resultado = _responder_e_guardar(
+            utilizador, sessao, mensagem_agente,
+            mensagem_visivel=f"🎙️ (reunião) {pergunta}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao obter resposta do agente: {e}")
+    return {"resposta": resultado["resposta"]}
 
 @app.post("/alma/reuniao/terminar")
 def reuniao_terminar(utilizador: str = Form(...), sessao: str = Form(...)):

@@ -688,20 +688,12 @@
   const anexoChips = document.getElementById("anexo-chips");
   let ficheirosAnexados = [];
 
-  // fila de reprodução — as frases de voz vão chegando uma a uma (por SSE) e
-  // têm de tocar em sequência, mesmo que a síntese da frase seguinte já
-  // tenha chegado antes de a anterior acabar de tocar
-  const filaAudio = [];
-  let aTocarAudio = false;
-  let urlAudioAtual = null;
-
   // um único elemento <audio>, reutilizado para toda a reprodução — no iOS
-  // Safari, criar um "new Audio(url)" a cada frase nunca chega a tocar: o
-  // desbloqueio de autoplay dado por um gesto do utilizador só vale para o
-  // MESMO elemento em que o play() aconteceu dentro desse gesto, não para
-  // elementos criados depois (quando o áudio da resposta chega, já fora do
-  // gesto, por streaming). Por isso o mesmo elemento é desbloqueado uma vez
-  // (ver desbloquearAudio) e depois só se lhe troca o "src".
+  // Safari, um elemento criado fora de um gesto do utilizador nunca chega a
+  // tocar: o desbloqueio de autoplay dado por um gesto só vale para o MESMO
+  // elemento em que o play() aconteceu dentro desse gesto. Por isso este
+  // elemento é desbloqueado uma vez (ver desbloquearAudio) e mais tarde só
+  // se lhe atribui o stream remoto da Realtime API (ver ligarConversaReuniao).
   const audioPlayerEl = new Audio();
   audioPlayerEl.playsInline = true;
   let audioDesbloqueado = false;
@@ -717,54 +709,24 @@
     audioPlayerEl.play().catch(() => {});
   }
 
-  function enfileirarAudio(base64) {
-    const binario = atob(base64);
-    const bytes = new Uint8Array(binario.length);
-    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
-    filaAudio.push(url);
-    tocarProximoAudio();
-  }
-
-  function tocarProximoAudio() {
-    if (aTocarAudio || filaAudio.length === 0) return;
-    aTocarAudio = true;
-    const url = filaAudio.shift();
-    urlAudioAtual = url;
-    const seguinte = () => {
-      URL.revokeObjectURL(url);
-      if (urlAudioAtual === url) urlAudioAtual = null;
-      aTocarAudio = false;
-      tocarProximoAudio();
-    };
-    audioPlayerEl.onended = seguinte;
-    audioPlayerEl.onerror = seguinte;
-    audioPlayerEl.src = url;
-    audioPlayerEl.play().catch(seguinte);
-  }
-
-  // corta a fala imediatamente (usado quando a Alma é chamada de novo a
-  // meio de uma resposta anterior — ela deve parar de falar já, não acabar
-  // a resposta antiga primeiro)
-  function pararReproducaoAudio() {
-    filaAudio.splice(0).forEach((url) => URL.revokeObjectURL(url));
-    if (urlAudioAtual) {
-      audioPlayerEl.pause();
-      URL.revokeObjectURL(urlAudioAtual);
-      urlAudioAtual = null;
-    }
-    aTocarAudio = false;
-  }
-
-  // modo reunião — em vez de push-to-talk, a Alma ouve em contínuo e só
-  // entra na conversa quando alguém a chama pelo nome. O áudio nunca passa
-  // pelo nosso servidor: o browser liga-se diretamente à Realtime API da
-  // OpenAI por WebRTC (com um token efémero emprestado por
-  // /alma/reuniao/iniciar) e recebe dela, pelo data channel, a transcrição
-  // já feita de cada turno — cada turno transcrito é então enviado ao nosso
-  // servidor (só o texto, nunca o áudio), que decide se foi ou não uma
-  // chamada e, se foi, devolve a resposta em streaming (texto + voz), tal
-  // como já fazia antes desta mudança.
+  // modo reunião — a Alma ouve e conversa em contínuo por voz, através de
+  // uma sessão de conversação completa da Realtime API da OpenAI (não só
+  // transcrição): o browser liga-se-lhe diretamente por WebRTC (token
+  // efémero emprestado por /alma/reuniao/iniciar), envia o microfone e
+  // recebe de volta a voz da própria Alma, que decide sozinha (pelas
+  // instruções em tools/voz.py) quando responder e quando pedir dados à
+  // empresa em vez de responder por si. O nosso servidor só entra em ação
+  // em dois casos: registar cada turno transcrito (para o resumo/ata final)
+  // e, quando ela chama a função "perguntar_dados_empresa", correr o Claude
+  // e devolver-lhe o texto da resposta.
+  //
+  // Histórico (2026-07-31): antes disto, esta sessão só transcrevia, e a
+  // deteção de "foi chamada"/interrupção era feita aqui e no servidor a
+  // partir do texto — frágil, porque a própria voz da Alma podia ser
+  // apanhada de volta pelo microfone e disparar-se a si mesma (ciclo de
+  // arrancar/parar). Com uma sessão de conversação a sério, o cancelamento
+  // de eco e a deteção de turno/interrupção são nativos da OpenAI, sobre a
+  // mesma ligação que reproduz a voz da Alma.
   const reuniaoBtn = document.getElementById("reuniao-btn");
   const reuniaoBanner = document.getElementById("reuniao-banner");
   const reuniaoStatusEl = document.getElementById("reuniao-status");
@@ -773,26 +735,20 @@
   let reuniaoStreamMic = null;
   let reuniaoPC = null;
   let reuniaoDC = null;
-  // cada turno transcrito é enviado ao servidor assim que chega (em
-  // paralelo, sem esperar pelos anteriores) — uma reunião longa ou muito
-  // faladora não pode ficar à espera de uma resposta lenta antes de
-  // processar o que se disse a seguir. A ordem correta na transcrição
-  // acumulada é garantida por um índice (não pela ordem de chegada da rede).
+  // cada turno transcrito é registado assim que chega, em paralelo, sem
+  // esperar pelos anteriores — a ordem certa na transcrição acumulada é
+  // garantida por um índice, não pela ordem de chegada da rede
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
-  // conta as respostas "ao vivo" que vão começando — usado para um evento
-  // de áudio tardio de uma resposta já interrompida não voltar a tocar
-  // depois de a fala ter sido cortada
-  let geracaoRespostaCliente = 0;
-  // uma queda de rede a meio da reunião tenta reconectar a transcrição uma
-  // vez (novo token + nova ligação WebRTC) antes de desistir — uma queda
-  // momentânea não deve obrigar a reiniciar a reunião toda
-  let reconexaoTranscricaoTentada = false;
+  // uma queda de rede a meio da reunião tenta reconectar uma vez (novo
+  // token + nova ligação WebRTC) antes de desistir — uma queda momentânea
+  // não deve obrigar a reiniciar a reunião toda
+  let reconexaoTentada = false;
 
   function atualizarEstadoReuniao() {
     reuniaoStatusEl.textContent = respondendoAtivo
-      ? "A Alma está a responder… (chama-a outra vez para a interromper)"
+      ? "A Alma está a responder…"
       : `A Alma está a ouvir a reunião (${excertosProcessados} excerto(s) processados) — só responde se for chamada pelo nome.`;
   }
 
@@ -811,12 +767,10 @@
     try {
       // pede explicitamente cancelamento de eco — a voz da própria Alma a
       // tocar nas colunas é apanhada pelo mesmo microfone que ouve a
-      // reunião, e sem isto contamina a transcrição exatamente quando
-      // alguém tenta chamá-la a meio de uma resposta (ver o "prompt" em
-      // tools/voz.py:emprestar_token_transcricao). Sem noiseSuppression: o
-      // browser já a combinava com o noise_reduction "far_field" do lado da
-      // OpenAI, e as duas juntas atenuavam demais a voz normal (bug real,
-      // Rui 2026-07-31: "temos que falar mais alto para ela ouvir").
+      // reunião. Sem noiseSuppression: o browser já a combinava com o
+      // noise_reduction "far_field" do lado da OpenAI, e as duas juntas
+      // atenuavam demais a voz normal (bug real, Rui 2026-07-31: "temos que
+      // falar mais alto para ela ouvir").
       reuniaoStreamMic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, autoGainControl: true }
       });
@@ -848,17 +802,17 @@
     }
 
     try {
-      await ligarTranscricaoReuniao(token);
+      await ligarConversaReuniao(token);
     } catch (e) {
-      console.error("Falha ao ligar à transcrição da reunião:", e);
-      msgPreparacao.atualizar("Não consegui ligar à transcrição da reunião.");
+      console.error("Falha ao ligar à conversação da reunião:", e);
+      msgPreparacao.atualizar("Não consegui ligar à conversação da reunião.");
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
       return;
     }
 
     reuniaoAtiva = true;
-    reconexaoTranscricaoTentada = false;
+    reconexaoTentada = false;
     proximoIndiceExcerto = 0;
     excertosProcessados = 0;
     respondendoAtivo = false;
@@ -870,23 +824,37 @@
   }
 
   // liga-se diretamente à Realtime API da OpenAI por WebRTC (o áudio nunca
-  // passa pelo nosso servidor) — segue o fluxo documentado pela OpenAI:
-  // oferta SDP local, troca por uma ligação HTTP autenticada com o token
-  // efémero, resposta SDP aplicada à ligação.
-  async function ligarTranscricaoReuniao(token) {
+  // passa pelo nosso servidor): oferta SDP local, troca por uma ligação
+  // HTTP autenticada com o token efémero, resposta SDP aplicada à ligação.
+  // Ao contrário de uma sessão só de transcrição, esta também recebe de
+  // volta a voz da própria Alma (pc.ontrack) — é ela quem fala, não a
+  // síntese de voz do nosso servidor.
+  async function ligarConversaReuniao(token) {
     const pc = new RTCPeerConnection();
     pc.addTrack(reuniaoStreamMic.getAudioTracks()[0], reuniaoStreamMic);
+    pc.ontrack = (event) => {
+      audioPlayerEl.srcObject = event.streams[0];
+      audioPlayerEl.play().catch(() => {});
+    };
     const dc = pc.createDataChannel("oai-events");
     dc.addEventListener("message", (e) => {
       let ev;
       try { ev = JSON.parse(e.data); } catch (_) { return; }
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
-        enviarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
+        registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
+      } else if (ev.type === "response.function_call_arguments.done") {
+        tratarPerguntaEmpresa(ev);
+      } else if (ev.type === "response.created") {
+        respondendoAtivo = true;
+        atualizarEstadoReuniao();
+      } else if (ev.type === "response.done") {
+        respondendoAtivo = false;
+        atualizarEstadoReuniao();
       }
     });
     pc.addEventListener("connectionstatechange", () => {
       if (reuniaoAtiva && (pc.connectionState === "failed" || pc.connectionState === "disconnected")) {
-        reconectarTranscricaoReuniao();
+        reconectarConversaReuniao();
       }
     });
 
@@ -900,19 +868,21 @@
     if (!resp.ok) throw new Error(`Troca de SDP falhou: ${resp.status}`);
     await pc.setRemoteDescription({ type: "answer", sdp: await resp.text() });
 
-    fecharTranscricaoReuniao();  // fecha a ligação anterior, se houver (ex: reconexão)
+    fecharConversaReuniao();  // fecha a ligação anterior, se houver (ex: reconexão)
     reuniaoPC = pc;
     reuniaoDC = dc;
   }
 
-  function fecharTranscricaoReuniao() {
+  function fecharConversaReuniao() {
     if (reuniaoDC) { reuniaoDC.close(); reuniaoDC = null; }
     if (reuniaoPC) { reuniaoPC.close(); reuniaoPC = null; }
+    audioPlayerEl.pause();
+    audioPlayerEl.srcObject = null;
   }
 
-  async function reconectarTranscricaoReuniao() {
-    if (!reuniaoAtiva || reconexaoTranscricaoTentada) return;
-    reconexaoTranscricaoTentada = true;
+  async function reconectarConversaReuniao() {
+    if (!reuniaoAtiva || reconexaoTentada) return;
+    reconexaoTentada = true;
     try {
       const resp = await fetch("/alma/reuniao/token", {
         method: "POST",
@@ -921,115 +891,83 @@
       });
       if (!resp.ok) throw new Error(`${resp.status}`);
       const { token } = await resp.json();
-      await ligarTranscricaoReuniao(token);
+      await ligarConversaReuniao(token);
     } catch (e) {
-      console.error("Falha ao reconectar a transcrição da reunião:", e);
-      addMessage("error", "Perdi a ligação à transcrição da reunião — termina e começa de novo o modo reunião.");
+      console.error("Falha ao reconectar a conversação da reunião:", e);
+      addMessage("error", "Perdi a ligação à reunião — termina e começa de novo o modo reunião.");
     }
   }
 
-  async function enviarTurnoReuniao(texto, indice) {
+  // só regista o turno para o resumo/ata final e para o contexto dado ao
+  // Claude quando for preciso — a decisão de responder já não é tomada
+  // aqui, é da própria sessão de conversação (ver ligarConversaReuniao)
+  async function registarTurnoReuniao(texto, indice) {
     texto = texto.trim();
     if (!texto) return;
     try {
       const dados = new FormData();
-      dados.append("utilizador", UTILIZADOR);
       dados.append("sessao", sessao);
       dados.append("indice", indice);
       dados.append("texto", texto);
       const resp = await fetch("/alma/reuniao/chunk", { method: "POST", body: dados });
-
       if (resp.status === 409) return;  // a reunião já terminou entretanto
       if (!resp.ok) {
         console.error("Falha num excerto da reunião:", resp.status, resp.statusText);
         return;
       }
-
-      const tipo = resp.headers.get("content-type") || "";
-      if (tipo.startsWith("application/json")) {
-        // não foi chamada (ou é um pedido explícito para se calar, ex:
-        // "Alma, para") — nada a mostrar, mas conta como sinal de vida.
-        // "parar_audio": um pedido de parar não gera resposta nova, por
-        // isso nunca passa pelo caminho normal (abaixo) que já corta o
-        // áudio quando chega um stream novo — sem isto, a Alma continuava a
-        // falar mesmo depois de lhe pedirem para parar.
-        const dadosJson = await resp.json().catch(() => null);
-        if (dadosJson && dadosJson.parar_audio) {
-          pararReproducaoAudio();
-          respondendoAtivo = false;
-          geracaoRespostaCliente++;
-        }
-        excertosProcessados++;
-        atualizarEstadoReuniao();
-        return;
-      }
-
-      // uma nova chamada corta imediatamente a fala de uma resposta
-      // anterior ainda a decorrer (o servidor já a interrompeu por si; aqui
-      // só se cala o áudio que já tinha sido enviado antes disso)
-      pararReproducaoAudio();
-      respondendoAtivo = true;
-      atualizarEstadoReuniao();
-      const minhaGeracaoCliente = ++geracaoRespostaCliente;
-      try {
-        let msg = null;
-        let textoCompleto = "";
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let bufferSSE = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          bufferSSE += decoder.decode(value, { stream: true });
-          const linhas = bufferSSE.split("\n\n");
-          bufferSSE = linhas.pop();
-          for (const linha of linhas) {
-            if (!linha.startsWith("data: ")) continue;
-            let ev;
-            try { ev = JSON.parse(linha.slice(6)); } catch (_) { continue; }
-            if (ev.transcricao) {
-              addMessage("user", ev.transcricao);
-              addTyping();
-            } else if (ev.delta) {
-              if (!msg) { removeTyping(); msg = addMessage("assistant", ""); }
-              textoCompleto += ev.delta;
-              msg.atualizar(textoCompleto);
-            } else if (ev.audio) {
-              // se entretanto já começou outra resposta, este áudio é de
-              // uma fala já interrompida — não deve voltar a tocar
-              if (minhaGeracaoCliente === geracaoRespostaCliente) enfileirarAudio(ev.audio);
-            } else if (ev.erro) {
-              removeTyping();
-              addMessage("error", "Erro ao contactar a Alma: " + ev.erro);
-            } else if (ev.a_processar) {
-              marcarAProcessar();
-            }
-          }
-        }
-        fetchSessions();
-      } finally {
-        // só a chamada mais recente pode voltar a marcar "a ouvir" — uma
-        // chamada antiga que acabou de ser interrompida não deve apagar o
-        // estado "a responder" de uma chamada mais nova, ainda em curso
-        if (minhaGeracaoCliente === geracaoRespostaCliente) respondendoAtivo = false;
-        excertosProcessados++;
+      const dadosResp = await resp.json().catch(() => null);
+      if (dadosResp && typeof dadosResp.processados === "number") {
+        excertosProcessados = dadosResp.processados;
         atualizarEstadoReuniao();
       }
     } catch (err) {
-      console.error("Falha de rede num excerto da reunião:", err);
+      console.error("Falha de rede a registar um excerto da reunião:", err);
     }
+  }
+
+  // chamado quando a sessão de conversação decide que uma pergunta é sobre
+  // a empresa (função perguntar_dados_empresa, definida em tools/voz.py) —
+  // corre o Claude e devolve o resultado à sessão, que continua a falar com
+  // a sua própria voz
+  async function tratarPerguntaEmpresa(ev) {
+    let args = {};
+    try { args = JSON.parse(ev.arguments || "{}"); } catch (_) { /* usa {} */ }
+    const pergunta = (args.pergunta || "").trim();
+
+    addMessage("user", `🎙️ (reunião) ${pergunta || "(pergunta sobre a empresa)"}`);
+    addTyping();
+    let resposta;
+    try {
+      const dados = new FormData();
+      dados.append("utilizador", UTILIZADOR);
+      dados.append("sessao", sessao);
+      dados.append("pergunta", pergunta);
+      const resp = await fetch("/alma/reuniao/pergunta_empresa", { method: "POST", body: dados });
+      if (!resp.ok) throw new Error(`${resp.status}`);
+      resposta = (await resp.json()).resposta;
+    } catch (err) {
+      console.error("Falha ao obter resposta do Claude no modo reunião:", err);
+      resposta = "Não consegui obter essa informação agora — houve uma falha de rede.";
+    }
+    removeTyping();
+    addMessage("assistant", resposta);
+    fetchSessions();
+
+    // devolve o resultado à sessão de conversação, para ela continuar a
+    // falar com a sua própria voz a partir daqui
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: ev.call_id, output: resposta }
+    }));
+    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
 
   function pararModoReuniao() {
     if (!reuniaoAtiva) return;
     reuniaoAtiva = false;
-    // se a Alma estava a meio de uma resposta, tem de parar de falar já —
-    // sem isto, terminar a reunião não a calava e ela continuava a tocar o
-    // áudio já em fila (bug real, Rui 2026-07-31)
-    pararReproducaoAudio();
     respondendoAtivo = false;
-    geracaoRespostaCliente++;  // invalida áudio tardio de uma resposta ainda em voo
-    fecharTranscricaoReuniao();
+    fecharConversaReuniao();
     if (reuniaoStreamMic) {
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());
       reuniaoStreamMic = null;
