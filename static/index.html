@@ -833,8 +833,11 @@
     const pc = new RTCPeerConnection();
     pc.addTrack(reuniaoStreamMic.getAudioTracks()[0], reuniaoStreamMic);
     pc.ontrack = (event) => {
+      console.log("[reuniao] recebi a faixa de áudio da Alma (pc.ontrack)");
       audioPlayerEl.srcObject = event.streams[0];
-      audioPlayerEl.play().catch(() => {});
+      audioPlayerEl.play()
+        .then(() => console.log("[reuniao] audioPlayerEl.play() arrancou"))
+        .catch((err) => console.error("[reuniao] audioPlayerEl.play() falhou:", err));
     };
     const dc = pc.createDataChannel("oai-events");
     // chamadas de função já tratadas (por call_id) — response.done inclui o
@@ -850,7 +853,10 @@
       // visibilidade imediata na consola do browser sobre o que a sessão
       // está mesmo a fazer (ex: gerou uma resposta? chamou uma função? deu
       // erro?), sem termos de adivinhar às cegas outra vez
-      console.debug("[reuniao] evento:", ev.type, ev);
+      // console.log, não console.debug — o Chrome esconde "Debug"/Verbose
+      // por omissão na consola, o que pareceu "não aparece nada" mesmo com
+      // eventos a chegar sem parar (bug real, Rui 2026-07-31)
+      console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
       } else if (ev.type === "error") {
@@ -882,10 +888,13 @@
       }
     });
     pc.addEventListener("connectionstatechange", () => {
+      console.log("[reuniao] connectionState:", pc.connectionState);
       if (reuniaoAtiva && (pc.connectionState === "failed" || pc.connectionState === "disconnected")) {
         reconectarConversaReuniao();
       }
     });
+    dc.addEventListener("open", () => console.log("[reuniao] data channel aberto"));
+    dc.addEventListener("close", () => console.log("[reuniao] data channel fechado"));
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
