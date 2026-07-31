@@ -224,16 +224,24 @@ def reuniao_pergunta_empresa(utilizador: str = Form(...), sessao: str = Form(...
 
     print(f"[reuniao] (sessao={sessao}): pergunta_empresa {pergunta!r}")
     contexto = reuniao.contexto_ao_vivo(sessao)
+    # a pergunta em si fica no fim, sem mais nada a seguir — o encaminhamento
+    # (orchestrator.contexto_para_encaminhar) só olha para os últimos 800
+    # carateres das mensagens recentes, e esta mensagem pode ter dezenas de
+    # milhares de carateres de transcrição de reunião antes da pergunta. Bug
+    # real (Rui, 2026-07-31): com a pergunta a meio e instruções de formatação
+    # a seguir, a Alma respondeu que só tinha acesso ao Basecamp, não ao
+    # dashboard — sinal de ter sido encaminhada para o agente errado, sem ver
+    # a pergunta com clareza suficiente no excerto usado para decidir.
     mensagem_agente = (
-        "Estás numa reunião em curso, em modo de conversação por voz. Isto é "
-        "o mais recente que se disse, transcrito automaticamente (pode ter "
-        f"erros ou sobreposição de vozes):\n\n{contexto}\n\n"
-        f'Alguém acabou de te perguntar (sobre a empresa): "{pergunta}"\n\n'
-        "Responde diretamente a essa pessoa, como se estivesses presente na "
-        "sala. Podes usar a formatação (tabelas, listas, etc.) que fizer "
-        "sentido para os dados — a versão dita em voz é limpa à parte "
-        "(ver tools/voz.py:limpar_para_fala), a consola em texto mostra "
-        "esta resposta tal como a escreveres."
+        "Estás numa reunião em curso, em modo de conversação por voz. "
+        "Responde diretamente a quem te perguntar a seguir, como se "
+        "estivesses presente na sala. Podes usar a formatação (tabelas, "
+        "listas, etc.) que fizer sentido para os dados — a versão dita em "
+        "voz é limpa à parte (ver tools/voz.py:limpar_para_fala), a consola "
+        "em texto mostra esta resposta tal como a escreveres.\n\n"
+        "Isto é o mais recente que se disse na reunião, transcrito "
+        f"automaticamente (pode ter erros ou sobreposição de vozes):\n\n{contexto}\n\n"
+        f'Pergunta (sobre a empresa): "{pergunta}"'
     )
     try:
         resultado = _responder_e_guardar(
