@@ -96,8 +96,17 @@ def emprestar_token_transcricao() -> dict:
     meio (ver nova_geracao em tools/reuniao.py), por isso a Alma nunca
     chegava a terminar uma resposta completa — sentia-se pior e mais lenta,
     não melhor. semantic_vad só fecha o turno quando entende que a pessoa
-    terminou mesmo o pensamento, a um custo de latência que, na prática,
-    compensa por dar turnos inteiros e coerentes em vez de fragmentados."""
+    terminou mesmo o pensamento — eagerness "high" pede-lhe para se
+    contentar com menos confiança antes de fechar (reage mais depressa),
+    sem voltar ao problema do temporizador fixo do server_vad.
+
+    noise_reduction "far_field" (mic de sala, não auscultador/headset perto
+    da boca) e um "prompt" de contexto: testado ao vivo (2026-07-30) — sem
+    isto, o modelo por vezes "ouvia" fala que não houve, inventando texto
+    coerente mas errado em idiomas aleatórios (russo, turco) a partir de
+    ruído de fundo/silêncio numa sala com várias pessoas — o mesmo tipo de
+    alucinação que o Whisper tinha antes (a razão de existir
+    _parece_alucinacao no código antigo, ver histórico deste ficheiro)."""
     r = httpx.post(
         "https://api.openai.com/v1/realtime/client_secrets",
         headers={
@@ -108,8 +117,16 @@ def emprestar_token_transcricao() -> dict:
             "session": {
                 "type": "transcription",
                 "audio": {"input": {
-                    "transcription": {"model": "gpt-4o-mini-transcribe", "language": "pt"},
-                    "turn_detection": {"type": "semantic_vad"},
+                    "transcription": {
+                        "model": "gpt-4o-mini-transcribe",
+                        "language": "pt",
+                        "prompt": ("Reunião de trabalho em português europeu, na empresa "
+                                   "Boa Safra / Interior Guider. Assuntos comuns: produção, "
+                                   "encomendas, entregas, logística, Basecamp, calendário. "
+                                   "Pode haver silêncio ou ruído de fundo entre falas."),
+                    },
+                    "turn_detection": {"type": "semantic_vad", "eagerness": "high"},
+                    "noise_reduction": {"type": "far_field"},
                 }},
             },
         },
