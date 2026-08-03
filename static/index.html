@@ -741,6 +741,16 @@
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
+  // rede de segurança determinística (Rui, 2026-07-31): a instrução para
+  // ela chamar mostrar_na_consola antes de falar nem sempre é seguida à
+  // letra — isto garante, por código, que tudo o que ela diz em voz
+  // acaba sempre escrito na consola, mesmo quando ela ignora essa
+  // instrução (ver response.output_audio_transcript.done abaixo). true
+  // só enquanto se espera a fala que dá seguimento a uma função já
+  // tratada (mostrar_na_consola ou perguntar_dados_empresa), cujo
+  // conteúdo já foi escrito por outro caminho — sem isto, essa fala
+  // apareceria duplicada.
+  let suprimirEcoProximaFala = false;
   // uma queda de rede a meio da reunião tenta reconectar uma vez (novo
   // token + nova ligação WebRTC) antes de desistir — uma queda momentânea
   // não deve obrigar a reiniciar a reunião toda
@@ -859,20 +869,32 @@
       console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
-        // create_response:false na sessão (ver tools/voz.py) — é este
-        // código, não o juízo do modelo, que decide se este turno merece
-        // resposta. Bug real (Rui, 2026-07-31): confiar só na instrução
-        // "só respondes quando chamada" fazia a Alma intervir demasiadas
-        // vezes em conversa não dirigida a ela.
-        if (/\balma\b/i.test(ev.transcript) && dc.readyState === "open") {
-          dc.send(JSON.stringify({ type: "response.create" }));
+        // create_response:true na sessão (ver tools/voz.py) — é a própria
+        // sessão que decide, a cada turno, se responde ou fica calada
+        // (regra reforçada em INSTRUCOES_MODO_REUNIAO). Não precisamos de
+        // disparar response.create aqui: um regex a decidir isso à parte
+        // (versão anterior) forçava sempre uma resposta em voz mesmo
+        // quando "Alma" só passava numa frase que não lhe era dirigida,
+        // já que response.create não dá à sessão a opção de ficar calada.
+      } else if (ev.type === "response.output_audio_transcript.done") {
+        // rede de segurança determinística — ver suprimirEcoProximaFala.
+        // log dedicado (não só o preview do objeto acima, que o Chrome corta
+        // em "…" antes de mostrar campos como este) — confirma ao vivo se
+        // ev.transcript vem mesmo preenchido
+        console.log("[reuniao] transcript da fala:", JSON.stringify(ev.transcript));
+        if (ev.transcript) {
+          if (suprimirEcoProximaFala) {
+            suprimirEcoProximaFala = false;
+          } else {
+            addMessage("assistant", ev.transcript);
+          }
         }
       } else if (ev.type === "error") {
         console.error("[reuniao] erro da sessão de conversação:", ev.error || ev);
       } else if (ev.type === "response.function_call_arguments.done" && ev.call_id) {
         if (!chamadasFuncaoTratadas.has(ev.call_id)) {
           chamadasFuncaoTratadas.add(ev.call_id);
-          tratarPerguntaEmpresa(ev.call_id, ev.arguments);
+          despacharChamadaFuncao(ev.name, ev.call_id, ev.arguments);
         }
       } else if (ev.type === "response.done") {
         respondendoAtivo = false;
@@ -886,7 +908,7 @@
           for (const item of saida) {
             if (item.type === "function_call" && item.call_id && !chamadasFuncaoTratadas.has(item.call_id)) {
               chamadasFuncaoTratadas.add(item.call_id);
-              tratarPerguntaEmpresa(item.call_id, item.arguments);
+              despacharChamadaFuncao(item.name, item.call_id, item.arguments);
             }
           }
         }
@@ -983,6 +1005,39 @@
     }
   }
 
+  // encaminha uma chamada de função da sessão de conversação pelo nome —
+  // ver tools/voz.py para as definições das duas funções disponíveis
+  function despacharChamadaFuncao(nome, callId, argumentosJson) {
+    if (nome === "mostrar_na_consola") {
+      mostrarNaConsola(callId, argumentosJson);
+    } else {
+      tratarPerguntaEmpresa(callId, argumentosJson);
+    }
+  }
+
+  // chamado quando a sessão de conversação decide que uma resposta dada por
+  // ela própria (não vinda do Claude) tem uma tabela/lista que fica mais
+  // clara escrita — função mostrar_na_consola, definida em tools/voz.py.
+  // Ao contrário de tratarPerguntaEmpresa, o conteúdo já vem pronto nos
+  // argumentos (não há nada a ir buscar ao Claude); só escrevemos na
+  // consola e devolvemos o ack para ela continuar a falar o resumo em voz.
+  function mostrarNaConsola(callId, argumentosJson) {
+    let args = {};
+    try { args = JSON.parse(argumentosJson || "{}"); } catch (_) { /* usa {} */ }
+    const conteudo = (args.conteudo || "").trim();
+    if (conteudo) addMessage("assistant", conteudo);
+    fetchSessions();
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "mostrado na consola" }
+    }));
+    // já escrevemos o conteúdo acima — suprime o eco automático da fala de
+    // seguimento (ver suprimirEcoProximaFala), para não aparecer duplicado
+    suprimirEcoProximaFala = true;
+    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
+  }
+
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
   // a empresa (função perguntar_dados_empresa, definida em tools/voz.py) —
   // corre o Claude e devolve o resultado à sessão, que continua a falar com
@@ -1025,6 +1080,11 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: respostaFalada }
     }));
+    // já escrevemos "resposta" acima — suprime o eco automático da fala de
+    // seguimento (ver suprimirEcoProximaFala), para não duplicar como uma
+    // segunda mensagem (era esse duplicado, voz vs. texto sem relação
+    // direta, que já tinha sido revertido antes, ver histórico deste ficheiro)
+    suprimirEcoProximaFala = true;
     reuniaoDC.send(JSON.stringify({ type: "response.create" }));
   }
 

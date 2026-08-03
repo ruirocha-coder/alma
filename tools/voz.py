@@ -90,22 +90,77 @@ TOOL_PERGUNTAR_EMPRESA = {
     },
 }
 
+# a sessão de conversação só tem "boca" (áudio) — sem isto, uma resposta
+# dada por ela própria (não vinda do Claude) nunca aparece escrita na
+# consola, seja texto simples, tabela ou lista. Pedido do Rui (2026-07-31):
+# "não sós tabelas — texto normal também, com a mesma formatação do
+# Claude, sempre que não vier do Claude" — por isso deixa de ser condicional
+# ("só se tiver tabela"), passa a ser chamada em TODA resposta direta.
+# Espelha o mesmo padrão de function calling que perguntar_dados_empresa já
+# usa: o browser recebe a chamada e escreve o conteúdo na consola (ver
+# mostrarNaConsola em static/index.html), devolvendo de seguida um
+# response.create para ela continuar a falar.
+TOOL_MOSTRAR_NA_CONSOLA = {
+    "type": "function",
+    "name": "mostrar_na_consola",
+    "description": (
+        "Chama SEMPRE esta função em primeiro lugar, antes de falares, em "
+        "TODA resposta que dás diretamente (sem passar pelo Claude) — "
+        "mesmo uma frase simples, não só tabelas. Passa o texto completo "
+        "da tua resposta formatado em markdown, exatamente como o Claude "
+        "escreveria (** para ênfase, - para listas, | para tabelas, etc.) "
+        "— isso aparece escrito na consola para a pessoa ler. Só depois "
+        "fala a mesma resposta em voz, de forma natural e breve, sem ler "
+        "a formatação à letra (não digas 'pipe', 'asterisco', etc.)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "conteudo": {
+                "type": "string",
+                "description": "O texto completo da resposta, formatado em markdown, a escrever na consola.",
+            },
+        },
+        "required": ["conteudo"],
+    },
+}
+
 INSTRUCOES_MODO_REUNIAO = (
     "Português europeu, nunca do Brasil. És a Alma, assistente da Boa Safra "
     "/ Interior Guider, numa reunião de trabalho em modo de escuta contínua "
     "— várias pessoas podem estar a falar entre si, não contigo.\n\n"
-    "REGRA MAIS IMPORTANTE: só respondes quando alguém te chamar pelo nome "
-    "diretamente (ex: \"Alma, ...\"). Todo o resto da conversa é entre as "
-    "pessoas presentes — NÃO respondas nem interrompas, mesmo que "
-    "mencionem o teu nome de passagem numa frase que não é dirigida a ti "
-    "(ex: \"a Alma disse que...\", \"pergunta à Alma depois\" — isso não é "
-    "uma chamada).\n\n"
-    "Quando fores chamada: se for conversa geral, responde tu mesma, breve "
-    "e direta. Se for sobre a empresa (Basecamp, produção, encomendas, "
-    "entregas, calendário, documentos, equipas), usa sempre a função "
-    "perguntar_dados_empresa — nunca inventes esses dados.\n\n"
+    "REGRA MAIS IMPORTANTE, acima de tudo o resto: só respondes quando "
+    "alguém te chama pelo nome diretamente, a dirigir-se a ti. Na dúvida, "
+    "o mais seguro é sempre ficar calada — nunca o oposto. É preferível "
+    "ficar calada uma vez em que eras mesmo chamada do que responder uma "
+    "vez em que não eras: uma resposta fora de contexto interrompe a "
+    "reunião das pessoas.\n\n"
+    "Exemplos do que É uma chamada direta (respondes):\n"
+    "- \"Alma, que dia é hoje?\"\n"
+    "- \"Ó Alma, ajuda-me aqui.\"\n"
+    "- \"Diz-me lá, Alma, qual é o estado da encomenda X.\"\n\n"
+    "Exemplos do que NÃO é uma chamada, é o teu nome só a passar na "
+    "conversa entre as pessoas (NÃO respondas nem interrompas):\n"
+    "- \"A Alma disse ontem que...\"\n"
+    "- \"Depois perguntamos à Alma.\"\n"
+    "- \"Ainda bem que temos a Alma para isto.\"\n"
+    "- Qualquer frase em que \"Alma\" não é a pessoa a quem se fala, mas "
+    "sim de quem se fala.\n\n"
+    "Quando fores mesmo chamada: se for conversa geral, responde tu mesma, "
+    "breve e direta. Se for sobre a empresa (Basecamp, produção, "
+    "encomendas, entregas, calendário, documentos, equipas), usa sempre a "
+    "função perguntar_dados_empresa — nunca inventes esses dados.\n\n"
+    "Sempre que respondes tu mesma (sem ser pelo perguntar_dados_empresa), "
+    "chama SEMPRE primeiro a função mostrar_na_consola com o texto "
+    "completo dessa resposta em markdown — texto simples, tabela, lista, "
+    "o que for — antes de falares. Não é só para tabelas: é para toda "
+    "resposta tua, mesmo uma frase curta. Só depois de chamares essa "
+    "função é que falas a resposta em voz, de forma natural e breve, sem "
+    "ler a formatação (markdown) à letra.\n\n"
     "Se alguém te chamar de novo enquanto ainda estás a falar, pára "
-    "imediatamente e ouve o que disserem a seguir."
+    "imediatamente e ouve o que disserem a seguir.\n\n"
+    "Repetindo, porque é a regra mais importante: se não foste chamada "
+    "diretamente pelo nome, fica calada. Não respondas."
 )
 
 def emprestar_token_conversa() -> dict:
@@ -152,28 +207,40 @@ def emprestar_token_conversa() -> dict:
                         },
                         "turn_detection": {
                             "type": "semantic_vad",
-                            "eagerness": "high",
-                            # create_response: false — bug real (Rui,
-                            # 2026-07-31): com true (omissão da API), a Alma
-                            # respondia sozinha a qualquer turno detetado,
-                            # mesmo sem ser chamada pelo nome — a instrução
-                            # "só respondes quando chamada" não chegava para
-                            # garantir isso com fiabilidade. Passa a ser o
-                            # browser a decidir quando disparar response.create
-                            # (só quando a transcrição do turno menciona
-                            # "Alma" — ver static/index.html), voltando a uma
-                            # verificação determinística em vez de confiar só
-                            # no juízo do modelo. interrupt_response continua
-                            # true: mesmo sem criar resposta nova sozinha, uma
-                            # nova fala deteta-se e corta a que estiver em curso.
-                            "create_response": False,
+                            # "low" em vez de "high" (Rui, 2026-07-31): menos
+                            # ávido a fechar um turno como "completo" dá ao
+                            # modelo menos oportunidades por reunião de errar
+                            # se deve responder — sem ligar a isso, uma
+                            # eagerness alta multiplicava o número de vezes
+                            # que a regra "só respondes se chamada" tinha de
+                            # ser acertada.
+                            "eagerness": "low",
+                            # create_response: true — voltámos atrás de
+                            # false (Rui, 2026-07-31): com false, o browser
+                            # decidia por regex (/\balma\b/i no texto
+                            # transcrito) quando disparar response.create, o
+                            # que forçava sempre uma resposta em voz mesmo
+                            # quando "Alma" só passava numa frase que não lhe
+                            # era dirigida (ex: "a Alma disse que..."), já
+                            # que response.create não dá à sessão a opção de
+                            # decidir ficar calada — só de decidir o quê
+                            # dizer. Isso produzia respostas incoerentes /
+                            # fora de contexto, pior do que confiar no juízo
+                            # do modelo. Com true, é a própria sessão que
+                            # decide, a cada turno, se responde — a garantia
+                            # passa a vir de INSTRUCOES_MODO_REUNIAO (regra
+                            # reforçada com exemplos positivos/negativos e
+                            # repetida) em vez de código. interrupt_response
+                            # mantém-se true: uma fala nova continua a cortar
+                            # uma resposta em curso.
+                            "create_response": True,
                             "interrupt_response": True,
                         },
                         "noise_reduction": {"type": "far_field"},
                     },
                     "output": {"voice": "marin"},
                 },
-                "tools": [TOOL_PERGUNTAR_EMPRESA],
+                "tools": [TOOL_PERGUNTAR_EMPRESA, TOOL_MOSTRAR_NA_CONSOLA],
             },
         },
         timeout=30,

@@ -362,25 +362,37 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
+_MEDIA_TYPE_POR_FORMATO = {
+    "pdf": "application/pdf",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
 @app.get("/documentos-gerados/{id}")
 def documento_gerado(id: int):
-    """Serve um PDF gerado pela Alma (ver tools/documentos_gerados.gerar_pdf)
-    — o link que ela partilha na conversa aponta para aqui. Guardado em
-    Postgres, não em disco (o Railway não persiste ficheiros locais entre
-    deploys), por isso o link continua válido mesmo depois de um deploy."""
+    """Serve um documento gerado pela Alma (PDF ou Excel — ver
+    tools/documentos_gerados.gerar_pdf e gerar_excel) — o link que ela
+    partilha na conversa aponta para aqui. Guardado em Postgres, não em
+    disco (o Railway não persiste ficheiros locais entre deploys), por
+    isso o link continua válido mesmo depois de um deploy."""
     documento = obter_documento_gerado(id)
     if not documento:
         raise HTTPException(status_code=404, detail="documento não encontrado")
+    formato = documento["formato"]
+    media_type = _MEDIA_TYPE_POR_FORMATO.get(formato, "application/octet-stream")
     # um título com acentos (normal em português) não é um valor de header
     # HTTP válido tal e qual — precisa do formato filename*= (RFC 6266),
     # com uma reserva em ASCII simples para browsers/clientes antigos
     titulo = documento["titulo"]
     nome_ascii = titulo.encode("ascii", errors="ignore").decode().strip() or "documento"
-    nome_utf8 = quote(f"{titulo}.pdf")
+    nome_utf8 = quote(f"{titulo}.{formato}")
+    # inline só faz sentido para o PDF (o browser sabe mostrá-lo); um .xlsx
+    # inline costuma só descarregar de qualquer forma, mas "attachment" é o
+    # comportamento correto e explícito para esse caso
+    disposicao = "inline" if formato == "pdf" else "attachment"
     return Response(
-        content=documento["pdf"], media_type="application/pdf",
+        content=documento["pdf"], media_type=media_type,
         headers={"Content-Disposition":
-                f'inline; filename="{nome_ascii}.pdf"; filename*=UTF-8\'\'{nome_utf8}'}
+                f'{disposicao}; filename="{nome_ascii}.{formato}"; filename*=UTF-8\'\'{nome_utf8}'}
     )
 
 @app.get("/health")

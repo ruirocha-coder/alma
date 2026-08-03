@@ -108,8 +108,14 @@ CREATE TABLE IF NOT EXISTS avaliacoes_cargas_toros (
 
 CREATE TABLE IF NOT EXISTS documentos_gerados (
     id SERIAL PRIMARY KEY,
+    utilizador TEXT,                -- quem pediu o documento (ver migração abaixo p/ tabelas já existentes)
     titulo TEXT NOT NULL,
-    pdf BYTEA NOT NULL,             -- guardado em Postgres, não em disco (Railway não persiste disco entre deploys)
+    formato TEXT NOT NULL DEFAULT 'pdf',  -- 'pdf' ou 'xlsx' (ver tools/documentos_gerados.py)
+    pdf BYTEA NOT NULL,             -- guardado em Postgres, não em disco (Railway não persiste disco entre
+                                     -- deploys) — nome histórico da coluna, guarda o ficheiro final em
+                                     -- qualquer formato (pdf ou xlsx), não só PDF
+    conteudo_markdown TEXT,         -- fonte usada para gerar o documento (markdown p/ pdf, JSON de
+                                     -- colunas/linhas p/ xlsx), para a Alma poder reler/reaproveitar depois
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
@@ -180,6 +186,9 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS quantidade TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS data_carga TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS talao TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
+ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS utilizador TEXT;
+ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS conteudo_markdown TEXT;
+ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DEFAULT 'pdf';
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -389,12 +398,14 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
                 "registado_em": l["criado_em"].date().isoformat(),
             } for l in cur.fetchall()]
 
-def guardar_documento_gerado(titulo: str, pdf: bytes) -> int:
+def guardar_documento_gerado(utilizador: str, titulo: str, ficheiro: bytes, conteudo_fonte: str,
+                             formato: str = "pdf") -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO documentos_gerados (titulo, pdf) VALUES (%s, %s) RETURNING id",
-                (titulo, pdf)
+                """INSERT INTO documentos_gerados (utilizador, titulo, pdf, conteudo_markdown, formato)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (utilizador, titulo, ficheiro, conteudo_fonte, formato)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()
@@ -403,9 +414,45 @@ def guardar_documento_gerado(titulo: str, pdf: bytes) -> int:
 def obter_documento_gerado(id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT titulo, pdf FROM documentos_gerados WHERE id = %s", (id,))
+            cur.execute("SELECT titulo, pdf, formato FROM documentos_gerados WHERE id = %s", (id,))
             linha = cur.fetchone()
-            return {"titulo": linha["titulo"], "pdf": bytes(linha["pdf"])} if linha else None
+            return ({"titulo": linha["titulo"], "pdf": bytes(linha["pdf"]), "formato": linha["formato"]}
+                    if linha else None)
+
+def documentos_gerados_recentes(utilizador: str, limite: int = 5) -> list:
+    """Últimos documentos que a Alma gerou para esta pessoa (ver gerar_pdf e
+    gerar_excel) — usado para ela saber, sem perguntar, do que já falámos/
+    geramos antes, e para dar o `id` que obter_conteudo_documento_gerado
+    precisa para reler a fonte de um deles."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, titulo, formato, criado_em FROM documentos_gerados
+                   WHERE utilizador = %s ORDER BY criado_em DESC LIMIT %s""",
+                (utilizador, limite)
+            )
+            return [{"id": l["id"], "titulo": l["titulo"], "formato": l["formato"],
+                     "criado_em": l["criado_em"].isoformat()}
+                    for l in cur.fetchall()]
+
+def obter_conteudo_documento_gerado(utilizador: str, id: int) -> dict:
+    """Devolve a fonte de um documento já gerado (markdown p/ pdf, JSON de
+    colunas/linhas p/ xlsx — ver formato), para a Alma poder reaproveitá-la
+    (ex: gerar noutro formato, atualizar, resumir) sem pedir à pessoa para
+    reenviar os dados. Restrito a documentos gerados para o próprio
+    utilizador que pergunta — nunca aos de outra pessoa."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT titulo, conteudo_markdown, formato FROM documentos_gerados WHERE id = %s AND utilizador = %s",
+                (id, utilizador)
+            )
+            linha = cur.fetchone()
+            if not linha:
+                return {"erro": "não encontrei nenhum documento com este id, gerado para ti"}
+            if not linha["conteudo_markdown"]:
+                return {"erro": "este documento foi gerado antes de guardarmos a fonte — já não está disponível"}
+            return {"titulo": linha["titulo"], "formato": linha["formato"], "conteudo": linha["conteudo_markdown"]}
 
 def contexto_utilizador(utilizador: str) -> str:
     """Bloco de texto com perfil + memórias, para injetar no system prompt.
@@ -416,7 +463,8 @@ def contexto_utilizador(utilizador: str) -> str:
     são independentes: só devolve vazio se não houver mesmo nada."""
     p = obter_perfil(utilizador)
     factos = factos_utilizador(utilizador)
-    if not p and not factos:
+    documentos = documentos_gerados_recentes(utilizador)
+    if not p and not factos and not documentos:
         return ""
     linhas = [f"Estás a falar com: {utilizador}"]
     if p:
@@ -432,6 +480,11 @@ def contexto_utilizador(utilizador: str) -> str:
     if factos:
         linhas.append("O que sabes sobre o trabalho recente desta pessoa:")
         linhas += [f"- {f}" for f in factos]
+    if documentos:
+        linhas.append("Documentos que já geraste para esta pessoa (mais recente primeiro) — usa "
+                       "obter_conteudo_documento_gerado com o id se precisares de reler/reaproveitar um deles, "
+                       "em vez de dizeres que não tens acesso:")
+        linhas += [f"- id {d['id']}: \"{d['titulo']}\" ({d['formato']}, {d['criado_em']})" for d in documentos]
     return "\n".join(linhas)
 
 def ja_alertado(recording_id: int, prazo: str) -> bool:

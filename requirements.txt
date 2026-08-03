@@ -13,4 +13,5 @@ Pillow
 python-multipart
 markdown
 xhtml2pdf
+openpyxl
 pyjwt[crypto]
