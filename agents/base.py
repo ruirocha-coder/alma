@@ -325,6 +325,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "ler_mensagem_mural_basecamp": lambda url: basecamp.ler_mensagem_mural(url),
         "gerar_pdf": lambda titulo, conteudo_markdown: documentos_gerados.gerar_pdf(
             utilizador, titulo, conteudo_markdown),
+        "gerar_excel": lambda titulo, colunas, linhas, subtitulo=None, linhas_destacadas=None: documentos_gerados.gerar_excel(
+            utilizador, titulo, colunas, linhas, subtitulo, linhas_destacadas),
         "obter_conteudo_documento_gerado": lambda id: documentos_gerados.obter_conteudo_documento_gerado(
             utilizador, id),
     }
