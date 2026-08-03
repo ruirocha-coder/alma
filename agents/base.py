@@ -84,7 +84,6 @@ FUNCOES = {
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
     "guardar_avaliacao_carga_toros": ecos_largos.guardar_avaliacao_carga_toros,
     "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
-    "gerar_pdf": documentos_gerados.gerar_pdf,
     "disparar_sugestao_semanal_logistica": _disparar_sugestao_semanal_logistica,
     "diagnosticar_logistica_on_hold": _diagnosticar_logistica_on_hold,
     "trajetos_logistica_entregas": _trajetos_logistica_entregas,
@@ -324,6 +323,10 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
             utilizador, assunto, mensagem, origem, projeto_mural),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
         "ler_mensagem_mural_basecamp": lambda url: basecamp.ler_mensagem_mural(url),
+        "gerar_pdf": lambda titulo, conteudo_markdown: documentos_gerados.gerar_pdf(
+            utilizador, titulo, conteudo_markdown),
+        "obter_conteudo_documento_gerado": lambda id: documentos_gerados.obter_conteudo_documento_gerado(
+            utilizador, id),
     }
     return system, tools_completas, funcoes_utilizador
 

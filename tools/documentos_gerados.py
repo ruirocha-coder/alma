@@ -28,7 +28,7 @@ def _markdown_para_html(titulo: str, conteudo_markdown: str) -> str:
     corpo = _markdown.markdown(conteudo_markdown, extensions=["extra", "sane_lists"])
     return f"<html><head>{_CSS}</head><body><h1>{titulo}</h1>{corpo}</body></html>"
 
-def gerar_pdf(titulo: str, conteudo_markdown: str) -> dict:
+def gerar_pdf(utilizador: str, titulo: str, conteudo_markdown: str) -> dict:
     """Gera um documento PDF formatado a partir de conteúdo em markdown
     (títulos, negrito, listas, tabelas — a mesma sintaxe que já usas nas
     respostas normais) e devolve um url para o partilhares na conversa.
@@ -37,15 +37,30 @@ def gerar_pdf(titulo: str, conteudo_markdown: str) -> dict:
     sempre que pedirem explicitamente um PDF — em vez de escreveres tudo
     como texto corrido no chat. Inclui sempre o url devolvido na tua
     resposta em formato de link markdown (ex: "[título](url)"), para a
-    pessoa poder abrir/descarregar o documento."""
+    pessoa poder abrir/descarregar o documento.
+
+    Guarda também o markdown-fonte (não só o PDF já compilado), associado
+    a quem pediu — pedido do Rui (2026-08-03): sem isto, pedir para
+    reaproveitar/converter um documento já feito ("passa o último PDF a
+    Excel") não tinha a que voltar, só o PDF final compilado. Ver
+    db.documentos_gerados_recentes (injetado automaticamente no contexto)
+    e obter_conteudo_documento_gerado."""
     html = _markdown_para_html(titulo, conteudo_markdown)
     buffer = io.BytesIO()
     resultado = pisa.CreatePDF(html, dest=buffer)
     if resultado.err:
         return {"erro": "não consegui gerar o PDF a partir deste conteúdo"}
-    id_gerado = db.guardar_documento_gerado(titulo, buffer.getvalue())
+    id_gerado = db.guardar_documento_gerado(utilizador, titulo, buffer.getvalue(), conteudo_markdown)
     url = f"{os.environ['ALMA_APP_URL'].rstrip('/')}/documentos-gerados/{id_gerado}"
     return {"titulo": titulo, "url": url}
+
+def obter_conteudo_documento_gerado(utilizador: str, id: int) -> dict:
+    """Relê o markdown-fonte de um documento já gerado para esta pessoa (ver
+    gerar_pdf) — usa isto quando pedirem para reaproveitar, atualizar,
+    resumir ou converter para outro formato um documento que já fizeste,
+    em vez de dizeres que não tens acesso a esses dados. O id vem da lista
+    de "Documentos que já geraste para esta pessoa" no teu contexto."""
+    return db.obter_conteudo_documento_gerado(utilizador, id)
 
 TOOLS_DOCUMENTOS_GERADOS = [
     {
@@ -58,6 +73,17 @@ TOOLS_DOCUMENTOS_GERADOS = [
                 "conteudo_markdown": {"type": "string", "description": "o conteúdo completo do documento, em markdown (títulos com #, negrito, listas, tabelas)"}
             },
             "required": ["titulo", "conteudo_markdown"]
+        }
+    },
+    {
+        "name": "obter_conteudo_documento_gerado",
+        "description": "Relê o markdown-fonte de um documento que já geraste para esta pessoa (ver gerar_pdf), pelo id listado no teu contexto (\"Documentos que já geraste para esta pessoa\"). Usa isto sempre que pedirem para reaproveitar, atualizar, resumir ou converter para outro formato (ex: Excel) um documento já feito, em vez de dizeres que não tens essa informação.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "id do documento, como listado no teu contexto"}
+            },
+            "required": ["id"]
         }
     }
 ]
