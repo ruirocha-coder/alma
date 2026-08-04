@@ -78,6 +78,7 @@ FUNCOES = {
     "estado_projeto_basecamp": basecamp.estado_projeto_basecamp,
     "resumo_pessoa_basecamp": basecamp.resumo_pessoa_basecamp,
     "procurar_cards_basecamp": basecamp.procurar_cards_basecamp,
+    "cards_de_card_table": basecamp.cards_de_card_table,
     "procurar_anexo_em_comentarios": basecamp.procurar_anexo_em_comentarios,
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
     "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,

@@ -238,6 +238,54 @@ def _card_tables_ativos(forcar: bool = False) -> list[dict]:
     _cache["card_tables_ativos"] = (time.time(), itens)
     return itens
 
+def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
+    """Lista TODOS os cards de um card table específico (por nome, ver
+    _card_tables_ativos), coluna a coluna, com as suas notas completas.
+
+    Bug real (Rui, 2026-08-04): pedida uma listagem de todos os cards de
+    um card table ("Programa Redes Sociais"), a Alma só conseguiu extrair
+    o conteúdo de 4 em 6 cards, reportando os outros dois como "não
+    identificado"/"notas em branco" — sem ter, de facto, forma de saber
+    isso, porque não existia nenhuma ferramenta para enumerar os cards de
+    um card table específico. procurar_cards_basecamp só encontra cards
+    cujo título ou notas contenham um termo — não serve para "lista-me
+    tudo o que está neste quadro", e sem essa ferramenta não havia como
+    confirmar sequer que os dois cards em falta existiam ou tinham
+    conteúdo. Confirmado ao vivo (2026-08-04): um deles ("XX XX» Inside")
+    tinha texto real nas notas — não estava em branco, só não tinha sido
+    encontrado.
+
+    Percorre a estrutura do próprio card table (GET ao seu url_api, que
+    devolve as colunas em "lists") e depois o `cards_url` de cada coluna —
+    ao contrário de procurar_cards_basecamp/estado_projeto_basecamp, que
+    partem de _itens_ativos (todos os cards de todos os projetos,
+    cacheado), isto vai sempre buscar os dados atuais deste card table em
+    concreto, sem cache (é uma operação pontual, não uma pesquisa
+    repetida sobre milhares de itens)."""
+    alvo = _normalizar(nome_tabela)
+    projeto_normalizado = _normalizar(projeto) if projeto else None
+    tabelas = [t for t in _card_tables_ativos() if alvo in _normalizar(t.get("title") or "")
+              and (not projeto_normalizado
+                   or projeto_normalizado in _normalizar((t.get("bucket") or {}).get("name") or ""))]
+    if not tabelas:
+        return []
+    encontrados = []
+    for tabela in tabelas:
+        r = httpx.get(tabela["url"], headers=_headers(), timeout=30)
+        r.raise_for_status()
+        detalhe = r.json()
+        for coluna in detalhe.get("lists", []):
+            cards_url = coluna.get("cards_url")
+            if not cards_url:
+                continue
+            r2 = httpx.get(cards_url, headers=_headers(), timeout=30)
+            r2.raise_for_status()
+            for card in r2.json():
+                formatado = _formatar_item(card)
+                formatado["card_table"] = detalhe.get("title")
+                encontrados.append(formatado)
+    return encontrados
+
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
     """Procura tarefas, cards ou card tables (de todos os projetos, ou só
     de um em concreto) cujo título ou notas contenham `termo` — pedido
@@ -992,6 +1040,18 @@ TOOLS_ESTADO_PROJETO = [
                 "projeto": {"type": "string", "description": "opcional — filtra por um projeto específico"}
             },
             "required": ["termo"]
+        }
+    },
+    {
+        "name": "cards_de_card_table",
+        "description": "Lista TODOS os cards de um card table (quadro Kanban) específico, coluna a coluna, com as suas notas completas — usa isto sempre que pedirem uma listagem/resumo completo de um quadro pelo nome (ex: \"lista-me os cards do card table Programa Redes Sociais\", \"o que está em X\"), NUNCA procurar_cards_basecamp para isso: essa só encontra cards cujo título/notas contenha um termo específico, não enumera um quadro inteiro, e vai deixar itens de fora sem aviso. Cada card devolvido tem \"estado\" com o nome da coluna onde está (ex: \"Aprovação\", \"Done\") e \"card_table\" com o nome do próprio quadro (útil se houver mais do que um projeto com um quadro do mesmo nome). `nome_tabela` é um termo de pesquisa pelo título do quadro (não precisa de ser exato); `projeto` (opcional) desambigua quando o mesmo nome de quadro existe em mais do que um projeto.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nome_tabela": {"type": "string", "description": "nome (ou parte do nome) do card table, ex: \"Programa Redes Sociais\""},
+                "projeto": {"type": "string", "description": "opcional — desambigua quando existe mais do que um card table com este nome"}
+            },
+            "required": ["nome_tabela"]
         }
     },
     {
