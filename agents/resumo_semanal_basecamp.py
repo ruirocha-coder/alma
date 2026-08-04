@@ -56,12 +56,14 @@ MISSAO_RESUMO_SEMANAL = PERSONA + """
 
 Modo atual: resumo semanal de atividade para toda a equipa, publicado no
 Mural do Basecamp. Vais escrever UMA mensagem com base no estado atual das
-tarefas e cards em atraso (dados abaixo) — e, quando o contexto também
-incluir uma secção "Produção da semana passada", com esses dados também,
-como mais uma parte do MESMO resumo (nunca um post à parte). Usa sempre os
-valores exatos dados no contexto para a produção — nunca inventes nem
-recalcules estes números, foram já calculados corretamente antes de
-chegarem até ti.
+tarefas e cards em atraso (dados abaixo). Quando o contexto também tiver
+uma secção "Produção da semana passada", NÃO a repitas nem escrevas tu
+mesma uma secção com esses números — isso é acrescentado à tua mensagem
+depois, por código, sempre com os valores exatos (ver histórico: confiar
+no modelo para reproduzir esses números à letra já falhou, umas vezes
+saía, outras não). Usa esses dados só como contexto para as sugestões
+finais, se fizer sentido (ex: referir que a produção ficou abaixo do
+esperado), sem citares os números em si.
 
 Regras desta mensagem:
 - Começa sempre com um cabeçalho "Semana de {data_inicio} a {data_fim}",
@@ -73,9 +75,6 @@ Regras desta mensagem:
   a equipa.
 - Resume o panorama geral (quantos itens em atraso, quais os projetos mais
   afetados) sem listar cada um exaustivamente.
-- Se houver dados de produção no contexto, inclui uma secção própria com
-  esses números (entrada/saída de madeira da semana passada), antes das
-  sugestões finais.
 - Termina com 2 a 3 sugestões concretas de melhoria, baseadas em padrões que
   vires nos dados (ex: um projeto acumula muitos atrasos, um tipo de tarefa
   repete-se, ou a produção ficou abaixo do esperado).
@@ -107,7 +106,18 @@ Por projeto:
         system=MISSAO_RESUMO_SEMANAL,
         messages=[{"role": "user", "content": contexto}]
     )
-    return "".join(b.text for b in resposta.content if b.type == "text").strip()
+    texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
+
+    # a secção de produção é sempre acrescentada aqui, por código — pedido
+    # da Beatriz (2026-08-04), depois do resumo de 3/agosto ter saído sem
+    # ela: pedir ao modelo para "incluir uma secção própria com esses
+    # números" (ver histórico deste ficheiro) não garantia que saísse
+    # sempre; os valores em si nunca dependeram do modelo (calculados em
+    # tools.ecos_largos._totais_intervalo), só faltava parar de confiar
+    # nele para os reproduzir na mensagem final.
+    if producao_texto:
+        texto += f"\n\n## Produção da semana passada\n{producao_texto}"
+    return texto
 
 def _correr(lock: threading.Lock, etiqueta: str, filtro, projeto_mural: str, incluir_producao: bool = False):
     """Núcleo partilhado pelas duas corridas: só muda o filtro dos atrasados,
