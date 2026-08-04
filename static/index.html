@@ -492,6 +492,8 @@
     flex-shrink: 0;
   }
   .reuniao-banner button:hover { background: rgba(255, 255, 255, 0.32) !important; }
+  .reuniao-banner.mudo { background: #6b6b6b; }
+  .reuniao-banner.mudo .reuniao-dot { animation: none; opacity: 0.6; }
   .anexo-chips {
     display: flex;
     flex-wrap: wrap;
@@ -751,12 +753,28 @@
   // conteúdo já foi escrito por outro caminho — sem isto, essa fala
   // apareceria duplicada.
   let suprimirEcoProximaFala = false;
+  // pedido do Rui (2026-08-04): "cala-te" e variações caíam num ciclo —
+  // ela tentava confirmar em voz/texto que ia ficar calada ("(silêncio)",
+  // "(entra em silêncio)"), o que é, em si, uma nova intervenção, porque
+  // create_response:true obriga a sessão a gerar sempre alguma coisa a
+  // cada turno, nunca "nada". Em vez de depender só de instrução para um
+  // "nada" que a API não permite, ela chama entrar_em_modo_mudo (juízo
+  // dela, não regex) quando reconhece o pedido; a partir daí é o browser
+  // que garante, por código, que nada do que ela gerar chega a
+  // tocar/aparecer — só sai chamando sair_do_modo_mudo, ao reconhecer que
+  // foi chamada de novo com um pedido genuíno.
+  let modoMudo = false;
   // uma queda de rede a meio da reunião tenta reconectar uma vez (novo
   // token + nova ligação WebRTC) antes de desistir — uma queda momentânea
   // não deve obrigar a reiniciar a reunião toda
   let reconexaoTentada = false;
 
   function atualizarEstadoReuniao() {
+    reuniaoBanner.classList.toggle("mudo", modoMudo);
+    if (modoMudo) {
+      reuniaoStatusEl.textContent = "🔇 A Alma está em modo mudo — chama-a pelo nome com um pedido para ela voltar a responder.";
+      return;
+    }
     reuniaoStatusEl.textContent = respondendoAtivo
       ? "A Alma está a responder…"
       : `A Alma está a ouvir a reunião (${excertosProcessados} excerto(s) processados) — só responde se for chamada pelo nome.`;
@@ -826,6 +844,8 @@
     proximoIndiceExcerto = 0;
     excertosProcessados = 0;
     respondendoAtivo = false;
+    modoMudo = false;
+    audioPlayerEl.muted = false;
     msgPreparacao.atualizar("🎙️ Já estou a ouvir — podes falar à vontade, só respondo se me chamares pelo nome.");
     reuniaoBtn.classList.add("a-gravar");
     reuniaoBtn.textContent = "🔴";
@@ -882,7 +902,7 @@
         // em "…" antes de mostrar campos como este) — confirma ao vivo se
         // ev.transcript vem mesmo preenchido
         console.log("[reuniao] transcript da fala:", JSON.stringify(ev.transcript));
-        if (ev.transcript) {
+        if (ev.transcript && !modoMudo) {
           if (suprimirEcoProximaFala) {
             suprimirEcoProximaFala = false;
           } else {
@@ -1006,13 +1026,63 @@
   }
 
   // encaminha uma chamada de função da sessão de conversação pelo nome —
-  // ver tools/voz.py para as definições das duas funções disponíveis
+  // ver tools/voz.py para as definições das quatro funções disponíveis
   function despacharChamadaFuncao(nome, callId, argumentosJson) {
-    if (nome === "mostrar_na_consola") {
+    if (nome === "entrar_em_modo_mudo") {
+      entrarModoMudo(callId);
+    } else if (nome === "sair_do_modo_mudo") {
+      sairModoMudo(callId);
+    } else if (modoMudo) {
+      // rede de segurança: mesmo que ela tente responder sem ter chamado
+      // sair_do_modo_mudo primeiro (ex: chamou perguntar_dados_empresa
+      // por engano em modo mudo), não deixa nada passar — só confirma a
+      // chamada, sem gerar resposta nenhuma a seguir
+      ignorarChamadaEmModoMudo(callId);
+    } else if (nome === "mostrar_na_consola") {
       mostrarNaConsola(callId, argumentosJson);
     } else {
       tratarPerguntaEmpresa(callId, argumentosJson);
     }
+  }
+
+  // ver modoMudo, mais acima — entra em modo mudo (juízo dela, não regex,
+  // ao reconhecer um pedido de silêncio) e garante, por código, que nada
+  // do que ela gerar a seguir chega a tocar/aparecer. Sem response.create
+  // a seguir ao ack — é essa ausência que evita o ciclo de "confirmações"
+  // ("(silêncio)", "(entra em silêncio)") que create_response:true
+  // continuava a forçar quando se tentava resolver isto só por instrução.
+  function entrarModoMudo(callId) {
+    modoMudo = true;
+    audioPlayerEl.muted = true;
+    atualizarEstadoReuniao();
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "modo mudo ativado" }
+    }));
+  }
+
+  // sai do modo mudo ao reconhecer uma chamada genuína — desmuta antes de
+  // pedir a resposta, para a fala a seguir (a resposta real ao pedido) já
+  // chegar a tocar/aparecer normalmente
+  function sairModoMudo(callId) {
+    modoMudo = false;
+    audioPlayerEl.muted = false;
+    atualizarEstadoReuniao();
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "modo mudo desativado" }
+    }));
+    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
+  }
+
+  function ignorarChamadaEmModoMudo(callId) {
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "ignorado — em modo mudo" }
+    }));
   }
 
   // chamado quando a sessão de conversação decide que uma resposta dada por
@@ -1092,6 +1162,7 @@
     if (!reuniaoAtiva) return;
     reuniaoAtiva = false;
     respondendoAtivo = false;
+    modoMudo = false;
     fecharConversaReuniao();
     if (reuniaoStreamMic) {
       reuniaoStreamMic.getTracks().forEach((t) => t.stop());

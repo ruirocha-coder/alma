@@ -125,6 +125,50 @@ TOOL_MOSTRAR_NA_CONSOLA = {
     },
 }
 
+# pedido do Rui (2026-08-04): um pedido de silêncio ("cala-te", "pára")
+# caía num ciclo — ela tentava confirmar em voz/texto que ia ficar calada
+# ("(silêncio)", "(entra em silêncio)"), o que é, em si, uma nova
+# intervenção, porque create_response:true obriga a sessão a gerar
+# sempre alguma coisa a cada turno, nunca literalmente "nada". Só
+# instrução ("não digas nada") não chegava — a API não dá essa opção.
+# Em vez disso, ela chama esta função (continua a ser juízo dela, não um
+# regex a vigiar palavras) e é o browser que garante, por código, que
+# nada do que ela gerar depois disto chega a tocar/aparecer (ver
+# entrarModoMudo em static/index.html) — sem pedir response.create a
+# seguir ao ack, por isso não há nenhuma "confirmação" a sair.
+TOOL_ENTRAR_MODO_MUDO = {
+    "type": "function",
+    "name": "entrar_em_modo_mudo",
+    "description": (
+        "Chama esta função sempre que reconheceres um pedido para ficares "
+        "calada, parares, ou não responderes (ex: \"cala-te\", \"pára\", "
+        "\"já chega\", \"fica calada\", \"silêncio\", \"deixa estar\", ou "
+        "variação óbvia) — EM VEZ DE tentares confirmar isso em voz ou "
+        "por texto. Nunca digas nada sobre isto, nem uma frase curta, nem "
+        "um parêntese tipo \"(silêncio)\" ou \"(entra em silêncio)\" — "
+        "isso conta como falar, é exatamente o que não deves fazer. Só "
+        "chama esta função, sem dizer mais nada. Continuas a ouvir tudo "
+        "normalmente depois disto; só voltas a intervir depois de "
+        "chamares sair_do_modo_mudo."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
+TOOL_SAIR_MODO_MUDO = {
+    "type": "function",
+    "name": "sair_do_modo_mudo",
+    "description": (
+        "Chama esta função, antes de responderes, sempre que estiveres em "
+        "modo mudo (ver entrar_em_modo_mudo) e reconheceres que estás a "
+        "ser chamada de novo com um pedido genuíno dirigido a ti (ex: "
+        "\"Alma, qual é o estado da encomenda X?\") — nunca só por "
+        "ouvires o teu nome a passar na conversa entre as pessoas. Isto "
+        "tira-te do modo mudo; só depois de a chamares é que respondes "
+        "normalmente ao pedido."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+}
+
 INSTRUCOES_MODO_REUNIAO = (
     "Português europeu, nunca do Brasil. És a Alma, assistente da Boa Safra "
     "/ Interior Guider, numa reunião de trabalho em modo de escuta contínua "
@@ -155,15 +199,14 @@ INSTRUCOES_MODO_REUNIAO = (
     "\"calas-te\", \"pára\", \"pára de falar\", \"já chega\", \"fica "
     "calada\", \"está calada\", \"não precisas de responder\", \"não "
     "respondas\", \"silêncio\", \"deixa estar\", ou qualquer variação "
-    "óbvia destas — a resposta certa é NÃO DIZERES NADA. Nem uma "
-    "confirmação breve como \"ok, vou ficar calada\". Essa confirmação "
-    "seria, ela própria, uma nova intervenção — exatamente o que te "
-    "pediram para não fazeres. Fica mesmo em silêncio: não fales, e não "
-    "chames mostrar_na_consola nem perguntar_dados_empresa para isto. Se "
-    "ouvires o mesmo tipo de pedido outra vez a seguir, isso não é motivo "
-    "para responderes de novo — a repetição só significa que a pessoa "
-    "está a confirmar que já pararam, nunca um convite a voltar a falar; "
-    "continua em silêncio.\n\n"
+    "óbvia destas — chama a função entrar_em_modo_mudo, e não digas nada "
+    "sobre isto (nem uma frase curta, nem um parêntese tipo "
+    "\"(silêncio)\"). Enquanto estiveres em modo mudo, continuas a ouvir "
+    "tudo, mas só voltas a intervir depois de chamares sair_do_modo_mudo, "
+    "ao reconhecer que foste chamada de novo com um pedido genuíno — "
+    "nunca só por o teu nome passar na conversa. Um pedido de silêncio "
+    "repetido enquanto já estás em modo mudo não precisa de nada — já lá "
+    "estás.\n\n"
     "Sempre que respondes tu mesma (sem ser pelo perguntar_dados_empresa, "
     "e sem ser um pedido de silêncio como acima), "
     "chama SEMPRE primeiro a função mostrar_na_consola com o texto "
@@ -255,7 +298,8 @@ def emprestar_token_conversa() -> dict:
                     },
                     "output": {"voice": "marin"},
                 },
-                "tools": [TOOL_PERGUNTAR_EMPRESA, TOOL_MOSTRAR_NA_CONSOLA],
+                "tools": [TOOL_PERGUNTAR_EMPRESA, TOOL_MOSTRAR_NA_CONSOLA,
+                         TOOL_ENTRAR_MODO_MUDO, TOOL_SAIR_MODO_MUDO],
             },
         },
         timeout=30,
