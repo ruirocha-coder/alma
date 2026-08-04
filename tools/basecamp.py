@@ -119,9 +119,15 @@ def _itens_ativos(forcar: bool = False) -> list[dict]:
     return itens
 
 def _formatar_item(item: dict) -> dict:
+    if item.get("type") == "Todo":
+        tipo = "tarefa"
+    elif item.get("type") == "Kanban::Board":
+        tipo = "card table"
+    else:
+        tipo = "card"
     return {
         "id": item["id"],
-        "tipo": "tarefa" if item.get("type") == "Todo" else "card",
+        "tipo": tipo,
         "titulo": item.get("title") or item.get("content") or "(sem título)",
         "notas": _texto_simples(item.get("description", "")),
         # coluna do Kanban (estado do card) ou lista de tarefas (para Todos)
@@ -195,17 +201,48 @@ def cards_parados_sem_prazo(dias_sem_atividade: int = 14) -> list[dict]:
         parados.append(formatado)
     return parados
 
+TTL_CARD_TABLES = 900  # mesmo TTL de _itens_ativos — o conjunto de quadros muda tão pouco quanto o de cards
+
+def _card_tables_ativos(forcar: bool = False) -> list[dict]:
+    """Os quadros Kanban (Card Tables) em si — não os cards que têm dentro.
+    Um Card Table é o seu próprio tipo de registo na API do Basecamp
+    (`Kanban::Board`), separado de `Kanban::Card`; por isso fica de fora de
+    _itens_ativos (usada para contagens de tarefas/cards em aberto por
+    estado — um quadro não tem "estado" nem prazo, e misturá-lo ali
+    inflacionava essas contagens). Bug real (Rui, 2026-08-04): a Alma nunca
+    encontrava um quadro pelo nome (ex: "Programa Redes Sociais") porque
+    TIPOS_MONITORIZADOS só via tarefas e cards — o próprio quadro, se for
+    isso que alguém está a procurar, era invisível para qualquer busca.
+
+    Sem filtro "completed" (um quadro não tem essa noção, ao contrário de
+    tarefas/cards) — só "status": "active", para excluir quadros
+    arquivados/na lixeira."""
+    if not forcar and "card_tables_ativos" in _cache:
+        ts, itens = _cache["card_tables_ativos"]
+        if time.time() - ts < TTL_CARD_TABLES:
+            return itens
+    itens = _get_paginado(f"{_base_url()}/projects/recordings.json",
+                          params={"type": "Kanban::Board", "status": "active"},
+                          etiqueta="Kanban::Board")
+    print(f"[basecamp] Kanban::Board: {len(itens)} em aberto")
+    _cache["card_tables_ativos"] = (time.time(), itens)
+    return itens
+
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
-    """Procura tarefas/cards (de todos os projetos, ou só de um em
-    concreto) cujo título ou notas contenham `termo` — pedido explícito
-    do Rui (2026-07-24): as notas de um card guardam frequentemente
-    informação crítica (morada de entrega, dados do cliente, datas
-    acordadas) que só aparecia noutras ferramentas quando o card estava
-    atrasado ou parado; isto permite consultar as notas de QUALQUER card
-    em aberto, a qualquer momento, mesmo dentro do prazo. Só considera
-    itens ativos e não concluídos (ver _itens_ativos) — não encontra
-    cards já arquivados/na lixeira. `termo` procura tanto no título como
-    no texto das notas, tolerante a acentos."""
+    """Procura tarefas, cards ou card tables (de todos os projetos, ou só
+    de um em concreto) cujo título ou notas contenham `termo` — pedido
+    explícito do Rui (2026-07-24): as notas de um card guardam
+    frequentemente informação crítica (morada de entrega, dados do
+    cliente, datas acordadas) que só aparecia noutras ferramentas quando o
+    card estava atrasado ou parado; isto permite consultar as notas de
+    QUALQUER card em aberto, a qualquer momento, mesmo dentro do prazo. Só
+    considera itens ativos e não concluídos (ver _itens_ativos) — não
+    encontra cards já arquivados/na lixeira. `termo` procura tanto no
+    título como no texto das notas, tolerante a acentos.
+
+    Inclui também os próprios card tables (quadros Kanban) cujo título
+    contenha `termo` — ver _card_tables_ativos: um card table é um objeto
+    à parte de um card, sem notas, por isso só o título é comparado."""
     alvo = _normalizar(termo)
     projeto_normalizado = _normalizar(projeto) if projeto else None
     encontrados = []
@@ -215,6 +252,13 @@ def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
         titulo = item.get("title") or item.get("content") or ""
         notas = _texto_simples(item.get("description", ""))
         if alvo not in _normalizar(titulo) and alvo not in _normalizar(notas):
+            continue
+        encontrados.append(_formatar_item(item))
+    for item in _card_tables_ativos():
+        if projeto_normalizado and projeto_normalizado not in _normalizar((item.get("bucket") or {}).get("name") or ""):
+            continue
+        titulo = item.get("title") or ""
+        if alvo not in _normalizar(titulo):
             continue
         encontrados.append(_formatar_item(item))
     return encontrados
@@ -930,7 +974,7 @@ TOOLS_ESTADO_PROJETO = [
     },
     {
         "name": "procurar_cards_basecamp",
-        "description": "Procura tarefas/cards do Basecamp (por título ou pelo texto das notas) por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor. Devolve os cards encontrados com as suas notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o card certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é. Se precisares de ler um PDF anexado ao card (ex: a fatura ou o orçamento, para identificar os produtos), usa depois ler_anexos_registo_basecamp com o campo \"url_api\" do card encontrado (nunca o campo \"url\", que é só o link para abrir no browser). Se o PDF estiver mencionado nas notas mas ler_anexos_registo_basecamp não encontrar nada anexado ao card, o ficheiro pode estar anexado a um COMENTÁRIO em vez da descrição — usa então procurar_anexo_em_comentarios com o campo \"comments_url\" deste card. IMPORTANTE: a morada de ENTREGA só pode vir do texto das notas (campo \"notas\") devolvido por esta ferramenta — nunca de um PDF anexado nem de um comentário; o PDF do orçamento/fatura tem a sua própria morada, mas é a morada fiscal/de faturação do cliente, que pode ser um sítio bem diferente do local real de entrega. Se as notas não tiverem morada nenhuma, diz isso claramente em vez de a ires buscar a outro sítio.",
+        "description": "Procura tarefas, cards OU card tables (quadros Kanban) do Basecamp por um termo — ex: o nome de um cliente, um número de encomenda, uma morada, um fornecedor, ou o próprio nome de um quadro. Compara título e notas de tarefas/cards; para card tables (que não têm notas) compara só o título. Devolve os itens encontrados com o campo \"tipo\" a indicar qual é qual (\"tarefa\", \"card\" ou \"card table\") e, para tarefas/cards, as notas (campo \"notas\"), onde costuma estar informação crítica como morada de entrega, dados do cliente, e datas acordadas. Usa isto sempre que precisares de consultar as notas de um card específico, mesmo que ele não esteja atrasado nem parado, OU para confirmar se existe um quadro com um certo nome — não é preciso esperar por um resumo geral do projeto, esta ferramenta encontra o item certo diretamente. `projeto` (opcional) filtra por um projeto em concreto, se souberes qual é. Se precisares de ler um PDF anexado ao card (ex: a fatura ou o orçamento, para identificar os produtos), usa depois ler_anexos_registo_basecamp com o campo \"url_api\" do card encontrado (nunca o campo \"url\", que é só o link para abrir no browser). Se o PDF estiver mencionado nas notas mas ler_anexos_registo_basecamp não encontrar nada anexado ao card, o ficheiro pode estar anexado a um COMENTÁRIO em vez da descrição — usa então procurar_anexo_em_comentarios com o campo \"comments_url\" deste card. IMPORTANTE: a morada de ENTREGA só pode vir do texto das notas (campo \"notas\") devolvido por esta ferramenta — nunca de um PDF anexado nem de um comentário; o PDF do orçamento/fatura tem a sua própria morada, mas é a morada fiscal/de faturação do cliente, que pode ser um sítio bem diferente do local real de entrega. Se as notas não tiverem morada nenhuma, diz isso claramente em vez de a ires buscar a outro sítio.",
         "input_schema": {
             "type": "object",
             "properties": {
