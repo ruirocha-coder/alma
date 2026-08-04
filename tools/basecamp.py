@@ -205,26 +205,36 @@ TTL_CARD_TABLES = 900  # mesmo TTL de _itens_ativos — o conjunto de quadros mu
 
 def _card_tables_ativos(forcar: bool = False) -> list[dict]:
     """Os quadros Kanban (Card Tables) em si — não os cards que têm dentro.
-    Um Card Table é o seu próprio tipo de registo na API do Basecamp
-    (`Kanban::Board`), separado de `Kanban::Card`; por isso fica de fora de
-    _itens_ativos (usada para contagens de tarefas/cards em aberto por
-    estado — um quadro não tem "estado" nem prazo, e misturá-lo ali
-    inflacionava essas contagens). Bug real (Rui, 2026-08-04): a Alma nunca
-    encontrava um quadro pelo nome (ex: "Programa Redes Sociais") porque
-    TIPOS_MONITORIZADOS só via tarefas e cards — o próprio quadro, se for
-    isso que alguém está a procurar, era invisível para qualquer busca.
+    Bug real (Rui, 2026-08-04): a Alma nunca encontrava um quadro pelo nome
+    (ex: "Programa Redes Sociais") porque TIPOS_MONITORIZADOS só via
+    tarefas e cards — o próprio quadro, se for isso que alguém está a
+    procurar, era invisível para qualquer busca.
 
-    Sem filtro "completed" (um quadro não tem essa noção, ao contrário de
-    tarefas/cards) — só "status": "active", para excluir quadros
-    arquivados/na lixeira."""
+    Confirmado ao vivo: um card table NÃO é um "recording" pesquisável em
+    /projects/recordings.json (`?type=Kanban::Board` dá 400 Bad Request,
+    não é um tipo aceite ali) — é uma ferramenta do dock de um projeto,
+    tal como o Mural ou o Vault (ver _resolver_mural/_resolver_vault). Por
+    isso a busca certa é pelo dock de cada projeto (listar_projetos), não
+    pelos recordings — e um projeto pode ter MAIS DO QUE UM card table no
+    dock: confirmado ao vivo (2026-08-04) que "Marketing Interior Guider"
+    tem dois, "Kanban" e "Programa Redes Sociais", ambos com
+    name="kanban_board", distinguidos só pelo title de cada um."""
     if not forcar and "card_tables_ativos" in _cache:
         ts, itens = _cache["card_tables_ativos"]
         if time.time() - ts < TTL_CARD_TABLES:
             return itens
-    itens = _get_paginado(f"{_base_url()}/projects/recordings.json",
-                          params={"type": "Kanban::Board", "status": "active"},
-                          etiqueta="Kanban::Board")
-    print(f"[basecamp] Kanban::Board: {len(itens)} em aberto")
+    itens = []
+    for p in listar_projetos():
+        for ferramenta in p.get("dock", []):
+            if ferramenta.get("name") == "kanban_board" and ferramenta.get("enabled"):
+                itens.append({
+                    "id": ferramenta["id"],
+                    "type": "Kanban::Board",
+                    "title": ferramenta.get("title"),
+                    "bucket": {"name": p.get("name")},
+                    "url": ferramenta.get("url"),
+                    "app_url": ferramenta.get("app_url"),
+                })
     _cache["card_tables_ativos"] = (time.time(), itens)
     return itens
 
