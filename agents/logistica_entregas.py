@@ -189,6 +189,29 @@ def _extrair_dados_encomenda(titulo: str, notas: str, texto_pdf: str = None) -> 
                 dados[campo] = None
     return dados
 
+def _data_entrega_efetiva(item: dict, dados: dict):
+    """Data de entrega ao cliente a usar na monitorização automática de
+    atrasos — pedido do Rui/Beatriz (2026-08-03), a seguir a um caso real
+    (card "Entregas" com a data reagendada para Setembro): o campo "due
+    on" do card é o único campo estruturado, e é o que a equipa atualiza
+    quando a data muda; a data nas notas em texto livre ("DATA PREVISTA
+    ENTREGA: ...") fica por atualizar, e a monitorização continuava a
+    sinalizar atraso contra essa data antiga mesmo depois de reagendado.
+
+    Prioridade: "due on" do card sempre que existir; só cai para a data
+    extraída das notas (dados["data_entrega_cliente"]) quando o card não
+    tiver "due on" definido — nunca ao contrário. Sobrepõe dados[...] em
+    vez de só devolver o valor, para os textos dos comentários gerados a
+    seguir (ver tools.logistica.gerar_texto_condicao_fixa) mostrarem
+    sempre a mesma data usada para decidir o alerta."""
+    due_on = item.get("due_on")
+    if due_on:
+        try:
+            return date.fromisoformat(due_on)
+        except ValueError:
+            print(f"[logistica_entregas] due_on em formato inesperado no card {item.get('id')}: {due_on!r}")
+    return dados.get("data_entrega_cliente")
+
 # palavras-chave usadas para detetar, num comentário humano recente, um
 # pedido de proposta de email de atraso ao cliente (condição E) — um
 # atalho simples em vez de uma classificação por IA a mais por card;
@@ -464,6 +487,7 @@ def correr_monitorizacao_logistica() -> dict:
             except Exception as e:
                 print(f"[logistica_entregas] falhou a extrair dados de {recording_id}: {e!r}")
                 dados = {}
+            dados["data_entrega_cliente"] = _data_entrega_efetiva(item, dados)
 
             if not dados.get("data_entrada_armazem") or not dados.get("data_entrega_cliente"):
                 resumo["campos_em_falta"] += 1
