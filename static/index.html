@@ -1026,8 +1026,13 @@
   }
 
   // encaminha uma chamada de função da sessão de conversação pelo nome —
-  // ver tools/voz.py para as definições das quatro funções disponíveis
+  // ver tools/voz.py para as definições das quatro funções disponíveis.
+  // log dedicado (Rui, 2026-08-04): o preview do evento no devtools
+  // esconde nome/argumentos atrás de "Object" quando copiado como texto —
+  // isto imprime-os já como texto simples, para se ver logo qual função
+  // foi mesmo chamada.
   function despacharChamadaFuncao(nome, callId, argumentosJson) {
+    console.log("[reuniao] função chamada:", nome, "| argumentos:", argumentosJson);
     if (nome === "entrar_em_modo_mudo") {
       entrarModoMudo(callId);
     } else if (nome === "sair_do_modo_mudo") {
@@ -1131,7 +1136,15 @@
       dados.append("pergunta", pergunta);
       dados.append("indice_recente", proximoIndiceExcerto);
       const resp = await fetch("/alma/reuniao/pergunta_empresa", { method: "POST", body: dados });
-      if (!resp.ok) throw new Error(`${resp.status}`);
+      if (!resp.ok) {
+        // log dedicado (Rui, 2026-08-04): sem isto só se via o código de
+        // estado (ex: 422), nunca o motivo exato que o FastAPI devolve no
+        // corpo — o que impedia de saber se é um campo em falta, o
+        // formato errado, ou outra coisa qualquer
+        const detalhe = await resp.text().catch(() => "(sem corpo)");
+        console.error("[reuniao] pergunta_empresa falhou:", resp.status, detalhe);
+        throw new Error(`${resp.status}`);
+      }
       const dadosResp = await resp.json();
       resposta = dadosResp.resposta;
       respostaFalada = dadosResp.resposta_falada || resposta;
