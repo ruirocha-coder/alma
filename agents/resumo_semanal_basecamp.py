@@ -14,18 +14,29 @@ from tools import basecamp, ecos_largos
 _a_correr_interior_guider = threading.Lock()
 _a_correr_ecos_largos = threading.Lock()
 
-def _semana_atual() -> tuple:
-    """Segunda a sexta da semana corrente — calculado aqui, nunca pelo
-    modelo (a mesma razão de sempre: aritmética de datas não se confia à
-    IA, ver tools/ecos_largos._semana_de). Bug real (Rui, 2026-07-27): o
-    resumo semanal nunca recebia a data de hoje no contexto, e o modelo
-    escreveu por iniciativa própria um cabeçalho "Semana de ___", sem
-    saber a data — como não sabia, e a persona pede honestidade
-    epistémica, escreveu literalmente "(data atual não disponível no
-    contexto — preencher antes de publicar)" e isso foi publicado a
-    sério no Mural, visível a toda a equipa."""
+def _semana_passada() -> tuple:
+    """Segunda a sexta da semana que acabou de terminar — calculado aqui,
+    nunca pelo modelo (a mesma razão de sempre: aritmética de datas não
+    se confia à IA, ver tools/ecos_largos._semana_de). Bug real (Rui,
+    2026-07-27): o resumo semanal nunca recebia a data de hoje no
+    contexto, e o modelo escreveu por iniciativa própria um cabeçalho
+    "Semana de ___", sem saber a data — como não sabia, e a persona pede
+    honestidade epistémica, escreveu literalmente "(data atual não
+    disponível no contexto — preencher antes de publicar)" e isso foi
+    publicado a sério no Mural, visível a toda a equipa.
+
+    Bug real (Beatriz, 2026-08-04): esta função chamava-se _semana_atual
+    e devolvia a semana CORRENTE (segunda a sexta a partir de hoje) — como
+    o resumo corre à segunda-feira de manhã, isso é a semana que está
+    mesmo agora a começar, não a que passou. O cabeçalho do resumo
+    (ex: "Semana de 03/08 a 07/08", publicado a 3/08) ficava a descrever
+    dias ainda por acontecer, e incoerente com a secção de produção logo
+    a seguir, que mostra corretamente a semana anterior (ver
+    tools/ecos_largos._semana_de, usada com "semana_passada"). Agora usa o
+    mesmo recuo de 7 dias que essa função já usava."""
     hoje = date.today()
-    inicio = hoje - timedelta(days=hoje.weekday())
+    inicio_semana_corrente = hoje - timedelta(days=hoje.weekday())
+    inicio = inicio_semana_corrente - timedelta(days=7)
     return inicio, inicio + timedelta(days=4)
 
 def _e_projeto_ecos_largos(nome_projeto: str) -> bool:
@@ -89,9 +100,9 @@ def _gerar_resumo(atrasados: list[dict], producao_texto: str = None) -> str:
     resumo_projetos = "\n".join(
         f"- {projeto}: {len(itens)} em atraso (o mais antigo tem {max(i['dias_atraso'] for i in itens)} dias)"
         for projeto, itens in sorted(por_projeto.items(), key=lambda x: -len(x[1]))
-    ) or "(nenhum item em atraso esta semana)"
+    ) or "(nenhum item em atraso)"
 
-    inicio_semana, fim_semana = _semana_atual()
+    inicio_semana, fim_semana = _semana_passada()
     contexto = f"""Semana de {inicio_semana.strftime('%d/%m/%Y')} a {fim_semana.strftime('%d/%m/%Y')}
 
 Total de tarefas/cards em atraso: {len(atrasados)}
