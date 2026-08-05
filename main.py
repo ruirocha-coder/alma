@@ -17,7 +17,8 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
                     sugestao_logistica_semanal, estimativa_montagem,
-                    avisos_gestao_agendas, sincronizacao_calendario)
+                    avisos_gestao_agendas, sincronizacao_calendario,
+                    mensagem_motivacional_diaria)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
 from db import inicializar_schema
 inicializar_schema()
@@ -69,6 +70,13 @@ scheduler.add_job(estimativa_montagem.correr_calibracao_estimativa, "cron",
 # agents/avisos_gestao_agendas.py), por isso corre sozinha todos os dias
 # sem custo extra na maioria deles.
 scheduler.add_job(avisos_gestao_agendas.correr_avisos_gestao_agendas, "cron", hour=8, minute=0)
+# mensagem diária motivacional (Mural da Gestão), a partir da evolução dos
+# cards nos projetos Boa Safra, Interior Guider e Gestão — pedido explícito
+# do Rui e da Beatriz (2026-08-05): segunda a sexta às 9h. Coincide com o
+# horário do resumo semanal (só às segundas, ver acima) — sem problema, são
+# publicações distintas, com locks próprios, nunca a mesma corrida.
+scheduler.add_job(mensagem_motivacional_diaria.correr_mensagem_diaria_motivacional, "cron",
+                  day_of_week="mon-fri", hour=9, minute=0)
 # sincronização unidirecional Basecamp (Agenda do projeto Entregas) ->
 # Google Calendar: de 2 em 2 minutos, pedido do Rui (2026-07-29) — o único
 # job por intervalo (não "cron") desta aplicação, porque aqui o objetivo é
