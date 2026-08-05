@@ -239,6 +239,60 @@ def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, ag
             )
         conn.commit()
 
+_LIMITE_CARATERES_RECORTE_ANTERIOR = 6000  # texto, não tokens — não precisa de ser exato
+
+def _recorte_sessao_anterior(utilizador: str, sessao_atual: str, limite_mensagens: int = 12) -> list[dict]:
+    """Só chamado por historico_sessao quando a sessão atual está mesmo a
+    começar (sem mensagens ainda) — nunca a meio de uma conversa já em
+    curso, para não repetir isto a cada troca.
+
+    Pedido do Rui (2026-08-05): a Alma só tinha memória do que decidisse
+    guardar explicitamente (memorizar_facto, ver contexto_utilizador) ou
+    da sessão ATUAL — nada da conversa anterior a essa, mesmo que tivesse
+    sido no próprio dia anterior. Devolve um recorte em BRUTO das últimas
+    mensagens da sessão anterior mais recente desta pessoa, como um par
+    user/assistant sintético logo no início da conversa — de propósito
+    não é um resumo: resumir custava uma chamada extra ao modelo a cada
+    sessão nova, e arriscava perder ou deturpar algo que depois fizesse
+    falta; o recorte mostra exatamente o que foi dito. [] se não houver
+    nenhuma sessão anterior."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT sessao, MAX(criado_em) AS ultima_atividade
+                   FROM conversas
+                   WHERE utilizador = %s AND sessao != %s
+                   GROUP BY sessao
+                   ORDER BY ultima_atividade DESC
+                   LIMIT 1""",
+                (utilizador, sessao_atual)
+            )
+            anterior = cur.fetchone()
+            if not anterior:
+                return []
+            cur.execute(
+                """SELECT papel, conteudo FROM conversas
+                   WHERE sessao = %s AND utilizador = %s
+                   ORDER BY criado_em DESC LIMIT %s""",
+                (anterior["sessao"], utilizador, limite_mensagens)
+            )
+            linhas = list(reversed(cur.fetchall()))
+    if not linhas:
+        return []
+    texto = "\n\n".join(f"{'Tu' if l['papel'] == 'assistant' else 'Eu'}: {l['conteudo']}" for l in linhas)
+    # corta pelo início (mantém o fim, mais recente) se ainda assim for
+    # muito grande — ex: uma das mensagens tinha uma tabela enorme
+    texto = texto[-_LIMITE_CARATERES_RECORTE_ANTERIOR:]
+    quando = anterior["ultima_atividade"].strftime("%d/%m às %H:%M")
+    return [
+        {"role": "user", "content": (
+            f"(nota, não é uma pergunta — recorte da nossa conversa anterior, de {quando}, só "
+            f"para teres contexto do que já falámos; não respondas a isto, espera pela mensagem "
+            f"a seguir)\n\n{texto}"
+        )},
+        {"role": "assistant", "content": "Entendido, tenho isso em conta."}
+    ]
+
 def historico_sessao(sessao: str, utilizador: str, limite: int = 20) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -251,6 +305,18 @@ def historico_sessao(sessao: str, utilizador: str, limite: int = 20) -> list[dic
             )
             linhas = cur.fetchall()
     return [{"role": l["papel"], "content": l["conteudo"]} for l in linhas]
+
+def historico_sessao_para_modelo(sessao: str, utilizador: str, limite: int = 20) -> list[dict]:
+    """Como historico_sessao, mas com o recorte da sessão anterior (ver
+    _recorte_sessao_anterior) à frente, quando esta sessão está mesmo a
+    começar — só para o que é dado ao modelo como contexto, nunca para o
+    que fica visível na consola (/historico/{sessao} usa historico_sessao
+    diretamente, sem isto, porque essa nota sintética não é uma mensagem
+    real da conversa e não deve aparecer no ecrã)."""
+    mensagens = historico_sessao(sessao, utilizador, limite)
+    if not mensagens:
+        mensagens = _recorte_sessao_anterior(utilizador, sessao) + mensagens
+    return mensagens
 
 def sessoes_utilizador(utilizador: str, limite: int = 30) -> list[dict]:
     """Sessões recentes de um utilizador, com preview da primeira mensagem — para a barra lateral."""

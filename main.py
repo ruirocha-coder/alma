@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_STREAM
-from db import (guardar_mensagem, historico_sessao, log_routing,
+from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
@@ -91,7 +91,7 @@ def _responder_e_guardar(utilizador: str, sessao: str, mensagem_agente: str, men
     `tem_anexos`: se esta mensagem trouxe ficheiros/fotos anexados — usado
     para o encaminhamento nunca depender só da classificação por texto
     (ver orchestrator.escolher_agente_ecos_largos)."""
-    mensagens = historico_sessao(sessao, utilizador)   # memória por utilizador
+    mensagens = historico_sessao_para_modelo(sessao, utilizador)   # memória por utilizador
     mensagens.append({"role": "user", "content": mensagem_agente})
 
     try:
@@ -125,7 +125,7 @@ def _fluxo_resposta_agente(utilizador: str, sessao: str, mensagem_agente: str, m
     carga com fotos passou a vir sempre por este caminho (ver
     alma_com_ficheiro), para beneficiar do sinal de vida durante chamadas
     a ferramentas demoradas (ex: ler o manual, consultar o Basecamp)."""
-    mensagens = historico_sessao(sessao, utilizador)
+    mensagens = historico_sessao_para_modelo(sessao, utilizador)
     mensagens.append({"role": "user", "content": mensagem_agente})
 
     try:
