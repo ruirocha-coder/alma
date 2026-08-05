@@ -50,6 +50,30 @@ CREATE TABLE IF NOT EXISTS memoria_utilizador (
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
+-- sugestões de mudança de comportamento da Alma, feitas por qualquer pessoa
+-- em qualquer conversa (ver registar_sugestao_comportamento em
+-- agents/base.py) — ficam aqui até serem aprovadas ou rejeitadas, porque a
+-- aprovação pode vir de outro dia, outra pessoa, ou outro canal, nunca da
+-- mesma troca de mensagens que gerou a sugestão.
+CREATE TABLE IF NOT EXISTS sugestoes_pendentes (
+    id SERIAL PRIMARY KEY,
+    sugestao TEXT NOT NULL,
+    proposto_por TEXT NOT NULL,
+    origem TEXT,                  -- consola, basecamp, reunião
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- memória aprovada (ver sugestoes_pendentes acima) que afeta TODAS as
+-- conversas, de qualquer utilizador, em qualquer canal — ao contrário de
+-- memoria_utilizador, que só é lida no contexto da própria pessoa.
+CREATE TABLE IF NOT EXISTS memoria_global (
+    id SERIAL PRIMARY KEY,
+    facto TEXT NOT NULL,
+    proposto_por TEXT,
+    aprovado_por TEXT NOT NULL,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS basecamp_alertas (
     recording_id BIGINT PRIMARY KEY,
     prazo DATE,                   -- due_on no momento do alerta, para saber se mudou
@@ -433,6 +457,111 @@ def factos_utilizador(utilizador: str, limite: int = 50) -> list[str]:
                 (utilizador, limite)
             )
             return [l["facto"] for l in cur.fetchall()]
+
+def registar_sugestao_comportamento(sugestao: str, proposto_por: str, origem: str) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO sugestoes_pendentes (sugestao, proposto_por, origem)
+                   VALUES (%s, %s, %s) RETURNING id""",
+                (sugestao, proposto_por, origem)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return {"registado": True, "id": id_gerado}
+
+def sugestoes_pendentes_lista(limite: int = 20) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, sugestao, proposto_por, origem, criado_em
+                   FROM sugestoes_pendentes ORDER BY criado_em ASC LIMIT %s""",
+                (limite,)
+            )
+            return [{
+                "id": l["id"], "sugestao": l["sugestao"], "proposto_por": l["proposto_por"],
+                "origem": l["origem"], "criado_em": l["criado_em"].isoformat(),
+            } for l in cur.fetchall()]
+
+def obter_sugestao_pendente(id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM sugestoes_pendentes WHERE id = %s", (id,))
+            return cur.fetchone()
+
+def eliminar_sugestao_pendente(id: int) -> bool:
+    """Devolve True se havia mesmo uma sugestão pendente com este id (e foi apagada), False se não existia."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sugestoes_pendentes WHERE id = %s", (id,))
+            apagou = cur.rowcount > 0
+        conn.commit()
+    return apagou
+
+def aprovar_sugestao_pendente(id: int, aprovado_por: str) -> dict:
+    """Move a sugestão pendente para memória global (visível a todas as
+    conversas) e apaga-a da lista de pendentes. Quem está autorizado a
+    aprovar é decidido em agents/base.py, não aqui."""
+    pendente = obter_sugestao_pendente(id)
+    if not pendente:
+        return {"erro": f"não encontrei nenhuma sugestão pendente com id {id}"}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO memoria_global (facto, proposto_por, aprovado_por)
+                   VALUES (%s, %s, %s)""",
+                (pendente["sugestao"], pendente["proposto_por"], aprovado_por)
+            )
+            cur.execute("DELETE FROM sugestoes_pendentes WHERE id = %s", (id,))
+        conn.commit()
+    return {"aprovado": True, "facto": pendente["sugestao"]}
+
+def factos_globais(limite: int = 50) -> list[str]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT facto FROM memoria_global ORDER BY criado_em DESC LIMIT %s",
+                (limite,)
+            )
+            return [l["facto"] for l in cur.fetchall()]
+
+def memoria_global_lista(limite: int = 50) -> list[dict]:
+    """Como factos_globais, mas devolve o registo completo (quem propôs,
+    quem aprovou, quando) — para a Alma poder mostrar um histórico
+    consultável a quem perguntar, em vez de só usar os factos, em bruto, no
+    contexto de sistema (ver contexto_global)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT facto, proposto_por, aprovado_por, criado_em
+                   FROM memoria_global ORDER BY criado_em DESC LIMIT %s""",
+                (limite,)
+            )
+            return [{
+                "facto": l["facto"], "proposto_por": l["proposto_por"], "aprovado_por": l["aprovado_por"],
+                "criado_em": l["criado_em"].isoformat(),
+            } for l in cur.fetchall()]
+
+def esquecer_factos_globais(termo: str) -> dict:
+    """Apaga da memória global os factos que contenham o termo. Devolve quantos apagou."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM memoria_global WHERE facto ILIKE %s", (f"%{termo}%",))
+            apagados = cur.rowcount
+        conn.commit()
+    return {"apagados": apagados}
+
+def contexto_global() -> str:
+    """Bloco de texto com a memória global aprovada (ver
+    aprovar_sugestao_pendente), para injetar no system prompt de QUALQUER
+    conversa, de qualquer utilizador, em qualquer canal — ao contrário de
+    contexto_utilizador, que só se aplica à própria pessoa."""
+    factos = factos_globais()
+    if not factos:
+        return ""
+    linhas = ["Regras/decisões aprovadas para todas as conversas, seja quem for a falar:"]
+    linhas += [f"- {f}" for f in factos]
+    return "\n".join(linhas)
 
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, ano: int,
                                   quantidade: str = None, data_carga: str = None, talao: str = None):

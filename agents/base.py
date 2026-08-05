@@ -220,6 +220,61 @@ TOOLS_MURAL = [
     }
 ]
 
+# Sugestões de mudança de comportamento: pedido do Rui e da Beatriz
+# (2026-08-05) — quando alguém propõe uma mudança à forma como a Alma se
+# comporta (não um facto sobre uma pessoa, isso é memorizar_facto), fica
+# pendente até uma pessoa autorizada aprovar; só aí passa a memória global,
+# visível em todas as conversas. Mesmo padrão do modo mudo em tools/voz.py:
+# é sempre juízo da Alma reconhecer a intenção, nunca uma palavra-chave.
+TOOLS_SUGESTAO = [
+    {
+        "name": "registar_sugestao_comportamento",
+        "description": "Chama esta função sempre que reconheceres, pelo sentido da conversa (nunca por uma palavra-chave em concreto), que alguém está a propor uma mudança de comportamento ou de regra tua — ex: \"passa a responder sempre em tópicos\", \"não precisas de perguntar X, assume sempre Y\", \"a partir de agora, quando isto acontecer, faz aquilo\" — mesmo que a pessoa não use a palavra \"sugestão\" nem peça explicitamente para guardares nada, e em qualquer canal (consola, Basecamp, reunião). Fica registada como pendente, com um id. Diz sempre à pessoa, depois de chamares esta função, o id atribuído e que a aprovação só pode ser pedida no Basecamp, pelo Rui ou pela Beatriz (basta um dos dois) — só depois disso passa a aplicar-se de verdade, a todas as conversas, de qualquer pessoa. Nunca uses isto para um facto sobre uma pessoa em concreto (para isso usa memorizar_facto) nem para algo já cobertos por outra função restrita (ex: atualizar_parametro_estimativa) — só para mudanças de comportamento gerais, sem função própria.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"sugestao": {"type": "string", "description": "a mudança proposta, resumida com clareza suficiente para alguém aprovar sem ambiguidade"}},
+            "required": ["sugestao"]
+        }
+    },
+    {
+        "name": "listar_sugestoes_pendentes",
+        "description": "Lista as sugestões de mudança de comportamento ainda por aprovar (ver registar_sugestao_comportamento), com id, quem propôs, quando e em que canal — usa isto sempre que precisares de encontrar o id certo (ex: alguém no Basecamp diz \"aprovo a sugestão sobre X\" sem dizer o id — encontra aqui qual corresponde pelo conteúdo antes de chamares aprovar_sugestao/rejeitar_sugestao; só perguntas o id explicitamente se houver mesmo ambiguidade entre duas pendentes parecidas), ou quando alguém perguntar o que está pendente. Disponível em qualquer canal.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "aprovar_sugestao",
+        "description": "Aprova uma sugestão de mudança de comportamento pendente (ver registar_sugestao_comportamento), pelo `id` — passa a valer para todas as conversas a partir daqui. Só funciona a partir do Basecamp, e só para o Rui ou a Beatriz (basta um dos dois, nunca aprovação dupla) — se o pedido vier da consola ou de outra pessoa, recusa e explica que a aprovação só pode ser pedida no Basecamp. Se não tiveres já o id exato da conversa, usa primeiro listar_sugestoes_pendentes para o encontrares pelo conteúdo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"]
+        }
+    },
+    {
+        "name": "rejeitar_sugestao",
+        "description": "Rejeita e apaga uma sugestão de mudança de comportamento pendente (ver registar_sugestao_comportamento), pelo `id`, sem a tornar memória. Mesma restrição de aprovar_sugestao: só a partir do Basecamp, só o Rui ou a Beatriz. Se não tiveres já o id exato, usa primeiro listar_sugestoes_pendentes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"]
+        }
+    },
+    {
+        "name": "esquecer_regra_global",
+        "description": "Apaga da memória global (ver aprovar_sugestao) as regras/decisões já aprovadas que contenham o termo indicado — usa quando pedirem para deixares de aplicar algo já aprovado antes, em todas as conversas. Mesma restrição de aprovar_sugestao: só a partir do Basecamp, só o Rui ou a Beatriz.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"termo": {"type": "string"}},
+            "required": ["termo"]
+        }
+    },
+    {
+        "name": "listar_memoria_global",
+        "description": "Lista as regras/decisões já aprovadas, ativas em todas as conversas (o facto, quem propôs, quem aprovou, quando) — usa isto sempre que alguém perguntar o que já foi decidido/aprovado sobre o teu comportamento, para responderes com a lista real em vez de tentares recordar de cabeça. Disponível em qualquer canal, sem restrição — é só consulta, não uma alteração.",
+        "input_schema": {"type": "object", "properties": {}}
+    }
+]
+
 # pedido explícito do Rui (2026-07-27): corrigir a empresa registada no
 # perfil de OUTRA pessoa (não o de quem está a falar) afeta o routing dela
 # em toda a aplicação — só o Rui e a Beatriz podem fazer isto, em qualquer
@@ -245,6 +300,38 @@ def _atualizar_parametro_estimativa_restrito(utilizador: str, nome: str, valor: 
     if not any(autorizado in utilizador.lower() for autorizado in _AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA):
         return {"erro": f"{utilizador} não tem autorização para alterar parâmetros da estimativa de montagem"}
     return db.atualizar_parametro_estimativa(nome, valor)
+
+# Sugestões de mudança de comportamento (ver TOOLS_SUGESTAO): qualquer
+# pessoa, em qualquer canal, pode propor — mas só passa a valer para todas
+# as conversas depois de aprovada por alguém autorizado, e basta UMA pessoa
+# desta lista (nunca aprovação dupla). Pedido explícito do Rui (2026-08-05):
+# ao contrário da proposta (aberta a qualquer canal), a aprovação/rejeição/
+# remoção só pode ser pedida a partir do Basecamp — nunca da consola, mesmo
+# que seja o Rui ou a Beatriz a pedir.
+def _registar_sugestao_comportamento(utilizador: str, sugestao: str, origem: str) -> dict:
+    return db.registar_sugestao_comportamento(sugestao, utilizador, origem)
+
+def _alteracao_memoria_global_autorizada(utilizador: str, origem: str) -> dict:
+    """Devolve o erro comum às três operações abaixo, ou None se autorizado."""
+    if origem != "basecamp":
+        return {"erro": "alterações à memória global só podem ser pedidas a partir do Basecamp"}
+    if not any(autorizado in utilizador.lower() for autorizado in _AUTORIZADOS_ATUALIZAR_EMPRESA_ALHEIA):
+        return {"erro": f"{utilizador} não tem autorização para alterar a memória global"}
+    return None
+
+def _aprovar_sugestao_restrito(utilizador: str, id: int, origem: str) -> dict:
+    return _alteracao_memoria_global_autorizada(utilizador, origem) or db.aprovar_sugestao_pendente(id, utilizador)
+
+def _rejeitar_sugestao_restrito(utilizador: str, id: int, origem: str) -> dict:
+    erro = _alteracao_memoria_global_autorizada(utilizador, origem)
+    if erro:
+        return erro
+    if not db.eliminar_sugestao_pendente(id):
+        return {"erro": f"não encontrei nenhuma sugestão pendente com id {id}"}
+    return {"rejeitado": True, "id": id}
+
+def _esquecer_regra_global_restrito(utilizador: str, termo: str, origem: str) -> dict:
+    return _alteracao_memoria_global_autorizada(utilizador, origem) or db.esquecer_factos_globais(termo)
 
 _AUTORIZADOS_MURAL = ("rui", "beatriz", "isa")
 
@@ -307,12 +394,23 @@ def _executar_tool_uses(blocos: list, funcoes_utilizador: dict) -> tuple:
     return resultados, texto_forcado
 
 def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, projeto_mural: str):
-    contexto = db.contexto_utilizador(utilizador)
+    # memória global (ver TOOLS_SUGESTAO/contexto_global) aplica-se a
+    # qualquer conversa, por isso vem sempre antes da memória desta pessoa
+    # em concreto, nunca condicionada a ela.
+    contexto = "\n\n".join(c for c in (db.contexto_global(), db.contexto_utilizador(utilizador)) if c)
     system = _system_com_cache(system_prompt, contexto)
-    tools_completas = _tools_com_cache(tools + TOOLS_MEMORIA + TOOLS_MURAL + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS)
+    tools_completas = _tools_com_cache(
+        tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
+        "registar_sugestao_comportamento": lambda sugestao: _registar_sugestao_comportamento(
+            utilizador, sugestao, origem),
+        "listar_sugestoes_pendentes": lambda: db.sugestoes_pendentes_lista(),
+        "aprovar_sugestao": lambda id: _aprovar_sugestao_restrito(utilizador, id, origem),
+        "rejeitar_sugestao": lambda id: _rejeitar_sugestao_restrito(utilizador, id, origem),
+        "esquecer_regra_global": lambda termo: _esquecer_regra_global_restrito(utilizador, termo, origem),
+        "listar_memoria_global": lambda: db.memoria_global_lista(),
         "definir_empresa": lambda empresa: db.atualizar_empresa(utilizador, empresa),
         "atualizar_empresa_pessoa": lambda nome, empresa: _atualizar_empresa_pessoa_restrito(
             utilizador, nome, empresa),
