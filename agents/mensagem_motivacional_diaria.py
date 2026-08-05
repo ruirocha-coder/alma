@@ -21,6 +21,9 @@ _a_correr = threading.Lock()
 # todos misturados (confirmado ao vivo, 2026-08-05).
 PROJETOS = ["@ Boa Safra", "@ Interior Guider", "Gestão"]
 
+_MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+             "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
 MISSAO_MENSAGEM_DIARIA = PERSONA + """
 
 Modo atual: mensagem diária, publicada no Mural da Gestão (visível a toda a
@@ -120,15 +123,28 @@ def _contexto_do_dia() -> str:
     contexto interno para a mensagem final, nunca para citar em concreto.
     web_search/web_fetch correm do lado do servidor da Anthropic (ver
     TOOLS_INTERNET em agents/base.py), por isso só é preciso lidar com
-    pause_turn, nunca com tool_use local."""
-    mensagens = [{"role": "user", "content": "Contexto de hoje em Portugal."}]
+    pause_turn, nunca com tool_use local.
+
+    A data de hoje é sempre calculada aqui em Python e passada explícita no
+    pedido — nunca deixada para o modelo inferir da data dos resultados de
+    pesquisa (bug real, 2026-08-05: sem isto, "hoje" saiu como "29 de julho
+    de 2025", a data da notícia mais recente encontrada, não a real).
+    Nome do mês escrito à mão (nunca strftime("%B")) — esse formato depende
+    da locale do servidor, que aqui não está em português, e sairia em
+    inglês ("August")."""
+    hoje_data = date.today()
+    hoje = f"{hoje_data.day} de {_MESES_PT[hoje_data.month - 1]} de {hoje_data.year}"
+    mensagens = [{"role": "user", "content": f"Hoje é {hoje}. Contexto de hoje em Portugal."}]
     system = (
-        "Pesquisa na internet e devolve um resumo factual muito breve (no "
-        "máximo 6 linhas, sem opinião nem floreados) sobre Portugal, para "
-        "hoje: previsão do tempo, a estação do ano, se há algum feriado ou "
-        "festa/tradição relevante nos próximos dias, e as principais "
-        "notícias do dia. Isto é só contexto interno para outra escrita, "
-        "não é para mostrar a ninguém tal como está."
+        f"Hoje é mesmo {hoje} — usa sempre esta data como \"hoje\", nunca a "
+        f"data de nenhum resultado de pesquisa que encontrares (uma notícia "
+        f"recente não é hoje, só é recente). Pesquisa na internet e devolve "
+        f"um resumo factual muito breve (no máximo 6 linhas, sem opinião "
+        f"nem floreados) sobre Portugal, para esta data exata: previsão do "
+        f"tempo, a estação do ano, se há algum feriado ou festa/tradição "
+        f"relevante nos próximos dias, e as principais notícias mais "
+        f"recentes que encontrares. Isto é só contexto interno para outra "
+        f"escrita, não é para mostrar a ninguém tal como está."
     )
     while True:
         resposta = client.messages.create(
