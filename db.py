@@ -522,6 +522,23 @@ def factos_globais(limite: int = 50) -> list[str]:
             )
             return [l["facto"] for l in cur.fetchall()]
 
+def memoria_global_lista(limite: int = 50) -> list[dict]:
+    """Como factos_globais, mas devolve o registo completo (quem propôs,
+    quem aprovou, quando) — para a Alma poder mostrar um histórico
+    consultável a quem perguntar, em vez de só usar os factos, em bruto, no
+    contexto de sistema (ver contexto_global)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT facto, proposto_por, aprovado_por, criado_em
+                   FROM memoria_global ORDER BY criado_em DESC LIMIT %s""",
+                (limite,)
+            )
+            return [{
+                "facto": l["facto"], "proposto_por": l["proposto_por"], "aprovado_por": l["aprovado_por"],
+                "criado_em": l["criado_em"].isoformat(),
+            } for l in cur.fetchall()]
+
 def esquecer_factos_globais(termo: str) -> dict:
     """Apaga da memória global os factos que contenham o termo. Devolve quantos apagou."""
     with get_conn() as conn:
