@@ -143,6 +143,23 @@ CREATE TABLE IF NOT EXISTS documentos_gerados (
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
+-- leitura diária do estado de um projeto do Basecamp (ver
+-- agents/mensagem_motivacional_diaria.py) — guardada para se poder comparar
+-- a leitura de hoje com a última leitura anterior (evolução real, não só
+-- uma fotografia isolada de um dia). Uma linha por (data, projeto); se a
+-- corrida repetir no mesmo dia, substitui a leitura desse dia em vez de
+-- duplicar.
+CREATE TABLE IF NOT EXISTS snapshot_diario_projetos (
+    data DATE NOT NULL,
+    projeto TEXT NOT NULL,
+    total_ativos INTEGER NOT NULL,
+    atrasados INTEGER NOT NULL,
+    parados INTEGER NOT NULL,
+    por_estado JSONB NOT NULL DEFAULT '{}'::jsonb,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (data, projeto)
+);
+
 -- parâmetros numéricos do "Procedimento Tempos de Montagem para Logística"
 -- (projeto Alma Data) — ver tools/tempos_montagem.py. Guardados em DB, não
 -- hardcoded, precisamente para poderem ser calibrados de 2 em 2 meses (ver
@@ -977,3 +994,33 @@ def limpar_reunioes_antigas(dias: int = 3) -> int:
             apagadas = cur.rowcount
         conn.commit()
     return apagadas
+
+def guardar_snapshot_diario_projeto(data, projeto: str, total_ativos: int, atrasados: int,
+                                    parados: int, por_estado: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO snapshot_diario_projetos
+                       (data, projeto, total_ativos, atrasados, parados, por_estado)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (data, projeto) DO UPDATE SET
+                       total_ativos = EXCLUDED.total_ativos, atrasados = EXCLUDED.atrasados,
+                       parados = EXCLUDED.parados, por_estado = EXCLUDED.por_estado""",
+                (data, projeto, total_ativos, atrasados, parados, Json(por_estado))
+            )
+        conn.commit()
+
+def snapshot_diario_projeto_anterior(projeto: str, antes_de) -> dict:
+    """A leitura mais recente deste projeto anterior a `antes_de` (tipicamente
+    hoje) — para comparar com a leitura de hoje e ter uma evolução real, não
+    só uma fotografia isolada. None se nunca houve nenhuma leitura anterior."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT data, total_ativos, atrasados, parados, por_estado
+                   FROM snapshot_diario_projetos
+                   WHERE projeto = %s AND data < %s
+                   ORDER BY data DESC LIMIT 1""",
+                (projeto, antes_de)
+            )
+            return cur.fetchone()
