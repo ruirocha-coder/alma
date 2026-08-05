@@ -585,6 +585,14 @@ def resumo_diario_ecos_largos_agora():
     threading.Thread(target=resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/gestao/mensagem-diaria")
+def mensagem_diaria_motivacional_agora():
+    """Dispara já a mensagem diária motivacional, no Mural da Gestão, em segundo plano — publica de
+    verdade, tal como a corrida agendada das 9h (sem modo de simulação)."""
+    threading.Thread(
+        target=mensagem_motivacional_diaria.correr_mensagem_diaria_motivacional, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
