@@ -1254,7 +1254,14 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: "mostrado na consola" }
     }));
-    agendarFalaPropria("Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — não fiques calada depois disto.");
+    // Bug real (Rui, 2026-08-05): "escreve duas vezes a mesma coisa" — uma
+    // instrução anterior aqui ("como se fosses tu a responder") foi
+    // interpretada a mais: a regra da sessão "sempre que respondes tu
+    // mesma, chama SEMPRE mostrar_na_consola primeiro" disparou de novo,
+    // e ela voltou a chamar mostrar_na_consola para reescrever o mesmo
+    // conteúdo já escrito. Tem de ficar explícito que o texto já está na
+    // consola e que não deve chamar a função outra vez — só falar.
+    agendarFalaPropria("Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — já está escrito, por isso não chames mostrar_na_consola outra vez, só fala. Não fiques calada depois disto.");
   }
 
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
@@ -1322,7 +1329,16 @@
     //    cima dessa resposta ainda ativa — ver agendarFalaPropria, que só
     //    manda quando não há nenhuma em curso, e espera pela seguinte se
     //    houver.
-    agendarFalaPropria("Diz agora em voz alta o conteúdo que acabaste de receber, com naturalidade e nas tuas próprias palavras — como se fosses tu a responder à pergunta, não a ler um texto escrito por outra pessoa.");
+    // 3) Bug real (Rui, 2026-08-05): "escreve duas vezes a mesma coisa" —
+    //    a formulação anterior aqui ("como se fosses tu a responder")
+    //    disparou a regra da sessão "sempre que respondes tu mesma, chama
+    //    SEMPRE mostrar_na_consola primeiro", e ela chamou mostrar_na_
+    //    consola de novo para reescrever o mesmo conteúdo já escrito por
+    //    addMessage acima. "resposta"/"respostaFalada" NÃO são uma
+    //    resposta dela — são o resultado de uma função que ela já chamou;
+    //    tem de ficar explícito que só falta dizer isto em voz, nunca
+    //    voltar a escrever.
+    agendarFalaPropria("Diz agora em voz alta o conteúdo que acabaste de receber desta função, com naturalidade e nas tuas próprias palavras, sem o recitar à letra. Isto já está escrito na consola — não chames mostrar_na_consola outra vez, nem nenhuma outra função; só fala.");
   }
 
   function pararModoReuniao() {
