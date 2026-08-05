@@ -743,6 +743,17 @@
   let proximoIndiceExcerto = 0;
   let excertosProcessados = 0;
   let respondendoAtivo = false;
+  // rede de segurança determinística (Rui, 2026-08-05): "escreve duas
+  // vezes a mesma coisa" — pedir-lhe por instrução para não chamar
+  // mostrar_na_consola outra vez ao relatar a resposta do Claude (ver
+  // tratarPerguntaEmpresa) já falhou, ela continuava a chamá-la mesmo
+  // assim. Em vez de confiar só na instrução, bloqueia por código:
+  // enquanto isto for true, qualquer chamada de função que aconteça é
+  // ignorada sem escrever nada (ver ignorarChamadaDuplicada) — o
+  // conteúdo já foi escrito por addMessage antes de pedir a fala. true
+  // só durante a resposta imediatamente a seguir a agendarFalaPropria;
+  // volta a false no response.done dessa resposta (ver abaixo).
+  let aRelatarRespostaClaude = false;
   // rede de segurança determinística (Rui, 2026-07-31): a instrução para
   // ela chamar mostrar_na_consola antes de falar nem sempre é seguida à
   // letra — isto garante, por código, que tudo o que ela diz em voz
@@ -773,17 +784,29 @@
   // response.done passava pelo mesmo caminho e mandava outro
   // response.create em cima do primeiro.
   let aEnviarFalaPropria = false;
-  function agendarFalaPropria(instructions) {
-    filaFalaPropriaAposResposta.push(instructions);
+  // marcarRelay: true só para tratarPerguntaEmpresa — ver
+  // aRelatarRespostaClaude. Tem de ficar guardado junto da instrução na
+  // fila (não marcado já em tratarPerguntaEmpresa) porque, se esta fala
+  // ficar à espera de uma resposta não relacionada ainda em curso, marcar
+  // já desligava a proteção antes da nossa própria resposta sequer
+  // começar (o response.done dessa resposta não relacionada chegava
+  // primeiro). Só liga no instante exato em que se manda mesmo o
+  // response.create — nesse momento, respondendoAtivo fica true até ao
+  // response.done desta MESMA resposta (nenhuma outra pode intercalar-se,
+  // só há uma resposta ativa de cada vez), por isso desligar em
+  // response.done está sempre a apanhar a resposta certa.
+  function agendarFalaPropria(instructions, marcarRelay) {
+    filaFalaPropriaAposResposta.push({ instructions, marcarRelay: !!marcarRelay });
     tentarEnviarFalaPropria();
   }
   function tentarEnviarFalaPropria() {
     if (aEnviarFalaPropria || respondendoAtivo || filaFalaPropriaAposResposta.length === 0) return;
-    const proximasInstrucoes = filaFalaPropriaAposResposta.shift();
+    const proxima = filaFalaPropriaAposResposta.shift();
     if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
     aEnviarFalaPropria = true;
     suprimirEcoProximaFala = true;
-    reuniaoDC.send(JSON.stringify({ type: "response.create", response: { instructions: proximasInstrucoes } }));
+    if (proxima.marcarRelay) aRelatarRespostaClaude = true;
+    reuniaoDC.send(JSON.stringify({ type: "response.create", response: { instructions: proxima.instructions } }));
   }
   // pedido do Rui (2026-08-04): "cala-te" e variações caíam num ciclo —
   // ela tentava confirmar em voz/texto que ia ficar calada ("(silêncio)",
@@ -1043,6 +1066,10 @@
             }
           }
         }
+        // ver aRelatarRespostaClaude, mais acima — só desliga aqui, depois
+        // de despachar (acima) as chamadas de função desta MESMA resposta,
+        // para a barreira continuar válida até ao fim desta resposta
+        aRelatarRespostaClaude = false;
         // só agora, com a resposta mesmo terminada (e depois de despachar
         // as suas próprias chamadas de função acima, que podem elas
         // próprias ter posto algo novo na fila) — nunca antes disto, ver
@@ -1191,6 +1218,11 @@
       // por engano em modo mudo), não deixa nada passar — só confirma a
       // chamada, sem gerar resposta nenhuma a seguir
       ignorarChamadaEmModoMudo(callId);
+    } else if (aRelatarRespostaClaude) {
+      // ver aRelatarRespostaClaude, mais acima — nenhuma função deve ser
+      // chamada agora, o conteúdo já está escrito; ignora por código em
+      // vez de confiar que ela obedece à instrução (já falhou)
+      ignorarChamadaDuplicada(callId);
     } else if (nome === "mostrar_na_consola") {
       mostrarNaConsola(callId, argumentosJson);
     } else {
@@ -1235,6 +1267,15 @@
     reuniaoDC.send(JSON.stringify({
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: "ignorado — em modo mudo" }
+    }));
+  }
+
+  // ver aRelatarRespostaClaude, mais acima
+  function ignorarChamadaDuplicada(callId) {
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    reuniaoDC.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output: "ignorado — o conteúdo já está escrito, não repitas" }
     }));
   }
 
@@ -1284,7 +1325,7 @@
     // e ela voltou a chamar mostrar_na_consola para reescrever o mesmo
     // conteúdo já escrito. Tem de ficar explícito que o texto já está na
     // consola e que não deve chamar a função outra vez — só falar.
-    agendarFalaPropria("Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — já está escrito, por isso não chames mostrar_na_consola outra vez, só fala. Não fiques calada depois disto.");
+    agendarFalaPropria("Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — já está escrito, por isso não chames mostrar_na_consola outra vez, só fala. Não fiques calada depois disto. Fala em português europeu, nunca em português do Brasil.");
   }
 
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
@@ -1361,7 +1402,11 @@
     //    resposta dela — são o resultado de uma função que ela já chamou;
     //    tem de ficar explícito que só falta dizer isto em voz, nunca
     //    voltar a escrever.
-    agendarFalaPropria("Diz agora em voz alta o conteúdo que acabaste de receber desta função, com naturalidade e nas tuas próprias palavras, sem o recitar à letra. Isto já está escrito na consola — não chames mostrar_na_consola outra vez, nem nenhuma outra função; só fala.");
+    // segundo argumento (marcarRelay=true) — ver aRelatarRespostaClaude:
+    // a instrução acima já foi ignorada ao vivo (ela chamou
+    // mostrar_na_consola de novo mesmo assim), por isso bloqueia por
+    // código também, não só por instrução.
+    agendarFalaPropria("Diz agora em voz alta o conteúdo que acabaste de receber desta função, com naturalidade e nas tuas próprias palavras, sem o recitar à letra. Isto já está escrito na consola — não chames mostrar_na_consola outra vez, nem nenhuma outra função; só fala. Fala em português europeu, nunca em português do Brasil.", true);
   }
 
   function pararModoReuniao() {
