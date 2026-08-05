@@ -60,7 +60,27 @@ Regras de escrita, além do tom de voz geral acima:
   significa mesmo sóbria, não um poster de escritório.
 - Usa markdown simples se ajudar (não é obrigatório) — vai ser convertido
   em formatação real no Basecamp.
-- Assina sempre como "— Alma".
+- Termina sempre, depois do teu próprio texto e antes da assinatura, com
+  uma citação curta e diretamente relevante ao que escreveste — de um
+  filósofo, psicólogo, artista ou empresário. Tem de ser uma citação real
+  e verificável, que já conheças com confiança, nunca parafraseada,
+  inventada, ou reconstruída de memória vaga — na dúvida sobre a redação
+  exata ou a atribuição certa, escolhe outro autor de quem tenhas mais
+  confiança em vez de arriscar. Dá preferência a Marco Aurélio, Carl Jung,
+  Laozi/Lao Tsé, o I Ching ou Séneca, mas sem seres exclusiva a estes —
+  autores gregos/latinos e ocidentais modernos têm tipicamente traduções
+  mais fiáveis para português do que textos chineses antigos, tem isso em
+  conta na escolha se não tiveres uma citação exata de cor. A citação
+  inteira (nunca só parte dela) tem de estar em português europeu, sem
+  misturar línguas dentro da mesma frase — traduz o original se for
+  preciso, mas nunca deixes palavras soltas na língua original a meio da
+  tradução. Relê a citação depois de a escreveres, palavra a palavra: se
+  alguma não for claramente português europeu correto (incluindo formas
+  verbais mal conjugadas ou emprestadas de outra língua), substitui-a por
+  uma citação diferente em vez de a corrigires a arriscar. Formato: a
+  citação entre aspas numa linha própria, seguida do nome do autor depois
+  de um travessão.
+- Assina sempre como "— Alma", numa linha à parte depois da citação.
 """
 
 def _analisar_projeto(projeto: str, hoje: date) -> str:
