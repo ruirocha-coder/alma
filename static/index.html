@@ -753,6 +753,38 @@
   // conteúdo já foi escrito por outro caminho — sem isto, essa fala
   // apareceria duplicada.
   let suprimirEcoProximaFala = false;
+  // fila de "falar a seguir" pendentes — ver agendarFalaPropria. Bug real
+  // (Rui, 2026-08-05): "a Alma esquizofrénica"/conteúdo a competir na
+  // consola. tratarPerguntaEmpresa espera pelo Claude (pode demorar vários
+  // segundos) — nesse intervalo, a própria sessão de voz pode gerar, por
+  // conta própria, uma resposta a algo que se disse na reunião entretanto.
+  // Se a nossa resposta (já com suprimirEcoProximaFala a true) fosse
+  // mandada em cima dessa resposta AINDA ativa, era a fala dela — não
+  // relacionada — que ficava apanhada pela supressão de eco, e a nossa
+  // aparecia sem supressão (duplicada, já que o texto já tinha sido
+  // escrito por addMessage antes). Só se manda response.create quando não
+  // houver nenhuma resposta já em curso — senão espera-se que a atual
+  // termine primeiro.
+  const filaFalaPropriaAposResposta = [];
+  // evita um duplo envio dentro do mesmo instante síncrono — entre mandar
+  // o nosso response.create e a sessão confirmar com response.created
+  // (que só chega no próximo evento), respondendoAtivo ainda não mudou;
+  // sem esta flag, uma segunda chamada de função despachada no mesmo
+  // response.done passava pelo mesmo caminho e mandava outro
+  // response.create em cima do primeiro.
+  let aEnviarFalaPropria = false;
+  function agendarFalaPropria(instructions) {
+    filaFalaPropriaAposResposta.push(instructions);
+    tentarEnviarFalaPropria();
+  }
+  function tentarEnviarFalaPropria() {
+    if (aEnviarFalaPropria || respondendoAtivo || filaFalaPropriaAposResposta.length === 0) return;
+    const proximasInstrucoes = filaFalaPropriaAposResposta.shift();
+    if (!reuniaoDC || reuniaoDC.readyState !== "open") return;
+    aEnviarFalaPropria = true;
+    suprimirEcoProximaFala = true;
+    reuniaoDC.send(JSON.stringify({ type: "response.create", response: { instructions: proximasInstrucoes } }));
+  }
   // pedido do Rui (2026-08-04): "cala-te" e variações caíam num ciclo —
   // ela tentava confirmar em voz/texto que ia ficar calada ("(silêncio)",
   // "(entra em silêncio)"), o que é, em si, uma nova intervenção, porque
@@ -1011,8 +1043,14 @@
             }
           }
         }
+        // só agora, com a resposta mesmo terminada (e depois de despachar
+        // as suas próprias chamadas de função acima, que podem elas
+        // próprias ter posto algo novo na fila) — nunca antes disto, ver
+        // agendarFalaPropria
+        tentarEnviarFalaPropria();
       } else if (ev.type === "response.created") {
         respondendoAtivo = true;
+        aEnviarFalaPropria = false;
         atualizarEstadoReuniao();
       }
     });
@@ -1199,7 +1237,12 @@
   // algo genuíno a que reagir.) Correção: response.create aceita um
   // "response.instructions" que só se aplica a esta resposta — usa-se
   // para pedir explicitamente que diga agora em voz o que escreveu, em
-  // vez de assumir que ela percebe isso sozinha.
+  // vez de assumir que ela percebe isso sozinha. Vai por agendarFalaPropria
+  // (não response.create direto) — ver essa função para o motivo: mandar
+  // isto em cima de uma resposta ainda ativa (algo não relacionado que a
+  // sessão estava a dizer na reunião) trocava a supressão de eco entre as
+  // duas ("a Alma esquizofrénica"/conteúdo a competir na consola, Rui
+  // 2026-08-05).
   function mostrarNaConsola(callId, argumentosJson) {
     let args = {};
     try { args = JSON.parse(argumentosJson || "{}"); } catch (_) { /* usa {} */ }
@@ -1211,15 +1254,7 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: "mostrado na consola" }
     }));
-    // já escrevemos o conteúdo acima — suprime o eco automático da fala de
-    // seguimento (ver suprimirEcoProximaFala), para não aparecer duplicado
-    suprimirEcoProximaFala = true;
-    reuniaoDC.send(JSON.stringify({
-      type: "response.create",
-      response: {
-        instructions: "Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — não fiques calada depois disto."
-      }
-    }));
+    agendarFalaPropria("Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — não fiques calada depois disto.");
   }
 
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
@@ -1272,12 +1307,22 @@
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: respostaFalada }
     }));
-    // já escrevemos "resposta" acima — suprime o eco automático da fala de
-    // seguimento (ver suprimirEcoProximaFala), para não duplicar como uma
-    // segunda mensagem (era esse duplicado, voz vs. texto sem relação
-    // direta, que já tinha sido revertido antes, ver histórico deste ficheiro)
-    suprimirEcoProximaFala = true;
-    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
+    // Bug real (Rui, 2026-08-05): "a Alma esquizofrénica"/conteúdo a
+    // competir na consola — dois problemas distintos, ambos aqui:
+    // 1) respostaFalada é texto escrito por um modelo diferente (Claude,
+    //    via perguntar_dados_empresa) — sem nenhuma instrução, a sessão de
+    //    voz não tinha orientação sobre COMO o dizer, e podia acabar a
+    //    recitá-lo quase à letra, no registo mais formal/escrito do
+    //    Claude, em vez de o relatar com naturalidade na sua própria voz
+    //    (mesmo mecanismo já corrigido em mostrarNaConsola).
+    // 2) este fetch pode demorar vários segundos (Claude + Basecamp) — a
+    //    sessão de voz continua a decorrer nesse intervalo e pode gerar,
+    //    por conta própria, uma resposta a algo dito na reunião
+    //    entretanto. Mandar isto agora, sem verificar, arriscava cair em
+    //    cima dessa resposta ainda ativa — ver agendarFalaPropria, que só
+    //    manda quando não há nenhuma em curso, e espera pela seguinte se
+    //    houver.
+    agendarFalaPropria("Diz agora em voz alta o conteúdo que acabaste de receber, com naturalidade e nas tuas próprias palavras — como se fosses tu a responder à pergunta, não a ler um texto escrito por outra pessoa.");
   }
 
   function pararModoReuniao() {
