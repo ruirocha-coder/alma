@@ -1060,7 +1060,30 @@
         reconectarConversaReuniao();
       }
     });
-    dc.addEventListener("open", () => console.log("[reuniao] data channel aberto"));
+    dc.addEventListener("open", () => {
+      console.log("[reuniao] data channel aberto");
+      // pedido do Rui (2026-08-05): mesmo com "Português europeu, nunca do
+      // Brasil" já na instructions da sessão (ver
+      // tools/voz.py:INSTRUCOES_MODO_REUNIAO), continua a arrancar de vez
+      // em quando com sotaque brasileiro — parece reagir melhor a um
+      // pedido "dito" na própria conversa do que só à instrução de
+      // sistema (foi o que aconteceu ao vivo quando lhe perguntaram
+      // diretamente se estava a falar brasileiro). Semeia um item de
+      // conversação como se alguém tivesse pedido isto mesmo no início da
+      // reunião — só entra no histórico, não gera nenhuma resposta visível
+      // nem audível (sem response.create a seguir, de propósito).
+      dc.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: "Alma, lembra-te: fala sempre em português europeu, nunca em português do Brasil, durante toda a reunião."
+          }]
+        }
+      }));
+    });
     dc.addEventListener("close", () => console.log("[reuniao] data channel fechado"));
 
     const offer = await pc.createOffer();
