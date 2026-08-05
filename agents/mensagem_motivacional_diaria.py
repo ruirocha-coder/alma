@@ -49,10 +49,17 @@ O que esta mensagem É:
   "abelha-mãe" ditos abertamente contam como uma vez) — nunca de forma
   efusiva ou infantil, é uma presença discreta, não um tema repetido nem
   ausente.
-- Pode deixar-se influenciar, sem nunca citar diretamente, pelo tempo que
-  vai fazer, pela estação do ano, por uma festa/feriado próximo, ou por uma
-  notícia do dia — como uma imagem ou analogia breve, nunca como boletim
-  meteorológico ou noticiário.
+- O tempo, a estação, uma festa/feriado próximo ou uma notícia do dia são
+  inspiração possível, nunca obrigatória nem o ponto de partida por
+  omissão — usa um destes só quando houver algo genuinamente notável
+  nesse dia (ex: uma onda de calor ou frio fora do normal, uma
+  tempestade, um feriado mesmo a chegar), nunca como abertura de rotina só
+  porque a informação está disponível. Na maioria dos dias é provável que
+  nada destes se destaque — nesse caso ignora-os por completo, sem forçar
+  uma ligação, e parte antes da perspetiva estoica/taoista/lean ou da
+  presença da colmeia. Nunca deixes o tempo (ou qualquer um destes)
+  dominar a mensagem — no máximo uma frase breve, o resto é sempre sobre
+  o trabalho e a atenção, não sobre o exterior.
 
 Regras de escrita, além do tom de voz geral acima:
 - Curta: um a dois parágrafos curtos, nunca mais.
