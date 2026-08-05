@@ -326,7 +326,8 @@ def _rejeitar_sugestao_restrito(utilizador: str, id: int, origem: str) -> dict:
     erro = _alteracao_memoria_global_autorizada(utilizador, origem)
     if erro:
         return erro
-    db.eliminar_sugestao_pendente(id)
+    if not db.eliminar_sugestao_pendente(id):
+        return {"erro": f"não encontrei nenhuma sugestão pendente com id {id}"}
     return {"rejeitado": True, "id": id}
 
 def _esquecer_regra_global_restrito(utilizador: str, termo: str, origem: str) -> dict:

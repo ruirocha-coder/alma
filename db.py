@@ -489,11 +489,14 @@ def obter_sugestao_pendente(id: int) -> dict:
             cur.execute("SELECT * FROM sugestoes_pendentes WHERE id = %s", (id,))
             return cur.fetchone()
 
-def eliminar_sugestao_pendente(id: int):
+def eliminar_sugestao_pendente(id: int) -> bool:
+    """Devolve True se havia mesmo uma sugestão pendente com este id (e foi apagada), False se não existia."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM sugestoes_pendentes WHERE id = %s", (id,))
+            apagou = cur.rowcount > 0
         conn.commit()
+    return apagou
 
 def aprovar_sugestao_pendente(id: int, aprovado_por: str) -> dict:
     """Move a sugestão pendente para memória global (visível a todas as
