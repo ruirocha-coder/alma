@@ -792,6 +792,22 @@ def publicar_mural(assunto: str, mensagem: str, projeto: str = "Gestão", notifi
                  f"a {notificar_apenas}: {e!r}")
     return resultado
 
+def editar_mensagem_mural(url: str, assunto: str = None, mensagem: str = None, projeto: str = None) -> dict:
+    """Edita uma mensagem já publicada no Mural, pelo `url` devolvido por
+    publicar_mural/listar_mural — atualiza no próprio post (visível a
+    quem já o tinha aberto), em vez de apagar e publicar de novo. Só
+    altera o(s) campo(s) passados; o resto mantém-se como estava. `projeto`
+    só é preciso se `mensagem` for passada (para resolver corretamente as
+    menções "@Nome" no conteúdo novo, ver _markdown_para_basecamp_com_mencoes)."""
+    corpo = {}
+    if assunto is not None:
+        corpo["subject"] = assunto
+    if mensagem is not None:
+        corpo["content"] = _markdown_para_basecamp_com_mencoes(mensagem, projeto)
+    r = httpx.put(url, headers=_headers(), json=corpo, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 def listar_mural(projeto: str = "Gestão", limite: int = 20) -> list[dict]:
     """Lista as mensagens mais recentes do Mural de um projeto (assunto,
     autor, data, quantos comentários tem, e o url para ler o conteúdo
