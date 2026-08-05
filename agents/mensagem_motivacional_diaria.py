@@ -13,10 +13,13 @@ import db
 
 _a_correr = threading.Lock()
 
-# só estes três — pedido explícito do Rui (2026-08-05): "Boa Safra" e
-# "Interior Guider" são projetos reais no Basecamp (não aparecem em mais
-# nenhum sítio do código porque nenhuma automação anterior os usava).
-PROJETOS = ["Boa Safra", "Interior Guider", "Gestão"]
+# só estes três — pedido explícito do Rui (2026-08-05). Os nomes reais no
+# Basecamp são mesmo "@ Boa Safra" e "@ Interior Guider" (com o "@", ver
+# listar_projetos) — sem o "@", a busca por substring de
+# estado_projeto_basecamp apanhava também "Marketing Boa Safra", "Criativa
+# Boa Safra", "Marketing Interior Guider" e "Academia Interior Guider",
+# todos misturados (confirmado ao vivo, 2026-08-05).
+PROJETOS = ["@ Boa Safra", "@ Interior Guider", "Gestão"]
 
 MISSAO_MENSAGEM_DIARIA = PERSONA + """
 
@@ -37,9 +40,12 @@ O que esta mensagem É:
 - Escrita como quem está dentro da equipa, não por cima dela — uma presença
   atenta e constante, como a abelha-mãe de uma colmeia: não manda, não
   vigia, sustenta o ritmo colectivo e repara no que cada abelha faz pelo
-  todo. Usa esta imagem com moderação, no máximo uma vez por mensagem,
-  nunca de forma efusiva ou infantil — é uma presença discreta, não um
-  tema repetido.
+  todo. Esta é a posição central da mensagem, não um adereço — toca nela
+  de alguma forma em toda mensagem (uma palavra, uma imagem, uma alusão),
+  mas só uma vez e sem a nomear de forma explícita e repetida ("colmeia",
+  "abelha-mãe" ditos abertamente contam como uma vez) — nunca de forma
+  efusiva ou infantil, é uma presença discreta, não um tema repetido nem
+  ausente.
 - Pode deixar-se influenciar, sem nunca citar diretamente, pelo tempo que
   vai fazer, pela estação do ano, por uma festa/feriado próximo, ou por uma
   notícia do dia — como uma imagem ou analogia breve, nunca como boletim
