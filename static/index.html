@@ -764,10 +764,17 @@
   // tocar/aparecer — só sai chamando sair_do_modo_mudo, ao reconhecer que
   // foi chamada de novo com um pedido genuíno.
   let modoMudo = false;
-  // uma queda de rede a meio da reunião tenta reconectar uma vez (novo
-  // token + nova ligação WebRTC) antes de desistir — uma queda momentânea
-  // não deve obrigar a reiniciar a reunião toda
-  let reconexaoTentada = false;
+  // uma queda de rede a meio da reunião tenta reconectar (novo token + nova
+  // ligação WebRTC) antes de desistir — uma queda momentânea não deve
+  // obrigar a reiniciar a reunião toda. Bug real (Rui, 2026-08-05): com só
+  // 1 tentativa, uma mudança de rede a meio (ex: wifi -> dados móveis) que
+  // ainda estava em transição fez a única tentativa falhar logo
+  // (ERR_NETWORK_CHANGED), desistindo sem chegar a haver rede outra vez —
+  // passa a tentar até MAX_TENTATIVAS_RECONEXAO vezes, com um pequeno
+  // intervalo crescente entre tentativas, para dar tempo à rede de
+  // estabilizar.
+  const MAX_TENTATIVAS_RECONEXAO = 4;
+  let tentativasReconexao = 0;
 
   function atualizarEstadoReuniao() {
     reuniaoBanner.classList.toggle("mudo", modoMudo);
@@ -840,7 +847,7 @@
     }
 
     reuniaoAtiva = true;
-    reconexaoTentada = false;
+    tentativasReconexao = 0;
     proximoIndiceExcerto = 0;
     excertosProcessados = 0;
     respondendoAtivo = false;
@@ -1053,8 +1060,8 @@
   }
 
   async function reconectarConversaReuniao() {
-    if (!reuniaoAtiva || reconexaoTentada) return;
-    reconexaoTentada = true;
+    if (!reuniaoAtiva || tentativasReconexao >= MAX_TENTATIVAS_RECONEXAO) return;
+    tentativasReconexao++;
     try {
       const resp = await fetch("/alma/reuniao/token", {
         method: "POST",
@@ -1064,9 +1071,17 @@
       if (!resp.ok) throw new Error(`${resp.status}`);
       const { token } = await resp.json();
       await ligarConversaReuniao(token);
+      console.log(`[reuniao] reconectado com sucesso (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO})`);
+      tentativasReconexao = 0;  // sucesso — uma futura queda merece as 4 tentativas outra vez
     } catch (e) {
-      console.error("Falha ao reconectar a conversação da reunião:", e);
-      addMessage("error", "Perdi a ligação à reunião — termina e começa de novo o modo reunião.");
+      console.error(`Falha ao reconectar a conversação da reunião (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO}):`, e);
+      if (tentativasReconexao >= MAX_TENTATIVAS_RECONEXAO) {
+        addMessage("error", "Perdi a ligação à reunião — termina e começa de novo o modo reunião.");
+      } else {
+        // intervalo crescente (1.5s, 3s, 4.5s) — dá tempo à rede de
+        // estabilizar em vez de repetir imediatamente a mesma falha
+        setTimeout(reconectarConversaReuniao, 1500 * tentativasReconexao);
+      }
     }
   }
 
