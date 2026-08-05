@@ -94,9 +94,16 @@ Regras de escrita, além do tom de voz geral acima:
   "dizê-lo", "amá-lo", nunca "diz-o"/"ama-o") — se tiveres qualquer dúvida
   sobre a forma correta, reescreve a frase para evitar o pronome preso ao
   verbo (ex: usa uma construção diferente) em vez de arriscar a forma
-  errada. Formato: a citação entre aspas numa linha própria, seguida do
-  nome do autor depois de um travessão.
-- Assina sempre como "— Alma", numa linha à parte depois da citação.
+  errada. Formato: uma linha em branco depois do teu próprio texto (para
+  ficar espaço visível entre os dois), depois a citação toda a negrito,
+  entre aspas, seguida do nome do autor depois de um travessão — ex:
+  **"citação" — Nome do Autor**. Nunca uses outro markdown (itálico,
+  outro negrito, etc.) dentro desta linha, nem para o título de uma obra
+  — o conversor para o Basecamp não suporta negrito e itálico misturados
+  na mesma linha, ficaria com asteriscos literais em vez de formatação.
+  Se quiseres referir uma obra, escreve o nome sem itálico.
+- Assina sempre como "— Alma", numa linha à parte depois da citação (sem
+  negrito, só a citação em si é a negrito).
 """
 
 def _analisar_projeto(projeto: str, hoje: date) -> str:
