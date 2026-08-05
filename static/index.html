@@ -875,6 +875,63 @@
     // anterior pode já ter disparado; sem isto arriscava tratar a mesma
     // chamada duas vezes
     const chamadasFuncaoTratadas = new Set();
+    // Poda de contexto para reuniões longas — ver podarConversaAntiga.
+    // ordemItensAudio: só turnos de ÁUDIO reais (nunca os itens de texto
+    // que a própria poda cria — ver o filtro por content[0].type no
+    // handler de conversation.item.added), na ordem em que aconteceram.
+    // transcricoesPorItem: item_id -> transcrição, associada pelos
+    // eventos de transcrição (chegam sempre depois do item em si).
+    const ordemItensAudio = [];
+    const transcricoesPorItem = new Map();
+    // gpt-realtime tem 32k tokens de contexto (confirmado na documentação
+    // da OpenAI) e áudio contínuo consome tokens muito mais depressa que
+    // texto — bug real (Rui, 2026-08-05): numa reunião de 30+ min, perto
+    // do fim, as respostas por voz pararam de sair (a sessão já não tinha
+    // espaço). Mantém os últimos LIMITE_ITENS_MANTIDOS_CONVERSA turnos de
+    // áudio intactos (para a Alma continuar a ouvir/falar com fluidez no
+    // curto prazo) e substitui os mais antigos pela sua transcrição em
+    // texto (muito mais barata em tokens) — ao contrário de os apagar sem
+    // mais, ela continua a "lembrar-se" do que foi dito, só que como
+    // texto em vez de áudio. Isto é só sobre a MEMÓRIA DA SESSÃO DE VOZ —
+    // a ata final (ver reuniao.terminar) vem sempre da transcrição
+    // acumulada no nosso servidor (registarTurnoReuniao), nunca desta
+    // sessão, por isso nunca fica incompleta por causa disto.
+    const LIMITE_ITENS_MANTIDOS_CONVERSA = 20;
+    function podarConversaAntiga() {
+      const excesso = ordemItensAudio.length - LIMITE_ITENS_MANTIDOS_CONVERSA;
+      if (excesso <= 0 || !dc || dc.readyState !== "open") return;
+      const aPodar = ordemItensAudio.slice(0, excesso);
+      // nunca apagar um turno sem já termos a transcrição para o
+      // substituir — se algum ainda não chegou, tenta-se de novo no
+      // próximo turno (a transcrição chega sempre pouco depois do item)
+      if (!aPodar.every((item) => transcricoesPorItem.has(item.id))) return;
+      console.log("[reuniao] a podar", aPodar.length, "turno(s) antigo(s) da sessão de voz (áudio -> texto, poupa contexto sem perder a memória)");
+      for (const item of aPodar) {
+        dc.send(JSON.stringify({ type: "conversation.item.delete", item_id: item.id }));
+      }
+      // recriados em ordem inversa: previous_item_id:null insere sempre
+      // no início da conversa, por isso o último a ser enviado (o mais
+      // antigo do lote) acaba por ficar mesmo o primeiro — reconstrói a
+      // ordem cronológica correta sem precisar de saber os ids que o
+      // servidor vai atribuir aos itens novos
+      for (let i = aPodar.length - 1; i >= 0; i--) {
+        const item = aPodar[i];
+        dc.send(JSON.stringify({
+          type: "conversation.item.create",
+          previous_item_id: null,
+          item: {
+            type: "message",
+            role: item.role,
+            content: [{
+              type: item.role === "user" ? "input_text" : "text",
+              text: transcricoesPorItem.get(item.id)
+            }]
+          }
+        }));
+      }
+      ordemItensAudio.splice(0, excesso);
+      for (const item of aPodar) transcricoesPorItem.delete(item.id);
+    }
     dc.addEventListener("message", (e) => {
       let ev;
       try { ev = JSON.parse(e.data); } catch (_) { return; }
@@ -888,7 +945,9 @@
       // eventos a chegar sem parar (bug real, Rui 2026-07-31)
       console.log("[reuniao] evento:", ev.type, ev);
       if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
+        if (ev.item_id) transcricoesPorItem.set(ev.item_id, ev.transcript);
         registarTurnoReuniao(ev.transcript, proximoIndiceExcerto++);
+        podarConversaAntiga();
         // create_response:true na sessão (ver tools/voz.py) — é a própria
         // sessão que decide, a cada turno, se responde ou fica calada
         // (regra reforçada em INSTRUCOES_MODO_REUNIAO). Não precisamos de
@@ -896,12 +955,25 @@
         // (versão anterior) forçava sempre uma resposta em voz mesmo
         // quando "Alma" só passava numa frase que não lhe era dirigida,
         // já que response.create não dá à sessão a opção de ficar calada.
+      } else if (ev.type === "conversation.item.added") {
+        // só turnos de ÁUDIO reais entram na lista de poda — os itens de
+        // texto que a própria poda cria (ver podarConversaAntiga) nunca
+        // voltam a ser candidatos, senão a ordem cronológica que fomos
+        // reconstruir perdia-se a cada ronda seguinte
+        const item = ev.item;
+        const tipoConteudo = item && Array.isArray(item.content) && item.content[0] && item.content[0].type;
+        if (item && item.type === "message" && (item.role === "user" || item.role === "assistant")
+            && (tipoConteudo === "input_audio" || tipoConteudo === "audio")) {
+          ordemItensAudio.push({ id: item.id, role: item.role });
+        }
       } else if (ev.type === "response.output_audio_transcript.done") {
         // rede de segurança determinística — ver suprimirEcoProximaFala.
         // log dedicado (não só o preview do objeto acima, que o Chrome corta
         // em "…" antes de mostrar campos como este) — confirma ao vivo se
         // ev.transcript vem mesmo preenchido
         console.log("[reuniao] transcript da fala:", JSON.stringify(ev.transcript));
+        if (ev.item_id && ev.transcript) transcricoesPorItem.set(ev.item_id, ev.transcript);
+        podarConversaAntiga();
         if (ev.transcript && !modoMudo) {
           if (suprimirEcoProximaFala) {
             suprimirEcoProximaFala = false;
