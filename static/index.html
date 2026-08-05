@@ -1096,6 +1096,23 @@
   // Ao contrário de tratarPerguntaEmpresa, o conteúdo já vem pronto nos
   // argumentos (não há nada a ir buscar ao Claude); só escrevemos na
   // consola e devolvemos o ack para ela continuar a falar o resumo em voz.
+  //
+  // Bug real (Rui, 2026-08-05): numa reunião de 30+ min, todas as respostas
+  // dadas via mostrar_na_consola ficaram só em texto — o response.create a
+  // seguir ao ack voltava sempre vazio (response.created -> response.done,
+  // sem nenhum response.output_audio_transcript.delta), reproduzido em
+  // TODAS as chamadas dessa parte da reunião, não foi 1 caso isolado.
+  // Motivo: o ack "mostrado na consola" não é informação nova nenhuma — o
+  // conteúdo já esteve nos argumentos da própria chamada de função, que o
+  // modelo gerou; do ponto de vista dele já "respondeu" ao chamar a
+  // função, por isso um response.create sem mais nada a que reagir dá uma
+  // resposta vazia em vez de dizer o conteúdo em voz. (perguntar_dados_
+  // empresa não tem este problema: o function_call_output aí leva a
+  // resposta REAL do Claude, que o modelo ainda não tinha visto — dá-lhe
+  // algo genuíno a que reagir.) Correção: response.create aceita um
+  // "response.instructions" que só se aplica a esta resposta — usa-se
+  // para pedir explicitamente que diga agora em voz o que escreveu, em
+  // vez de assumir que ela percebe isso sozinha.
   function mostrarNaConsola(callId, argumentosJson) {
     let args = {};
     try { args = JSON.parse(argumentosJson || "{}"); } catch (_) { /* usa {} */ }
@@ -1110,7 +1127,12 @@
     // já escrevemos o conteúdo acima — suprime o eco automático da fala de
     // seguimento (ver suprimirEcoProximaFala), para não aparecer duplicado
     suprimirEcoProximaFala = true;
-    reuniaoDC.send(JSON.stringify({ type: "response.create" }));
+    reuniaoDC.send(JSON.stringify({
+      type: "response.create",
+      response: {
+        instructions: "Diz agora em voz alta, com as tuas próprias palavras, o que acabaste de mostrar na consola — não fiques calada depois disto."
+      }
+    }));
   }
 
   // chamado quando a sessão de conversação decide que uma pergunta é sobre
