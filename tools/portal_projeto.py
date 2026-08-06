@@ -16,10 +16,19 @@
 #    "VALIDADO: <Fase>") — nunca de inferência sobre o histórico da
 #    conversa. Essa leitura é feita pela Alma antes de chamar esta
 #    função; esta função só valida a consistência do que lhe é passado.
+import base64
+import io
 import json
 import os
 import re
+
+import fitz
+from PIL import Image
+
 import db
+from tools import basecamp
+
+_TAMANHO_MAX_IMAGEM_PX = 1600
 
 _EMAIL_ESTUDIO = "studio@interiorguider.com"
 
@@ -46,6 +55,92 @@ _FASES_DEF = [
      "assunto_email": "Adjudicação"},
 ]
 _ESTADOS_VALIDOS = ("validada", "aguarda", "prevista")
+
+
+def extrair_imagem_conceito_pdf(download_url: str) -> dict:
+    """Extrai a imagem do moodboard de um PDF "Conceito Psicoestético
+    [Nome cliente]" anexado a um card do Basecamp, para usar como
+    conceito_imagem em gerar_portal_projeto.
+
+    Nunca escolhas/recortes a imagem tu mesma a partir do PDF — chama
+    sempre esta função e usa o campo "imagem_base64" do resultado tal
+    como vem, sem alterações. Passa o download_url exato do campo
+    "download_url" de listar_pdfs_anexados_por_data, filtrando pelo nome
+    do ficheiro conter "Conceito Psicoestético" (usa o mais recente, se
+    houver mais do que um anexado ao card) — nunca um download_url
+    obtido de outro lado (ex: de um preview_url, ou de um link dentro do
+    HTML de um comentário): esses podem apontar a um domínio/token
+    diferente e dar 404. Bug real, 2026-08-06: usar um download_url
+    errado (domínio storage.app.basecamp.com em vez do que vinha da
+    listagem) deu 404 e a fase "conceito" ficou sem imagem por engano.
+
+    A extração é determinística: procura a página cujo título é
+    "Moodboard" e extrai dessa página a maior imagem embutida; se não
+    encontrar uma página com esse título, usa a maior imagem de todo o
+    documento. Devolve {"erro": "..."} se não conseguir descarregar,
+    abrir o PDF, ou não encontrar nenhuma imagem.
+    """
+    try:
+        bruto = basecamp._get_bytes(download_url)
+    except Exception as exc:
+        return {"erro": f"não consegui descarregar o PDF em {download_url}: {exc}"}
+
+    try:
+        doc = fitz.open(stream=bruto, filetype="pdf")
+    except Exception as exc:
+        return {"erro": f"não consegui abrir o ficheiro como PDF: {exc}"}
+
+    pagina_moodboard = None
+    for pagina in doc:
+        if "moodboard" in pagina.get_text().lower():
+            pagina_moodboard = pagina
+            break
+
+    if pagina_moodboard is not None:
+        candidatas = [(pagina_moodboard, im) for im in pagina_moodboard.get_images(full=True)]
+        pagina_usada = "Moodboard"
+    else:
+        candidatas = [(p, im) for p in doc for im in p.get_images(full=True)]
+        pagina_usada = ("sem página \"Moodboard\" identificada no PDF — usei a maior "
+                        "imagem de todo o documento")
+
+    if not candidatas:
+        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
+
+    _, maior = max(candidatas, key=lambda pi: pi[1][2] * pi[1][3])
+    xref = maior[0]
+    info = doc.extract_image(xref)
+
+    imagem = Image.open(io.BytesIO(info["image"])).convert("RGB")
+    if max(imagem.size) > _TAMANHO_MAX_IMAGEM_PX:
+        imagem.thumbnail((_TAMANHO_MAX_IMAGEM_PX, _TAMANHO_MAX_IMAGEM_PX))
+    buffer = io.BytesIO()
+    imagem.save(buffer, format="JPEG", quality=85)
+    b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    return {"imagem_base64": f"data:image/jpeg;base64,{b64}", "pagina_usada": pagina_usada}
+
+
+TOOLS_EXTRAIR_IMAGEM_CONCEITO = [
+    {
+        "name": "extrair_imagem_conceito_pdf",
+        "description": ("Extrai deterministicamente a imagem do moodboard de dentro de um PDF "
+                        "\"Conceito Psicoestético [Nome cliente]\" anexado a um card do Basecamp. "
+                        "Usa o resultado (campo imagem_base64) diretamente como conceito_imagem em "
+                        "gerar_portal_projeto — nunca tentes escolher/descrever a imagem tu mesma a "
+                        "partir do texto do PDF."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "download_url": {"type": "string", "description": ("download_url exato do PDF, tal como "
+                                 "veio de listar_pdfs_anexados_por_data (filtra por nome de ficheiro conter "
+                                 "\"Conceito Psicoestético\"; usa o mais recente se houver mais do que um)")},
+            },
+            "required": ["download_url"]
+        }
+    }
+]
+
 
 def _validar_fases_estado(fases_estado: dict) -> str:
     """Devolve uma mensagem de erro (string) se `fases_estado` não tiver
@@ -83,10 +178,10 @@ def _mailto(assunto: str, ref: str) -> str:
 
 def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: str,
                          honorarios_total: float, honorarios_total_com_iva: bool, honorarios_linhas: list,
-                         conceito_leitura: str, conceito_materiais: str,
                          ambientes: list, fases_estado: dict,
                          valor_produto: float = None, valor_produto_com_iva: bool = False,
-                         conceito_imagem: str = None, documento_apresentacao: str = None,
+                         conceito_imagem: str = None, conceito_materiais: str = None,
+                         conceito_leitura: str = None, documento_apresentacao: str = None,
                          documento_orcamento: str = None) -> dict:
     """Gera o portal de acompanhamento de um projeto Interior Guider (página
     HTML autónoma, o link que o cliente abre) a partir dos dados já lidos
@@ -125,6 +220,28 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     `honorarios_total_com_iva` vier False, ou se `valor_produto_com_iva`
     vier False quando `valor_produto` não é nulo — precisamente para
     nunca publicar um valor ambíguo ou incorreto ao cliente.
+
+    `conceito_imagem`, `conceito_leitura` e `conceito_materiais` só podem
+    vir do PDF "Conceito Psicoestético [Nome cliente]" anexado ao card
+    (procura-o com listar_pdfs_anexados_por_data, filtrando pelo nome
+    conter "Conceito Psicoestético" — usa o mais recente se houver mais
+    do que um). NUNCA escrevas tu mesma um texto descritivo/poético sobre
+    o conceito a partir de notas informais ou da conversa com a cliente
+    — isso já aconteceu (2026-08-06) e é exatamente o tipo de invenção
+    que esta ferramenta não pode ter: o texto mostrado à cliente tem de
+    ser o que a designer já escreveu, não uma composição tua.
+    `conceito_imagem` vem sempre de extrair_imagem_conceito_pdf (campo
+    imagem_base64) chamada sobre esse PDF — nunca inventes/descrevas uma
+    imagem. `conceito_materiais` é a linha curta de estilo tal como está
+    escrita no PDF (ex: "Natural | Eclético | Introvertido"), copiada
+    literalmente. `conceito_leitura` é opcional (deixa a None) — só a
+    preenchas se existir texto real e literal (do PDF ou de um
+    comentário da designer) a descrever o conceito por escrito; se não
+    existir, deixa a None e diz isso na tua resposta em vez de
+    inventares um parágrafo. Se este PDF ainda não estiver anexado ao
+    card, a fase "conceito" não pode estar "aguarda" (o cliente veria
+    uma secção sem conteúdo real) — mantém-la "prevista" e explica ao
+    humano que falta anexar o PDF antes de a abrir ao cliente.
 
     `valor_produto` é opcional (deixa a None) quando ainda não existe
     nenhum orçamento de produto para este projeto (ex: fase inicial,
@@ -170,6 +287,12 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         return {"erro": ("valor_produto é obrigatório quando a fase \"orcamento\" não é \"prevista\" — o "
                          "cliente vai ver essa secção e precisa de um valor real, nunca 0 como substituto de "
                          "\"ainda não há orçamento\".")}
+    if fases_estado["conceito"]["estado"] != "prevista" and (conceito_imagem is None or conceito_materiais is None):
+        return {"erro": ("conceito_imagem e conceito_materiais são obrigatórios quando a fase \"conceito\" não "
+                         "é \"prevista\" — o cliente vai ver essa secção e precisa de conteúdo real, extraído do "
+                         "PDF \"Conceito Psicoestético\" (usa listar_pdfs_anexados_por_data e "
+                         "extrair_imagem_conceito_pdf). Se esse PDF ainda não está anexado ao card, mantém a "
+                         "fase \"conceito\" como \"prevista\" em vez disso.")}
 
     ref = f"IG-{card_id}"
     fases_json = [{
@@ -268,9 +391,9 @@ TOOLS_PORTAL_PROJETO = [
                         "required": ["titulo", "descricao", "valor"]
                     }
                 },
-                "conceito_leitura": {"type": "string", "description": "leitura/descrição do conceito (materiais, estilo) tal como já foi comunicado ao cliente"},
-                "conceito_materiais": {"type": "string", "description": "lista curta de materiais/paleta, ex: \"Carvalho maciço · Linho cru\""},
-                "conceito_imagem": {"type": "string", "description": "url de uma imagem guia do conceito, se houver anexada no card — opcional"},
+                "conceito_leitura": {"type": "string", "description": "texto real e literal (do PDF \"Conceito Psicoestético\" ou de um comentário da designer) a descrever o conceito por escrito — nunca uma composição tua. Omite/deixa nulo se não existir esse texto; não inventes um parágrafo"},
+                "conceito_materiais": {"type": "string", "description": "a linha curta de estilo tal como está escrita no PDF \"Conceito Psicoestético\", copiada literalmente (ex: \"Natural | Eclético | Introvertido\") — obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
+                "conceito_imagem": {"type": "string", "description": "o campo imagem_base64 devolvido por extrair_imagem_conceito_pdf, chamada sobre o PDF \"Conceito Psicoestético [Nome cliente]\" anexado ao card — nunca outra imagem, nunca inventada. Obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
                 "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado. Omite (ou não passes) se ainda não existir nenhum orçamento de produto para este projeto — nunca passes 0 como substituto disso; só podes omitir se a fase \"orcamento\" em fases_estado for \"prevista\""},
                 "valor_produto_com_iva": {"type": "boolean", "description": "True só se `valor_produto` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
                 "ambientes": {
@@ -300,7 +423,7 @@ TOOLS_PORTAL_PROJETO = [
                 }
             },
             "required": ["card_id", "cliente", "validade", "honorarios_total", "honorarios_total_com_iva",
-                        "honorarios_linhas", "conceito_leitura", "conceito_materiais", "ambientes", "fases_estado"]
+                        "honorarios_linhas", "ambientes", "fases_estado"]
         }
     }
 ]
@@ -500,7 +623,7 @@ const conteudo = {
 
   conceito: () => `
     <div class="imagem">${projeto.conceito.imagem?`<img src="${projeto.conceito.imagem}" alt="Imagem guia">`:''}</div>
-    <p class="leitura">${projeto.conceito.leitura}</p>
+    ${projeto.conceito.leitura?`<p class="leitura">${projeto.conceito.leitura}</p>`:''}
     <p class="materiais">${projeto.conceito.materiais}</p>`,
 
   projeto: () => `

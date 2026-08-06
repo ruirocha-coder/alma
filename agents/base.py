@@ -403,7 +403,7 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(
         tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS
-        + portal_projeto.TOOLS_PORTAL_PROJETO)
+        + portal_projeto.TOOLS_PORTAL_PROJETO + portal_projeto.TOOLS_EXTRAIR_IMAGEM_CONCEITO)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
@@ -432,6 +432,7 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "obter_conteudo_documento_gerado": lambda id: documentos_gerados.obter_conteudo_documento_gerado(
             utilizador, id),
         "gerar_portal_projeto": lambda **kwargs: portal_projeto.gerar_portal_projeto(utilizador, **kwargs),
+        "extrair_imagem_conceito_pdf": portal_projeto.extrair_imagem_conceito_pdf,
     }
     return system, tools_completas, funcoes_utilizador
 
