@@ -184,7 +184,8 @@ def _processar(payload: dict):
         except Exception as e:
             print(f"[responder_basecamp] não consegui reobter as notas do alvo: {e!r}")
 
-    comentarios = basecamp.ler_comentarios(f"{basecamp._base_url()}/recordings/{alvo_id}/comments.json")
+    comments_url = f"{basecamp._base_url()}/recordings/{alvo_id}/comments.json"
+    comentarios = basecamp.ler_comentarios(comments_url)
     titulo = alvo_completo.get("title") or alvo.get("title") or "(sem título)"
     notas = _texto_simples(alvo_completo.get("description", ""))
     estado = (alvo_completo.get("parent") or {}).get("title") or "(sem estado)"
@@ -200,6 +201,9 @@ def _processar(payload: dict):
     historico = "\n".join(_linha_comentario(c) for c in comentarios) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
 Url da tarefa/card: {url_alvo}
+Url dos comentários desta tarefa/card (usa este exato valor em
+procurar_anexo_em_comentarios/listar_pdfs_anexados_por_data — nunca
+inventes outro a partir só do id): {comments_url}
 Estado/coluna: {estado}
 Responsáveis: {responsaveis}
 

@@ -81,6 +81,7 @@ FUNCOES = {
     "procurar_cards_basecamp": basecamp.procurar_cards_basecamp,
     "cards_de_card_table": basecamp.cards_de_card_table,
     "procurar_anexo_em_comentarios": basecamp.procurar_anexo_em_comentarios,
+    "listar_pdfs_anexados_por_data": basecamp.listar_pdfs_anexados_por_data,
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
     "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,

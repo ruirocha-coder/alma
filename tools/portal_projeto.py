@@ -95,19 +95,22 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     é sempre derivada dele (IG-{card_id}), nunca escrita à mão, para nunca
     haver duas referências diferentes para o mesmo projeto.
 
-    ANTES de decidires qualquer valor monetário: identifica TODOS os PDFs
-    anexados no card (na descrição e em qualquer comentário) relacionados
-    com honorários/orçamento, ordena-os por data, e usa sempre o MAIS
-    RECENTE — nunca uma versão anterior, mesmo que a encontres primeiro ou
-    que pareça mais fácil de ler (ex: uma proposta inicial fica
-    desatualizada assim que sai uma fatura final mais recente). Bug real,
-    2026-08-05: usar um PDF de uma proposta antiga deu um valor de
+    ANTES de decidires qualquer valor monetário: chama
+    listar_pdfs_anexados_por_data (nunca tentes tu mesma perceber, lendo o
+    texto corrido dos comentários, qual PDF é mais recente — isso já deu
+    respostas inconsistentes entre tentativas, porque a ordenação por
+    data ficava a cargo da leitura de texto em vez de código). Dessa
+    lista já ordenada, usa o PRIMEIRO ficheiro cujo nome corresponda ao
+    que procuras (ex: contém "Fee"/"honorário" para honorários, "Product"/
+    "orçamento" para o orçamento de produto) — nunca uma versão anterior
+    na lista, mesmo que a encontres primeiro na tua leitura do card. Bug
+    real, 2026-08-05: usar um PDF de uma proposta antiga deu um valor de
     honorários errado, quando havia uma versão mais recente anexada
     depois. As Notas do card podem também ter um link para uma Google
     Sheet/Doc (não tens ferramenta para abrir isso) — não é um problema
-    desde que exista um PDF recente com a mesma informação; só precisas de
-    sinalizar incerteza ao humano se não encontrares NENHUM PDF com o
-    valor final, só esse link.
+    desde que a lista de PDFs tenha um ficheiro recente com a mesma
+    informação; só precisas de sinalizar incerteza ao humano se não
+    encontrares NENHUM PDF com o valor final, só esse link.
 
     Todos os valores monetários mostrados nesta página são o que o CLIENTE
     paga — têm de incluir IVA sempre. `honorarios_total_com_iva` e
@@ -200,19 +203,22 @@ TOOLS_PORTAL_PROJETO = [
             "pedirem explicitamente o link/portal para um projeto "
             "concreto, e só depois de teres lido a descrição, os "
             "comentários e os anexos desse card — nunca com dados "
-            "inventados. IMPORTANTE: identifica TODOS os PDFs anexados "
-            "no card (descrição e comentários) relacionados com "
-            "honorários/orçamento, ordena-os por data, e usa sempre o "
-            "MAIS RECENTE — nunca uma versão anterior, mesmo que a "
-            "encontres primeiro (uma proposta inicial fica desatualizada "
-            "assim que sai uma fatura/versão final mais recente). As "
-            "Notas do card podem ter também um link para uma Google "
-            "Sheet/Doc que não consegues abrir — não é um problema "
-            "desde que exista um PDF recente com a mesma informação; só "
-            "precisas de dizer no teu comentário de resposta que precisas "
-            "de confirmação humana se não encontrares NENHUM PDF com o "
-            "valor final. O estado de cada fase só pode vir de um "
-            "vir de um comentário literal \"VALIDADO: <Fase>\" nesse card "
+            "inventados. IMPORTANTE: chama primeiro "
+            "listar_pdfs_anexados_por_data (nunca tentes tu mesma "
+            "perceber, lendo os comentários, qual PDF é mais recente — "
+            "isso já deu respostas inconsistentes entre tentativas) — "
+            "dessa lista já ordenada, usa o primeiro ficheiro relacionado "
+            "com honorários/orçamento, nunca uma versão anterior na "
+            "lista mesmo que a encontres primeiro (uma proposta inicial "
+            "fica desatualizada assim que sai uma fatura/versão final "
+            "mais recente). As Notas do card podem ter também um link "
+            "para uma Google Sheet/Doc que não consegues abrir — não é "
+            "um problema desde que a lista de PDFs tenha um ficheiro "
+            "recente com a mesma informação; só precisas de dizer no teu "
+            "comentário de resposta que precisas de confirmação humana "
+            "se não encontrares NENHUM PDF com o valor final. O estado "
+            "de cada fase só pode vir de um comentário literal "
+            "\"VALIDADO: <Fase>\" nesse card "
             "(ex: \"VALIDADO: Conceito\") — nunca de uma leitura geral/"
             "informal da conversa; sem essa marca, a fase fica \"aguarda\" "
             "(se for a próxima em aberto) ou \"prevista\". Os valores "

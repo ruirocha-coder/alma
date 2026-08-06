@@ -434,6 +434,31 @@ def ler_comentarios(comments_url: str) -> list[dict]:
         })
     return resultado
 
+def listar_pdfs_anexados_por_data(comments_url: str) -> list[dict]:
+    """Lista todos os PDFs anexados nos comentários de uma tarefa/card,
+    ordenados do MAIS RECENTE para o mais antigo — pedido real (Rui,
+    2026-08-05): pedir para escolher "o PDF mais recente" olhando o texto
+    dos comentários (por vezes uma centena) dava respostas inconsistentes
+    entre tentativas, porque a ordenação por data ficava a cargo da
+    leitura do texto corrido em vez de ser feita aqui, em código. Usa
+    SEMPRE esta função antes de decidires qual é a versão mais atual de um
+    documento (ex: honorários, orçamento) — a lista já vem ordenada; o
+    primeiro item que corresponder ao que procuras (pelo nome do ficheiro)
+    é sempre o mais recente. Cada item tem o "comentario_url", pronto a
+    passar a ler_anexos_registo_basecamp para leres o conteúdo."""
+    comentarios = _get_paginado(comments_url)
+    resultado = []
+    for c in comentarios:
+        for a in (c.get("content_attachments") or []):
+            if a.get("content_type") == "application/pdf":
+                resultado.append({
+                    "ficheiro": a.get("filename") or a.get("name") or "(sem nome)",
+                    "data": c.get("created_at"),
+                    "comentario_url": c.get("url"),
+                })
+    resultado.sort(key=lambda item: item["data"] or "", reverse=True)
+    return resultado
+
 def procurar_anexo_em_comentarios(comments_url: str, termo: str) -> list[dict]:
     """Procura, nos comentários de uma tarefa/card, aqueles que têm um
     ficheiro anexado cujo nome contenha `termo` (ex: um nome de ficheiro
@@ -1080,6 +1105,17 @@ TOOLS_ESTADO_PROJETO = [
                 "termo": {"type": "string", "description": "nome (ou parte do nome) do ficheiro a encontrar, ex: \"OR 2026_13\""}
             },
             "required": ["comments_url", "termo"]
+        }
+    },
+    {
+        "name": "listar_pdfs_anexados_por_data",
+        "description": "Lista todos os PDFs anexados nos comentários de uma tarefa/card, já ordenados do mais recente para o mais antigo. Usa isto SEMPRE antes de decidires qual é a versão mais atual de um documento (ex: honorários, orçamento, uma proposta que foi revista várias vezes) — nunca tentes tu mesma perceber qual comentário é mais recente lendo o texto corrido, mesmo que pareça óbvio; esta lista já vem ordenada por código. O primeiro item cujo nome de ficheiro corresponder ao que procuras é sempre o mais recente; passa o \"comentario_url\" desse item a ler_anexos_registo_basecamp para leres o conteúdo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "comments_url": {"type": "string", "description": "o campo \"comments_url\" do card (devolvido por procurar_cards_basecamp, estado_projeto_basecamp, etc.) — nunca inventado"}
+            },
+            "required": ["comments_url"]
         }
     }
 ]
