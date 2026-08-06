@@ -373,6 +373,7 @@ async def alma_com_ficheiro(utilizador: str = Form(...), sessao: str = Form(...)
 _MEDIA_TYPE_POR_FORMATO = {
     "pdf": "application/pdf",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "html": "text/html; charset=utf-8",
 }
 
 @app.get("/documentos-gerados/{id}")
@@ -393,10 +394,10 @@ def documento_gerado(id: int):
     titulo = documento["titulo"]
     nome_ascii = titulo.encode("ascii", errors="ignore").decode().strip() or "documento"
     nome_utf8 = quote(f"{titulo}.{formato}")
-    # inline só faz sentido para o PDF (o browser sabe mostrá-lo); um .xlsx
-    # inline costuma só descarregar de qualquer forma, mas "attachment" é o
-    # comportamento correto e explícito para esse caso
-    disposicao = "inline" if formato == "pdf" else "attachment"
+    # inline só faz sentido para o PDF e o HTML (o browser sabe mostrar os
+    # dois); um .xlsx inline costuma só descarregar de qualquer forma, mas
+    # "attachment" é o comportamento correto e explícito para esse caso
+    disposicao = "inline" if formato in ("pdf", "html") else "attachment"
     return Response(
         content=documento["pdf"], media_type=media_type,
         headers={"Content-Disposition":

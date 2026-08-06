@@ -1,5 +1,6 @@
 import anthropic, json, threading
-from tools import bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos, documentos_gerados
+from tools import (bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos,
+                   documentos_gerados, portal_projeto)
 from agents import agendamento_entregas
 import db
 
@@ -400,7 +401,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
     contexto = "\n\n".join(c for c in (db.contexto_global(), db.contexto_utilizador(utilizador)) if c)
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(
-        tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS)
+        tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS
+        + portal_projeto.TOOLS_PORTAL_PROJETO)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),
@@ -428,6 +430,7 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
             utilizador, titulo, colunas, linhas, subtitulo, linhas_destacadas),
         "obter_conteudo_documento_gerado": lambda id: documentos_gerados.obter_conteudo_documento_gerado(
             utilizador, id),
+        "gerar_portal_projeto": lambda **kwargs: portal_projeto.gerar_portal_projeto(utilizador, **kwargs),
     }
     return system, tools_completas, funcoes_utilizador
 
