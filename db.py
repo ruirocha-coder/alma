@@ -230,6 +230,14 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS utilizador TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS conteudo_markdown TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DEFAULT 'pdf';
+-- card_id do Basecamp, só usado pelo portal de projeto (ver
+-- tools/portal_projeto.py) — permite atualizar o mesmo registo (e por
+-- isso manter o mesmo link) em vez de criar um documento novo a cada
+-- vez que o portal de um projeto é gerado outra vez. NULL para todos os
+-- outros tipos de documento (PDF/Excel gerados por gerar_pdf/gerar_excel).
+ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS card_id BIGINT;
+CREATE UNIQUE INDEX IF NOT EXISTS documentos_gerados_card_id_idx
+    ON documentos_gerados (card_id) WHERE card_id IS NOT NULL;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -618,6 +626,32 @@ def guardar_documento_gerado(utilizador: str, titulo: str, ficheiro: bytes, cont
                 """INSERT INTO documentos_gerados (utilizador, titulo, pdf, conteudo_markdown, formato)
                    VALUES (%s, %s, %s, %s, %s) RETURNING id""",
                 (utilizador, titulo, ficheiro, conteudo_fonte, formato)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def guardar_ou_atualizar_documento_gerado(utilizador: str, titulo: str, ficheiro: bytes, conteudo_fonte: str,
+                                          card_id: int, formato: str = "html") -> int:
+    """Como guardar_documento_gerado, mas para documentos que representam
+    um projeto/card específico (ex: o portal de acompanhamento) e por isso
+    têm de manter sempre o mesmo link: se já existir um documento gerado
+    para este `card_id`, atualiza esse registo em vez de criar um novo.
+    Sem isto, cada vez que o portal era gerado outra vez (ex: depois de
+    uma fase ser validada) criava um documento novo com um link novo — o
+    link já enviado à cliente ficava congelado no estado antigo, o que
+    contradiz a própria ideia de um portal de acompanhamento."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO documentos_gerados (utilizador, titulo, pdf, conteudo_markdown, formato, card_id)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (card_id) WHERE card_id IS NOT NULL
+                   DO UPDATE SET utilizador = EXCLUDED.utilizador, titulo = EXCLUDED.titulo,
+                                 pdf = EXCLUDED.pdf, conteudo_markdown = EXCLUDED.conteudo_markdown,
+                                 formato = EXCLUDED.formato, criado_em = now()
+                   RETURNING id""",
+                (utilizador, titulo, ficheiro, conteudo_fonte, formato, card_id)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()

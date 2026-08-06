@@ -4,7 +4,7 @@
 import calendar, os, re, time, unicodedata
 from datetime import date, timedelta
 import httpx
-from tools import documentos_empresa
+from tools import documentos_empresa, tempo
 import db
 
 # servidor próprio da equipa (fora do Basecamp) — configurável por env var
@@ -298,7 +298,8 @@ def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = Non
     dias = []
     d = inicio
     while d <= fim:
-        dias.append({"data": d.isoformat(), **ler_dashboard_producao(d.isoformat())})
+        dias.append({"data": d.isoformat(), "dia_semana": tempo.dia_da_semana(d.isoformat())["abreviado"],
+                    **ler_dashboard_producao(d.isoformat())})
         d += timedelta(days=1)
     return {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "dias": dias,
             "totais": _totais_intervalo(dias)}
@@ -316,7 +317,7 @@ TOOLS_DASHBOARD_PRODUCAO = [
     },
     {
         "name": "dashboard_producao_ecos_largos_intervalo",
-        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\", \"a semana passada\", \"este mês\", \"o mês passado\", ou um mês pelo nome (ex: \"junho\", \"em maio\", \"quanto entrou em março\"): passa `periodo` com exatamente \"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome do mês (ex: \"junho\" ou \"junho de 2026\" se um ano diferente do atual for mencionado) — as datas certas são sempre calculadas aqui, nunca por ti, tu não sabes a data de hoje com fiabilidade nem quantos dias tem cada mês. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`. A resposta inclui um campo \"totais\" já com a soma de input_m3 e output_m3 do intervalo inteiro, calculada aqui — usa sempre esse total pronto quando perguntarem pelo total/soma do período, NUNCA somes tu mesma os valores diários (é aritmética decimal com muitas parcelas, fácil de errar).",
+        "description": "Lê os dados de produção dia a dia num intervalo de datas — usa sempre esta ferramenta (nunca dashboard_producao_ecos_largos repetidamente com datas calculadas por ti) sempre que perguntarem por um período como \"esta semana\", \"a semana passada\", \"este mês\", \"o mês passado\", ou um mês pelo nome (ex: \"junho\", \"em maio\", \"quanto entrou em março\"): passa `periodo` com exatamente \"esta_semana\", \"semana_passada\", \"este_mes\", \"mes_passado\", ou o nome do mês (ex: \"junho\" ou \"junho de 2026\" se um ano diferente do atual for mencionado) — as datas certas são sempre calculadas aqui, nunca por ti, tu não sabes a data de hoje com fiabilidade nem quantos dias tem cada mês. Para outro intervalo qualquer, usa `data_inicio` e `data_fim` (YYYY-MM-DD) em vez de `periodo`. A resposta inclui um campo \"totais\" já com a soma de input_m3 e output_m3 do intervalo inteiro, calculada aqui — usa sempre esse total pronto quando perguntarem pelo total/soma do período, NUNCA somes tu mesma os valores diários (é aritmética decimal com muitas parcelas, fácil de errar). Cada dia em \"dias\" já vem com \"dia_semana\" (ex: \"Seg\", \"Dom\") calculado aqui — usa sempre esse valor para rotular o dia num relatório, NUNCA escrevas o dia da semana de memória: já aconteceu rotular uma segunda-feira como domingo.",
         "input_schema": {
             "type": "object",
             "properties": {
