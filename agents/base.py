@@ -1,6 +1,6 @@
 import anthropic, json, threading
 from tools import (bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos,
-                   documentos_gerados, portal_projeto)
+                   documentos_gerados, portal_projeto, tempo, calculadora)
 from agents import agendamento_entregas
 import db
 
@@ -66,6 +66,9 @@ def _disparar_avisos_gestao_agendas():
     return avisos_gestao_agendas.correr_avisos_gestao_agendas()
 
 FUNCOES = {
+    "agora": lambda: tempo.agora(),
+    "dia_da_semana": tempo.dia_da_semana,
+    "calcular": calculadora.calcular,
     "procurar_produtos": bigcommerce.procurar_produtos,
     "procurar_paginas": bigcommerce.procurar_paginas,
     "procurar_posts_blog": bigcommerce.procurar_posts_blog,
@@ -399,11 +402,15 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
     # memória global (ver TOOLS_SUGESTAO/contexto_global) aplica-se a
     # qualquer conversa, por isso vem sempre antes da memória desta pessoa
     # em concreto, nunca condicionada a ela.
-    contexto = "\n\n".join(c for c in (db.contexto_global(), db.contexto_utilizador(utilizador)) if c)
+    # a data de hoje vem sempre aqui, fora do bloco de system prompt em
+    # cache (que nunca é reprocessado entre pedidos) — nunca dentro dele,
+    # ou ficaria presa à data do dia em que a cache foi criada.
+    contexto = "\n\n".join(c for c in (tempo.contexto_data_atual(), db.contexto_global(),
+                                       db.contexto_utilizador(utilizador)) if c)
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(
         tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS
-        + portal_projeto.TOOLS_PORTAL_PROJETO)
+        + portal_projeto.TOOLS_PORTAL_PROJETO + tempo.TOOLS_TEMPO + calculadora.TOOLS_CALCULADORA)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
         "esquecer": lambda termo: db.esquecer_factos(utilizador, termo),

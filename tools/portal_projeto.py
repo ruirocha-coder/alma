@@ -397,7 +397,8 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
 
     titulo = f"Portal — {cliente}"
     conteudo_fonte = json.dumps({"card_id": card_id, "projeto": projeto}, ensure_ascii=False)
-    id_gerado = db.guardar_documento_gerado(utilizador, titulo, html.encode("utf-8"), conteudo_fonte, formato="html")
+    id_gerado = db.guardar_ou_atualizar_documento_gerado(utilizador, titulo, html.encode("utf-8"), conteudo_fonte,
+                                                          card_id, formato="html")
     url = f"{os.environ['ALMA_APP_URL'].rstrip('/')}/documentos-gerados/{id_gerado}"
     return {"titulo": titulo, "url": url, "ref": ref}
 
