@@ -216,16 +216,22 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     para outro argumento (bug real, 2026-08-06: copiar um base64 de
     algumas centenas de KB de uma chamada para a outra ficou truncado
     sem erro visível, e a imagem apareceu em branco no portal).
-    `conceito_materiais` é a linha curta de estilo tal como está escrita
-    no PDF (ex: "Natural | Eclético | Introvertido"), copiada
-    literalmente. `conceito_leitura` é opcional (deixa a None) — só a
-    preenchas se existir texto real e literal (do PDF ou de um
-    comentário da designer) a descrever o conceito por escrito; se não
-    existir, deixa a None e diz isso na tua resposta em vez de
-    inventares um parágrafo. Se este PDF ainda não estiver anexado ao
-    card, a fase "conceito" não pode estar "aguarda" (o cliente veria
-    uma secção sem conteúdo real) — mantém-la "prevista" e explica ao
-    humano que falta anexar o PDF antes de a abrir ao cliente.
+    `conceito_materiais` e `conceito_leitura` são ambos opcionais (deixa
+    a None) — só os preenchas se existir texto literal e real no PDF ou
+    num comentário da designer (ex: uma linha curta "Natural | Eclético |
+    Introvertido"). NUNCA componhas tu mesma uma linha de estilo quando
+    o PDF não tem esse formato — bug real, 2026-08-06: um projeto com um
+    PDF de "imagem guia" mais antigo não tinha essa linha, e em vez de
+    deixar o campo vazio foi escrita uma composição própria ("Natural |
+    Contemporâneo | Harmonioso") só para preencher o campo; isso é
+    exatamente o tipo de invenção que não pode acontecer, mesmo
+    assinalada depois na resposta — o texto errado já foi para o portal.
+    Se não existir texto literal, deixa ambos os campos a None; a
+    imagem (via conceito_pdf_download_url) chega para tornar a fase
+    "conceito" visível ao cliente. Se nem a imagem existir ainda, a fase
+    "conceito" não pode estar "aguarda" (o cliente veria uma secção sem
+    conteúdo real) — mantém-la "prevista" e explica ao humano que falta
+    anexar o PDF antes de a abrir ao cliente.
 
     `valor_produto` é opcional (deixa a None) quando ainda não existe
     nenhum orçamento de produto para este projeto (ex: fase inicial,
@@ -271,12 +277,12 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         return {"erro": ("valor_produto é obrigatório quando a fase \"orcamento\" não é \"prevista\" — o "
                          "cliente vai ver essa secção e precisa de um valor real, nunca 0 como substituto de "
                          "\"ainda não há orçamento\".")}
-    if fases_estado["conceito"]["estado"] != "prevista" and (conceito_pdf_download_url is None or conceito_materiais is None):
-        return {"erro": ("conceito_pdf_download_url e conceito_materiais são obrigatórios quando a fase "
-                         "\"conceito\" não é \"prevista\" — o cliente vai ver essa secção e precisa de conteúdo "
-                         "real, extraído do PDF \"Conceito Psicoestético\" (usa listar_pdfs_anexados_por_data "
-                         "para encontrar o download_url). Se esse PDF ainda não está anexado ao card, mantém a "
-                         "fase \"conceito\" como \"prevista\" em vez disso.")}
+    if fases_estado["conceito"]["estado"] != "prevista" and conceito_pdf_download_url is None:
+        return {"erro": ("conceito_pdf_download_url é obrigatório quando a fase \"conceito\" não é \"prevista\" "
+                         "— o cliente vai ver essa secção e precisa pelo menos da imagem, extraída do PDF "
+                         "\"Conceito Psicoestético\"/\"Imagem Guia\" (usa listar_pdfs_anexados_por_data para "
+                         "encontrar o download_url). Se esse PDF ainda não está anexado ao card, mantém a fase "
+                         "\"conceito\" como \"prevista\" em vez disso.")}
 
     conceito_imagem = None
     if conceito_pdf_download_url is not None:
@@ -383,7 +389,7 @@ TOOLS_PORTAL_PROJETO = [
                     }
                 },
                 "conceito_leitura": {"type": "string", "description": "texto real e literal (do PDF \"Conceito Psicoestético\" ou de um comentário da designer) a descrever o conceito por escrito — nunca uma composição tua. Omite/deixa nulo se não existir esse texto; não inventes um parágrafo"},
-                "conceito_materiais": {"type": "string", "description": "a linha curta de estilo tal como está escrita no PDF \"Conceito Psicoestético\", copiada literalmente (ex: \"Natural | Eclético | Introvertido\") — obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
+                "conceito_materiais": {"type": "string", "description": "a linha curta de estilo tal como está escrita no PDF, copiada literalmente (ex: \"Natural | Eclético | Introvertido\") — opcional; omite/deixa nulo se o PDF não tiver essa linha nesse formato, nunca compões uma tu mesma"},
                 "conceito_pdf_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Conceito Psicoestético [Nome cliente]\" anexado ao card (usa o mais recente, se houver mais do que um) — a função extrai a imagem do moodboard internamente, nunca passes uma imagem já extraída. Obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
                 "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado. Omite (ou não passes) se ainda não existir nenhum orçamento de produto para este projeto — nunca passes 0 como substituto disso; só podes omitir se a fase \"orcamento\" em fases_estado for \"prevista\""},
                 "valor_produto_com_iva": {"type": "boolean", "description": "True só se `valor_produto` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
@@ -615,7 +621,7 @@ const conteudo = {
   conceito: () => `
     <div class="imagem">${projeto.conceito.imagem?`<img src="${projeto.conceito.imagem}" alt="Imagem guia">`:''}</div>
     ${projeto.conceito.leitura?`<p class="leitura">${projeto.conceito.leitura}</p>`:''}
-    <p class="materiais">${projeto.conceito.materiais}</p>`,
+    ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}`,
 
   projeto: () => `
     ${projeto.ambientes.map(a=>`
