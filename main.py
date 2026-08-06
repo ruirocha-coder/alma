@@ -4,8 +4,8 @@ load_dotenv()
 import asyncio, json, os
 import threading
 from urllib.parse import quote
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import StreamingResponse, Response
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Body
+from fastapi.responses import StreamingResponse, Response, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,7 +19,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto
 from db import inicializar_schema
 inicializar_schema()
 
@@ -403,6 +403,29 @@ def documento_gerado(id: int):
         headers={"Content-Disposition":
                 f'{disposicao}; filename="{nome_ascii}.{formato}"; filename*=UTF-8\'\'{nome_utf8}'}
     )
+
+@app.get("/documentos-gerados/{id}/editar", response_class=HTMLResponse)
+def portal_projeto_editar_pagina(id: int):
+    """Página interna (nunca partilhada com a cliente) onde a equipa
+    corrige/completa os campos de um portal de projeto já gerado — ver
+    tools/portal_projeto.pagina_edicao. Só existe para documentos com
+    card_id (os outros tipos de documento, PDF/Excel, não têm edição)."""
+    documento = obter_documento_gerado(id)
+    if not documento or documento["formato"] != "html" or documento["card_id"] is None:
+        raise HTTPException(status_code=404, detail="este documento não é um portal de projeto editável")
+    projeto = json.loads(documento["conteudo_markdown"])["projeto"]
+    return HTMLResponse(portal_projeto.pagina_edicao(id, projeto))
+
+@app.post("/documentos-gerados/{id}/editar")
+def portal_projeto_editar_gravar(id: int, campos: dict = Body(...)):
+    """Grava as alterações feitas na página acima — ver
+    tools/portal_projeto.atualizar_portal_projeto_edicao. `editado_por`
+    fica genérico (não há sessão de utilizador nesta página) porque só a
+    equipa tem acesso ao link, nunca a cliente."""
+    resultado = portal_projeto.atualizar_portal_projeto_edicao(id, "equipa (via página de edição)", campos)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
 
 @app.get("/health")
 def health():
