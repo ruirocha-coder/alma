@@ -57,9 +57,38 @@ _FASES_DEF = [
 _ESTADOS_VALIDOS = ("validada", "aguarda", "prevista")
 
 
-def _extrair_imagem_conceito_pdf(download_url: str) -> dict:
-    """Extrai a imagem do moodboard de um PDF "Conceito Psicoestético
-    [Nome cliente]" anexado a um card do Basecamp.
+def _normalizar_texto(s: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().strip().lower()
+
+
+def _imagem_pagina_para_base64(doc, pagina, imagens_permitidas: set) -> str:
+    imagens = [im for im in pagina.get_images(full=True) if (im[2], im[3]) not in imagens_permitidas]
+    if not imagens:
+        return None
+    xref = max(imagens, key=lambda im: im[2] * im[3])[0]
+    info = doc.extract_image(xref)
+    try:
+        imagem = Image.open(io.BytesIO(info["image"])).convert("RGB")
+    except Exception:
+        return None
+    if max(imagem.size) > _TAMANHO_MAX_IMAGEM_PX:
+        imagem.thumbnail((_TAMANHO_MAX_IMAGEM_PX, _TAMANHO_MAX_IMAGEM_PX))
+    buffer = io.BytesIO()
+    imagem.save(buffer, format="JPEG", quality=85)
+    return f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+
+def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
+    """Extrai, de um PDF "Conceito Psicoestético [Nome cliente]" anexado a
+    um card do Basecamp, uma imagem por cada página de ambiente (ex:
+    "Sala", "Cozinha", "Suite Master" — uma página por espaço, cada uma
+    com o seu próprio render/fotografia guia). Nunca a do "Moodboard"
+    (a colagem de materiais) nem a da página de estilo (a que só tem uma
+    linha "Estilo A | Estilo B | Estilo C") — essas não são imagens de
+    ambiente. A primeira imagem de ambiente (pela ordem do documento) é a
+    que se usa como preview da fase "Conceito"; as restantes associam-se
+    aos ambientes do projeto pelo nome da página.
 
     Uso interno de gerar_portal_projeto — nunca exposta como tool ao
     modelo. Motivo (bug real, 2026-08-06): quando isto era uma tool
@@ -70,10 +99,17 @@ def _extrair_imagem_conceito_pdf(download_url: str) -> dict:
     codificação para base64 ficam inteiramente em código, sem nunca
     passar pelos tokens do modelo.
 
-    A extração é determinística: procura a página cujo título é
-    "Moodboard" e extrai dessa página a maior imagem embutida; se não
-    encontrar uma página com esse título, usa a maior imagem de todo o
-    documento. Devolve {"erro": "..."} se não conseguir descarregar,
+    A extração é determinística: cada página deste template tem um
+    cabeçalho fixo "CONCEITO PSICOESTÉTICO" seguido de um título curto
+    (o nome do ambiente, ou "Moodboard", ou a linha de estilo com "|").
+    Só as páginas com esse cabeçalho E um título que não seja "Moodboard"
+    nem contenha "|" contam como página de ambiente; delas extrai-se a
+    maior imagem embutida, ignorando o logótipo pequeno que se repete em
+    quase todas as páginas (detetado por aparecer 3+ vezes com as mesmas
+    dimensões). Se o PDF não tiver esta estrutura (ex: um template mais
+    antigo, "Imagem Guia"), cai para a maior imagem de todo o documento,
+    sem título — só serve então como imagem de preview, sem associação a
+    ambientes. Devolve {"erro": "..."} se não conseguir descarregar,
     abrir o PDF, ou não encontrar nenhuma imagem.
     """
     try:
@@ -86,35 +122,52 @@ def _extrair_imagem_conceito_pdf(download_url: str) -> dict:
     except Exception as exc:
         return {"erro": f"não consegui abrir o ficheiro como PDF: {exc}"}
 
-    pagina_moodboard = None
+    from collections import Counter
+    frequencia_dims = Counter()
     for pagina in doc:
-        if "moodboard" in pagina.get_text().lower():
-            pagina_moodboard = pagina
-            break
+        for im in pagina.get_images(full=True):
+            frequencia_dims[(im[2], im[3])] += 1
+    dims_recorrentes = {d for d, c in frequencia_dims.items() if c >= 3}
 
-    if pagina_moodboard is not None:
-        candidatas = [(pagina_moodboard, im) for im in pagina_moodboard.get_images(full=True)]
-        pagina_usada = "Moodboard"
-    else:
+    paginas_ambiente = []
+    for pagina in doc:
+        blocos = pagina.get_text("blocks")
+        textos = [b[4].strip() for b in blocos if b[4].strip()]
+        if not any(_normalizar_texto(t) == "conceito psicoestetico" for t in textos):
+            continue
+        # a capa também tem o texto "Conceito Psicoestético" (é o título do
+        # documento) — só as páginas de conteúdo têm o rodapé com "|"
+        # ("Conceito Psicoestético | Criativa ... | ..."); usa isso para
+        # nunca confundir a capa com uma página de ambiente.
+        if not any("|" in t for t in textos):
+            continue
+        candidatos_titulo = [t for t in textos
+                             if _normalizar_texto(t) != "conceito psicoestetico" and "|" not in t and len(t) < 40]
+        if not candidatos_titulo:
+            continue
+        titulo = min(candidatos_titulo, key=len)
+        if _normalizar_texto(titulo) == "moodboard":
+            continue
+        imagem_b64 = _imagem_pagina_para_base64(doc, pagina, dims_recorrentes)
+        if imagem_b64:
+            paginas_ambiente.append({"titulo": titulo, "imagem_base64": imagem_b64})
+
+    if paginas_ambiente:
+        return {"paginas": paginas_ambiente}
+
+    # PDF sem a estrutura "Conceito Psicoestético" (ex: template antigo
+    # "Imagem Guia") — usa a maior imagem de todo o documento, sem título,
+    # só como preview; não há como associar a ambientes com confiança.
+    candidatas = [(p, im) for p in doc for im in p.get_images(full=True) if (im[2], im[3]) not in dims_recorrentes]
+    if not candidatas:
         candidatas = [(p, im) for p in doc for im in p.get_images(full=True)]
-        pagina_usada = ("sem página \"Moodboard\" identificada no PDF — usei a maior "
-                        "imagem de todo o documento")
-
     if not candidatas:
         return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
-
-    _, maior = max(candidatas, key=lambda pi: pi[1][2] * pi[1][3])
-    xref = maior[0]
-    info = doc.extract_image(xref)
-
-    imagem = Image.open(io.BytesIO(info["image"])).convert("RGB")
-    if max(imagem.size) > _TAMANHO_MAX_IMAGEM_PX:
-        imagem.thumbnail((_TAMANHO_MAX_IMAGEM_PX, _TAMANHO_MAX_IMAGEM_PX))
-    buffer = io.BytesIO()
-    imagem.save(buffer, format="JPEG", quality=85)
-    b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-
-    return {"imagem_base64": f"data:image/jpeg;base64,{b64}", "pagina_usada": pagina_usada}
+    pagina_maior, _ = max(candidatas, key=lambda pi: pi[1][2] * pi[1][3])
+    imagem_b64 = _imagem_pagina_para_base64(doc, pagina_maior, dims_recorrentes)
+    if not imagem_b64:
+        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
+    return {"paginas": [{"titulo": None, "imagem_base64": imagem_b64}]}
 
 
 def _validar_fases_estado(fases_estado: dict) -> str:
@@ -210,12 +263,19 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     de listar_pdfs_anexados_por_data (nunca um download_url obtido de
     outro lado, ex: de um preview_url ou de um link dentro do HTML de um
     comentário — esses podem apontar a um domínio/token diferente e dar
-    404). Passa só o url — a extração e a codificação da imagem do
-    moodboard são feitas aqui dentro, em código; nunca tentes tu mesma
-    extrair/descrever a imagem ou copiar bytes de imagem para este ou
-    para outro argumento (bug real, 2026-08-06: copiar um base64 de
-    algumas centenas de KB de uma chamada para a outra ficou truncado
-    sem erro visível, e a imagem apareceu em branco no portal).
+    404). Passa só o url — a extração e a codificação das imagens são
+    feitas aqui dentro, em código; nunca tentes tu mesma extrair/descrever
+    imagens ou copiar bytes de imagem para este ou para outro argumento
+    (bug real, 2026-08-06: copiar um base64 de algumas centenas de KB de
+    uma chamada para a outra ficou truncado sem erro visível, e a imagem
+    apareceu em branco no portal). A imagem mostrada na fase "Conceito" é
+    SEMPRE a primeira imagem de ambiente do PDF (nunca o moodboard, que é
+    a colagem de materiais/texturas, nem a página de estilo) — bug real,
+    2026-08-06: um teste mostrou o moodboard na fase "Conceito" quando
+    devia mostrar a primeira imagem de espaço (ex: a Sala). As restantes
+    imagens de ambiente do mesmo PDF são associadas automaticamente a
+    cada item de `ambientes` pelo nome — nunca precisas de indicar tu
+    mesma qual imagem pertence a qual ambiente.
     `conceito_materiais` e `conceito_leitura` são ambos opcionais (deixa
     a None) — só os preenchas se existir texto literal e real no PDF ou
     num comentário da designer (ex: uma linha curta "Natural | Eclético |
@@ -285,11 +345,23 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          "\"conceito\" como \"prevista\" em vez disso.")}
 
     conceito_imagem = None
+    imagens_por_ambiente = {}
     if conceito_pdf_download_url is not None:
-        resultado_imagem = _extrair_imagem_conceito_pdf(conceito_pdf_download_url)
-        if "erro" in resultado_imagem:
-            return {"erro": f"não consegui extrair a imagem do conceito: {resultado_imagem['erro']}"}
-        conceito_imagem = resultado_imagem["imagem_base64"]
+        resultado_imagens = _extrair_imagens_conceito_pdf(conceito_pdf_download_url)
+        if "erro" in resultado_imagens:
+            return {"erro": f"não consegui extrair a imagem do conceito: {resultado_imagens['erro']}"}
+        paginas = resultado_imagens["paginas"]
+        conceito_imagem = paginas[0]["imagem_base64"]
+        for pagina in paginas:
+            if pagina["titulo"]:
+                imagens_por_ambiente[_normalizar_texto(pagina["titulo"])] = pagina["imagem_base64"]
+
+    def _imagem_ambiente(nome: str) -> str:
+        nome_norm = _normalizar_texto(nome)
+        for titulo_norm, imagem in imagens_por_ambiente.items():
+            if titulo_norm in nome_norm or nome_norm in titulo_norm:
+                return imagem
+        return None
 
     ref = f"IG-{card_id}"
     fases_json = [{
@@ -310,7 +382,8 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         ]},
         "conceito": {"imagem": conceito_imagem, "leitura": conceito_leitura, "materiais": conceito_materiais},
         "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento},
-        "ambientes": [{"nome": a["nome"], "imagem": a.get("imagem"), "nota": a["nota"]} for a in ambientes],
+        "ambientes": [{"nome": a["nome"], "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem"),
+                      "nota": a["nota"]} for a in ambientes],
         "valorProduto": valor_produto,
         "fases": fases_json,
         "acoes": acoes_json,
@@ -400,7 +473,7 @@ TOOLS_PORTAL_PROJETO = [
                         "properties": {
                             "nome": {"type": "string"},
                             "nota": {"type": "string"},
-                            "imagem": {"type": "string", "description": "url da imagem deste ambiente, se houver anexada — opcional"}
+                            "imagem": {"type": "string", "description": "normalmente NÃO precisas de preencher isto — a função associa automaticamente a imagem certa do PDF do conceito a cada ambiente pelo nome. Só usa este campo numa exceção (ex: uma imagem à parte, sem ser desse PDF) — nunca inventada"}
                         },
                         "required": ["nome", "nota"]
                     }
