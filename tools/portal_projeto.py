@@ -95,19 +95,19 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     é sempre derivada dele (IG-{card_id}), nunca escrita à mão, para nunca
     haver duas referências diferentes para o mesmo projeto.
 
-    ANTES de decidires qualquer valor monetário: as Notas do card (a
-    descrição da tarefa) costumam ter um link direto para a fonte
-    verdadeiramente atual de Honorários/Orçamento (normalmente uma Google
-    Sheet/Doc, não um PDF anexado num comentário) — bug real, 2026-08-05:
-    usar um PDF de uma proposta antiga anexado num comentário em vez do
-    link nas Notas deu um valor de honorários errado. NÃO TENS nenhuma
-    ferramenta para abrir Google Sheets/Docs — se as Notas tiverem um link
-    desses, NUNCA o substituas silenciosamente por outro documento que
-    consigas ler (ex: um PDF de uma versão anterior); chama esta função
-    mesmo assim com o que tiveres a certeza absoluta, deixa os valores em
-    causa a zero/vazios, e diz explicitamente no teu comentário de resposta
-    que precisas que um humano confirme esse valor a partir desse link,
-    porque não consegues abri-lo.
+    ANTES de decidires qualquer valor monetário: identifica TODOS os PDFs
+    anexados no card (na descrição e em qualquer comentário) relacionados
+    com honorários/orçamento, ordena-os por data, e usa sempre o MAIS
+    RECENTE — nunca uma versão anterior, mesmo que a encontres primeiro ou
+    que pareça mais fácil de ler (ex: uma proposta inicial fica
+    desatualizada assim que sai uma fatura final mais recente). Bug real,
+    2026-08-05: usar um PDF de uma proposta antiga deu um valor de
+    honorários errado, quando havia uma versão mais recente anexada
+    depois. As Notas do card podem também ter um link para uma Google
+    Sheet/Doc (não tens ferramenta para abrir isso) — não é um problema
+    desde que exista um PDF recente com a mesma informação; só precisas de
+    sinalizar incerteza ao humano se não encontrares NENHUM PDF com o
+    valor final, só esse link.
 
     Todos os valores monetários mostrados nesta página são o que o CLIENTE
     paga — têm de incluir IVA sempre. `honorarios_total_com_iva` e
@@ -200,16 +200,18 @@ TOOLS_PORTAL_PROJETO = [
             "pedirem explicitamente o link/portal para um projeto "
             "concreto, e só depois de teres lido a descrição, os "
             "comentários e os anexos desse card — nunca com dados "
-            "inventados. IMPORTANTE: as Notas do card costumam ter um "
-            "link direto (normalmente Google Sheets/Docs) para a fonte "
-            "verdadeiramente atual dos Honorários/Orçamento — não tens "
-            "nenhuma ferramenta para abrir esses links; NUNCA os "
-            "substituas silenciosamente por um PDF anexado num "
-            "comentário (pode ser uma versão antiga) — se não conseguires "
-            "confirmar um valor na fonte certa, chama a função mesmo assim "
-            "com o resto, deixa esse valor a zero, e diz claramente no teu "
-            "comentário de resposta que precisas que um humano confirme "
-            "esse valor a partir desse link. O estado de cada fase só pode "
+            "inventados. IMPORTANTE: identifica TODOS os PDFs anexados "
+            "no card (descrição e comentários) relacionados com "
+            "honorários/orçamento, ordena-os por data, e usa sempre o "
+            "MAIS RECENTE — nunca uma versão anterior, mesmo que a "
+            "encontres primeiro (uma proposta inicial fica desatualizada "
+            "assim que sai uma fatura/versão final mais recente). As "
+            "Notas do card podem ter também um link para uma Google "
+            "Sheet/Doc que não consegues abrir — não é um problema "
+            "desde que exista um PDF recente com a mesma informação; só "
+            "precisas de dizer no teu comentário de resposta que precisas "
+            "de confirmação humana se não encontrares NENHUM PDF com o "
+            "valor final. O estado de cada fase só pode vir de um "
             "vir de um comentário literal \"VALIDADO: <Fase>\" nesse card "
             "(ex: \"VALIDADO: Conceito\") — nunca de uma leitura geral/"
             "informal da conversa; sem essa marca, a fase fica \"aguarda\" "
@@ -268,10 +270,10 @@ TOOLS_PORTAL_PROJETO = [
                     "type": "object",
                     "description": "estado de cada uma das 4 fases fixas — chaves obrigatórias: honorarios, conceito, projeto, orcamento",
                     "properties": {
-                        "honorarios": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string"}}, "required": ["estado"]},
-                        "conceito": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string"}}, "required": ["estado"]},
-                        "projeto": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string"}}, "required": ["estado"]},
-                        "orcamento": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string"}}, "required": ["estado"]}
+                        "honorarios": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string", "description": "por extenso em português, ex: \"18 de junho de 2026\" — nunca em formato ISO (\"2026-06-18\")"}}, "required": ["estado"]},
+                        "conceito": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string", "description": "por extenso em português, ex: \"18 de junho de 2026\" — nunca em formato ISO (\"2026-06-18\")"}}, "required": ["estado"]},
+                        "projeto": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string", "description": "por extenso em português, ex: \"18 de junho de 2026\" — nunca em formato ISO (\"2026-06-18\")"}}, "required": ["estado"]},
+                        "orcamento": {"type": "object", "properties": {"estado": {"type": "string", "enum": ["validada", "aguarda", "prevista"]}, "data": {"type": "string", "description": "por extenso em português, ex: \"18 de junho de 2026\" — nunca em formato ISO (\"2026-06-18\")"}}, "required": ["estado"]}
                     },
                     "required": ["honorarios", "conceito", "projeto", "orcamento"]
                 }
