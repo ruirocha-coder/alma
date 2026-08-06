@@ -84,7 +84,8 @@ def _mailto(assunto: str, ref: str) -> str:
 def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: str,
                          honorarios_total: float, honorarios_total_com_iva: bool, honorarios_linhas: list,
                          conceito_leitura: str, conceito_materiais: str,
-                         valor_produto: float, valor_produto_com_iva: bool, ambientes: list, fases_estado: dict,
+                         ambientes: list, fases_estado: dict,
+                         valor_produto: float = None, valor_produto_com_iva: bool = False,
                          conceito_imagem: str = None, documento_apresentacao: str = None,
                          documento_orcamento: str = None) -> dict:
     """Gera o portal de acompanhamento de um projeto Interior Guider (página
@@ -120,9 +121,19 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     com IVA tu mesma (23% em Portugal continental, mas nunca faças essa
     conta aqui): se só encontraste o valor sem IVA, ou não tens a certeza,
     passa False e falta o valor com IVA no teu comentário de resposta em
-    vez de arriscar. A função recusa-se a gerar o portal se algum destes
-    dois campos vier False, precisamente para nunca publicar um valor
-    ambíguo ou incorreto ao cliente.
+    vez de arriscar. A função recusa-se a gerar o portal se
+    `honorarios_total_com_iva` vier False, ou se `valor_produto_com_iva`
+    vier False quando `valor_produto` não é nulo — precisamente para
+    nunca publicar um valor ambíguo ou incorreto ao cliente.
+
+    `valor_produto` é opcional (deixa a None) quando ainda não existe
+    nenhum orçamento de produto para este projeto (ex: fase inicial,
+    ainda só o conceito em curso) — nunca passes 0 como substituto de
+    "ainda não há orçamento", 0€ mostrado ao cliente parece uma
+    afirmação real de que o produto não custa nada. Só podes deixar
+    `valor_produto` a None se a fase "orcamento" em `fases_estado` for
+    "prevista" (ainda não é a próxima em aberto) — se for "aguarda" ou
+    "validada", o cliente vai ver essa secção e precisa de um valor real.
 
     `fases_estado` tem de ter exatamente as chaves "honorarios", "conceito",
     "projeto", "orcamento", cada uma com {"estado": "validada"|"aguarda"|
@@ -151,10 +162,14 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         return {"erro": ("honorarios_total_com_iva tem de ser True — o valor mostrado ao cliente tem de incluir "
                          "IVA. Confirma o valor final (com IVA) na fonte certa (ver Notas do card) antes de "
                          "chamares esta função outra vez.")}
-    if not valor_produto_com_iva:
-        return {"erro": ("valor_produto_com_iva tem de ser True — o valor mostrado ao cliente tem de incluir "
-                         "IVA. Confirma o valor final (com IVA) na fonte certa (ver Notas do card) antes de "
-                         "chamares esta função outra vez.")}
+    if valor_produto is not None and not valor_produto_com_iva:
+        return {"erro": ("valor_produto_com_iva tem de ser True quando valor_produto não é nulo — o valor "
+                         "mostrado ao cliente tem de incluir IVA. Confirma o valor final (com IVA) na fonte "
+                         "certa (ver Notas do card) antes de chamares esta função outra vez.")}
+    if valor_produto is None and fases_estado["orcamento"]["estado"] != "prevista":
+        return {"erro": ("valor_produto é obrigatório quando a fase \"orcamento\" não é \"prevista\" — o "
+                         "cliente vai ver essa secção e precisa de um valor real, nunca 0 como substituto de "
+                         "\"ainda não há orçamento\".")}
 
     ref = f"IG-{card_id}"
     fases_json = [{
@@ -256,7 +271,7 @@ TOOLS_PORTAL_PROJETO = [
                 "conceito_leitura": {"type": "string", "description": "leitura/descrição do conceito (materiais, estilo) tal como já foi comunicado ao cliente"},
                 "conceito_materiais": {"type": "string", "description": "lista curta de materiais/paleta, ex: \"Carvalho maciço · Linho cru\""},
                 "conceito_imagem": {"type": "string", "description": "url de uma imagem guia do conceito, se houver anexada no card — opcional"},
-                "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado"},
+                "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado. Omite (ou não passes) se ainda não existir nenhum orçamento de produto para este projeto — nunca passes 0 como substituto disso; só podes omitir se a fase \"orcamento\" em fases_estado for \"prevista\""},
                 "valor_produto_com_iva": {"type": "boolean", "description": "True só se `valor_produto` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
                 "ambientes": {
                     "type": "array",
@@ -284,8 +299,8 @@ TOOLS_PORTAL_PROJETO = [
                     "required": ["honorarios", "conceito", "projeto", "orcamento"]
                 }
             },
-            "required": ["card_id", "cliente", "validade", "honorarios_total", "honorarios_linhas",
-                        "conceito_leitura", "conceito_materiais", "valor_produto", "ambientes", "fases_estado"]
+            "required": ["card_id", "cliente", "validade", "honorarios_total", "honorarios_total_com_iva",
+                        "honorarios_linhas", "conceito_leitura", "conceito_materiais", "ambientes", "fases_estado"]
         }
     }
 ]
@@ -446,8 +461,9 @@ const eur = v => v.toLocaleString('pt-PT') + ' €';
 const $ = id => document.getElementById(id);
 
 const totalProduto = projeto.valorProduto;
-const credito      = Math.round(totalProduto/10);
-const totalAPagar  = totalProduto - credito;
+const temProduto   = totalProduto != null;
+const credito      = temProduto ? Math.round(totalProduto/10) : 0;
+const totalAPagar  = temProduto ? totalProduto - credito : 0;
 const p50 = Math.round(totalAPagar*.5),
       p40 = Math.round(totalAPagar*.4),
       p10 = totalAPagar - p50 - p40;
@@ -501,7 +517,11 @@ const conteudo = {
         <span>Orçamento detalhado</span><span>PDF</span></a>
     </div>`,
 
-  orcamento: () => `
+  orcamento: () => !temProduto ? `
+    <div class="credito-bloco">
+      <h3>O orçamento de produto ainda não está disponível.</h3>
+      <p>Esta secção fica disponível quando o orçamento do conjunto de produto estiver definido. Entretanto, o crédito de 1€ por cada 10€ do conjunto mantém-se garantido na compra de 100% da especificação com o Interior Guider.</p>
+    </div>` : `
     <div class="credito-bloco">
       <h3>Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
       <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
