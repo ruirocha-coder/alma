@@ -26,7 +26,7 @@ import fitz
 from PIL import Image
 
 import db
-from tools import basecamp
+from tools import basecamp, tempo
 
 _TAMANHO_MAX_IMAGEM_PX = 1600
 
@@ -437,6 +437,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
 
     projeto = {
         "ref": ref,
+        "cardId": card_id,
         "cliente": cliente,
         "sub": _SUB_PADRAO,
         "contacto": {"rotulo": _CONTACTO_ROTULO, "href": _mailto("Projeto", ref)},
@@ -514,6 +515,71 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
                                campos.get("documento_orcamento"), campos["conceito"].get("documento"))
+
+
+def validar_fase_portal(card_id: int, fase: str) -> dict:
+    """Chamada pelo endpoint público POST /portal/{card_id}/validar-fase
+    (main.py), a partir do botão que a cliente vê no portal — nunca pela
+    Alma/LLM. Marca a fase como validada com a data de hoje, avança a fase
+    seguinte para "aguarda" só se esta já tiver o conteúdo obrigatório para
+    ser mostrada (as mesmas regras de _validar_campos_edicao — nunca
+    duplicadas à parte), grava mantendo o mesmo link, e avisa a equipa com
+    um comentário no card do Basecamp (um erro a postar o comentário nunca
+    impede a validação de ficar gravada — a cliente não tem culpa disso)."""
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"erro": "portal não encontrado"}
+
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    fases_estado = {f["id"]: ({"estado": f["estado"], "data": f["data"]} if f.get("data")
+                              else {"estado": f["estado"]}) for f in projeto["fases"]}
+
+    if fase not in fases_estado:
+        return {"erro": f"fase desconhecida: {fase!r}"}
+    if fases_estado[fase]["estado"] != "aguarda":
+        return {"erro": "esta fase já não está a aguardar validação — atualiza a página."}
+
+    titulo_fase = next(f["titulo"] for f in _FASES_DEF if f["id"] == fase)
+    fases_estado[fase] = {"estado": "validada", "data": tempo.data_extenso_hoje()}
+
+    ids_fases = [f["id"] for f in _FASES_DEF]
+    indice_seguinte = ids_fases.index(fase) + 1
+    seguinte = ids_fases[indice_seguinte] if indice_seguinte < len(ids_fases) else None
+
+    honorarios_linhas = [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
+                         for l in projeto["honorarios"]["linhas"]]
+    valor_produto = projeto.get("valorProduto")
+    conceito_imagem = projeto["conceito"].get("imagem")
+
+    aviso = None
+    if seguinte and fases_estado[seguinte]["estado"] == "prevista":
+        tentativa = dict(fases_estado)
+        tentativa[seguinte] = {"estado": "aguarda"}
+        # com_iva a True: são valores já publicados, confirmados quando o
+        # portal foi gerado — esta chamada só verifica se a fase seguinte
+        # já tem o conteúdo (imagem/valor) obrigatório para abrir agora.
+        if not _validar_campos_edicao(True, valor_produto, True, tentativa, conceito_imagem):
+            fases_estado = tentativa
+        else:
+            aviso = (f"a fase \"{titulo_fase}\" foi validada, mas a fase seguinte ainda não abriu — "
+                     "falta completar o conteúdo dela na página de edição do portal.")
+
+    resultado = _construir_e_gravar(
+        "cliente (via portal)", card_id, projeto["cliente"], projeto["validade"],
+        projeto["honorarios"]["total"], honorarios_linhas, projeto["ambientes"], fases_estado,
+        valor_produto, conceito_imagem, projeto["conceito"].get("materiais"), projeto["conceito"].get("leitura"),
+        projeto["documentos"].get("apresentacao"), projeto["documentos"].get("orcamento"),
+        projeto["documentos"].get("conceito"))
+
+    try:
+        basecamp.comentar(card_id, f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
+                                    f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
+    except Exception as exc:
+        aviso = (aviso + " " if aviso else "") + f"(não consegui postar o comentário no Basecamp: {exc})"
+
+    if aviso:
+        resultado["aviso"] = aviso
+    return resultado
 
 TOOLS_PORTAL_PROJETO = [
     {
@@ -632,7 +698,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <style>
   :root{
     --paper:#FBFAF8; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7;
-    --clay:#B96D4E;
+    --clay:#B96D4E; --err:#B94E4E;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -708,6 +774,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nota{margin-top:22px;font-size:13px;color:var(--stone);max-width:56ch}
   .nota b{font-weight:500;color:var(--ink)}
 
+  .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
+  .exemplo-selo{display:inline-block;font-size:12px;color:var(--clay);font-weight:500;letter-spacing:.01em}
+
   .pag-tit{margin-top:36px;font-size:13px;font-weight:500;color:var(--stone);display:flex;align-items:center;gap:14px}
   .pag-tit::after{content:"";flex:1;height:1px;background:var(--line)}
   .pag{margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line)}
@@ -722,9 +791,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .validar{margin-top:34px;padding-top:26px;border-top:1px solid var(--line)}
   .validar .conv{font-size:13px;color:var(--stone);max-width:48ch}
   .btn{display:inline-block;margin-top:14px;background:var(--ink);border:1px solid var(--ink);color:var(--paper);
-       text-decoration:none;font-size:15px;font-weight:400;padding:15px 32px;transition:.15s}
+       text-decoration:none;font-size:15px;font-weight:400;padding:15px 32px;transition:.15s;
+       font-family:inherit;cursor:pointer}
   .btn:hover{background:transparent;color:var(--ink)}
   .btn:focus-visible{outline:2px solid var(--clay);outline-offset:3px}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn:disabled:hover{background:var(--ink);color:var(--paper)}
+  .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
   .validado{margin-top:30px;padding-top:22px;border-top:1px solid var(--line);
             font-size:13px;color:var(--clay);display:flex;align-items:center;gap:9px}
   .validado::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--clay)}
@@ -780,6 +853,17 @@ const totalAPagar  = temProduto ? totalProduto - credito : 0;
 const p50 = Math.round(totalAPagar*.5),
       p40 = Math.round(totalAPagar*.4),
       p10 = totalAPagar - p50 - p40;
+
+// exemplo ilustrativo mostrado na fase de orçamento antes de existir um
+// valor real (ver conteudo.orcamento) — 10.000€ fixo, só para explicar o
+// mecanismo (crédito + faseamento do pagamento) à cliente; nunca é um
+// valor real, por isso é sempre rotulado como exemplo.
+const DEMO_VALOR = 10000;
+const demoCredito = Math.round(DEMO_VALOR/10);
+const demoAPagar  = DEMO_VALOR - demoCredito;
+const demoP50 = Math.round(demoAPagar*.5),
+      demoP40 = Math.round(demoAPagar*.4),
+      demoP10 = demoAPagar - demoP50 - demoP40;
 
 $('ref').textContent = projeto.ref;
 $('cliente').textContent = projeto.cliente;
@@ -838,6 +922,32 @@ const conteudo = {
     <div class="credito-bloco">
       <h3>O orçamento de produto ainda não está disponível.</h3>
       <p>Esta secção fica disponível quando o orçamento do conjunto de produto estiver definido. Entretanto, o crédito de 1€ por cada 10€ do conjunto mantém-se garantido na compra de 100% da especificação com o Interior Guider.</p>
+    </div>
+    <div class="exemplo">
+      <span class="exemplo-selo">Exemplo ilustrativo — com ${eur(DEMO_VALOR)}, um valor fictício só para mostrar como esta fase funciona</span>
+      <div class="linhas" style="margin-top:16px">
+        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(DEMO_VALOR)}</span></div>
+        <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(demoCredito)}</span></div>
+        <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(demoAPagar)}</span></div>
+      </div>
+      <div class="pag-tit">Como se paga</div>
+      <div class="pag">
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">50%</span><span class="val">${eur(demoP50)}</span></div>
+          <div class="pf-q">Na adjudicação</div>
+          <p>Confirma a decisão e inicia a produção das encomendas.</p>
+        </div>
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">40%</span><span class="val">${eur(demoP40)}</span></div>
+          <div class="pf-q">Encomenda concluída</div>
+          <p>Quando o material está pronto a entregar.</p>
+        </div>
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">10%</span><span class="val">${eur(demoP10)}</span></div>
+          <div class="pf-q">Entrega e montagem</div>
+          <p>Com a instalação concluída em sua casa.</p>
+        </div>
+      </div>
     </div>` : `
     <div class="credito-bloco">
       <h3>Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
@@ -886,7 +996,8 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
     bloco  = conteudo[f.id]() + `
       <div class="validar">
         <p class="conv">${f.obs}</p>
-        <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
+        <button type="button" class="btn" onclick="validarFase('${f.id}', this)">${f.acao}</button>
+        <p class="validar-msg" id="msg-${f.id}"></p>
       </div>`;
   } else {
     const anterior = projeto.fases[i-1];
@@ -900,6 +1011,26 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
     <div class="corpo">${bloco}</div>
   </section>`;
 }).join('');
+
+async function validarFase(faseId, botao){
+  const textoOriginal = botao.textContent;
+  const msg = document.getElementById('msg-' + faseId);
+  botao.disabled = true;
+  botao.textContent = 'A validar…';
+  if (msg) msg.textContent = '';
+  try {
+    const r = await fetch(`/portal/${projeto.cardId}/validar-fase`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fase: faseId})
+    });
+    const corpo = await r.json();
+    if (!r.ok) throw new Error(corpo.erro || 'não foi possível validar');
+    location.href = location.pathname + '?v=' + Date.now();
+  } catch (e) {
+    botao.disabled = false;
+    botao.textContent = textoOriginal;
+    if (msg) msg.textContent = e.message || 'Falha de rede — tenta outra vez.';
+  }
+}
 </script>
 </body>
 </html>

@@ -667,6 +667,22 @@ def obter_documento_gerado(id: int) -> dict:
                     "card_id": linha["card_id"], "conteudo_markdown": linha["conteudo_markdown"]}
                     if linha else None)
 
+def obter_documento_gerado_por_card_id(card_id: int) -> dict:
+    """Como obter_documento_gerado, mas pelo card_id do Basecamp — usado
+    para a página do portal de projeto encontrar o seu próprio registo a
+    partir do card, sem precisar de conhecer o id do documento (ver
+    tools/portal_projeto.validar_fase_portal, chamado pelo botão de
+    validação de cada fase, cujo link só conhece o card_id)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, titulo, pdf, formato, card_id, conteudo_markdown FROM documentos_gerados "
+                       "WHERE card_id = %s", (card_id,))
+            linha = cur.fetchone()
+            return ({"id": linha["id"], "titulo": linha["titulo"], "pdf": bytes(linha["pdf"]),
+                    "formato": linha["formato"], "card_id": linha["card_id"],
+                    "conteudo_markdown": linha["conteudo_markdown"]}
+                    if linha else None)
+
 def documentos_gerados_recentes(utilizador: str, limite: int = 5) -> list:
     """Últimos documentos que a Alma gerou para esta pessoa (ver gerar_pdf e
     gerar_excel) — usado para ela saber, sem perguntar, do que já falámos/

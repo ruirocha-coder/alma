@@ -432,6 +432,20 @@ def portal_projeto_editar_gravar(id: int, campos: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/portal/{card_id}/validar-fase")
+def portal_projeto_validar_fase(card_id: int, corpo: dict = Body(...)):
+    """Chamada pelo botão de validação no portal público (ver
+    tools/portal_projeto._TEMPLATE, função validarFase) — marca a fase
+    como validada e avisa a equipa no Basecamp. Ver
+    tools/portal_projeto.validar_fase_portal."""
+    fase = corpo.get("fase")
+    if not fase:
+        return JSONResponse({"erro": "falta indicar a fase"}, status_code=400)
+    resultado = portal_projeto.validar_fase_portal(card_id, fase)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
