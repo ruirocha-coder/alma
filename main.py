@@ -319,7 +319,12 @@ async def _processar_ficheiro_anexado(ficheiro: UploadFile) -> str:
     if texto is None:
         return (f'Ficheiro anexado ("{ficheiro.filename}"): não consigo ler ficheiros do tipo '
                 f'{ficheiro.content_type or "(desconhecido)"}.')
-    return f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:8000]}'
+    # 8000 carateres cortava a meio ficheiros maiores (ex: uma folha de
+    # cálculo com várias folhas/meses) sem nenhum aviso — 150000 (mesmo
+    # limite de tools/documentos_empresa.py) cobre um ficheiro real de
+    # ponta a ponta; para .xlsx, extrair_texto já para em limites de folha
+    # completa e avisa se algo ficou de fora, nunca corta a meio.
+    return f'Ficheiro anexado ("{ficheiro.filename}"):\n\n{texto[:150000]}'
 
 _EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
