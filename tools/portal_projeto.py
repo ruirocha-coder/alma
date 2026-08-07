@@ -79,6 +79,19 @@ def _imagem_pagina_para_base64(doc, pagina, imagens_permitidas: set) -> str:
     return f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
 
 
+def _baixar_pdf_base64(download_url: str) -> dict:
+    """Descarrega um PDF do Basecamp e devolve-o como data URI — para
+    documentos do portal (apresentação, orçamento detalhado) que a
+    cliente tem de poder descarregar sem acesso ao Basecamp. Nunca
+    guardes/uses o download_url original diretamente num link do portal:
+    exige autenticação que a cliente não tem."""
+    try:
+        bruto = basecamp._get_bytes(download_url)
+    except Exception as exc:
+        return {"erro": f"não consegui descarregar o PDF em {download_url}: {exc}"}
+    return {"pdf_base64": f"data:application/pdf;base64,{base64.b64encode(bruto).decode('ascii')}"}
+
+
 def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
     """Extrai, de um PDF "Conceito Psicoestético [Nome cliente]" anexado a
     um card do Basecamp, uma imagem por cada página de ambiente (ex:
@@ -215,8 +228,8 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          ambientes: list, fases_estado: dict,
                          valor_produto: float = None, valor_produto_com_iva: bool = False,
                          conceito_pdf_download_url: str = None, conceito_materiais: str = None,
-                         conceito_leitura: str = None, documento_apresentacao: str = None,
-                         documento_orcamento: str = None) -> dict:
+                         conceito_leitura: str = None, documento_apresentacao_download_url: str = None,
+                         documento_orcamento_download_url: str = None) -> dict:
     """Gera o portal de acompanhamento de um projeto Interior Guider (página
     HTML autónoma, o link que o cliente abre) a partir dos dados já lidos
     do card do Basecamp, e devolve um url para partilhares no comentário de
@@ -327,11 +340,19 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     reais dos honorários, tal como aparecem no documento/proposta. `valor_produto`
     é o TOTAL do orçamento de produto (sem honorários) — só o total, nunca o
     detalhe peça a peça (esse fica só no PDF do orçamento, ver
-    `documento_orcamento`). `ambientes`: lista de {"nome","nota","imagem"
-    (url, opcional)}. Todos os valores monetários e textos têm de vir
+    `documento_orcamento_download_url`). `ambientes`: lista de {"nome","nota",
+    "imagem" (url, opcional)}. Todos os valores monetários e textos têm de vir
     explicitamente do card/documentos — nunca inventados nem calculados
     aqui (a aritmética de crédito/pagamentos é feita em JS, no browser do
-    cliente)."""
+    cliente).
+
+    `documento_apresentacao_download_url` e `documento_orcamento_download_url`
+    são os "download_url" desses PDFs, tal como vêm de
+    listar_pdfs_anexados_por_data (nunca um download_url obtido de outro
+    lado — ver a mesma nota em `conceito_pdf_download_url`). São
+    descarregados e embutidos aqui dentro, tal como o PDF do conceito —
+    a cliente não tem acesso ao Basecamp, por isso um download_url
+    original nunca lhe serviria diretamente."""
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
@@ -377,6 +398,20 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
 
     ambientes_com_imagem = [{"nome": a["nome"], "nota": a["nota"],
                             "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem")} for a in ambientes]
+
+    documento_apresentacao = None
+    if documento_apresentacao_download_url is not None:
+        resultado = _baixar_pdf_base64(documento_apresentacao_download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de apresentação: {resultado['erro']}"}
+        documento_apresentacao = resultado["pdf_base64"]
+
+    documento_orcamento = None
+    if documento_orcamento_download_url is not None:
+        resultado = _baixar_pdf_base64(documento_orcamento_download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de orçamento: {resultado['erro']}"}
+        documento_orcamento = resultado["pdf_base64"]
 
     return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
@@ -562,8 +597,8 @@ TOOLS_PORTAL_PROJETO = [
                         "required": ["nome", "nota"]
                     }
                 },
-                "documento_apresentacao": {"type": "string", "description": "url do PDF de apresentação do projeto, se houver anexado no card — opcional"},
-                "documento_orcamento": {"type": "string", "description": "url do PDF do orçamento detalhado, se houver anexado no card — opcional"},
+                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF do orçamento detalhado, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "fases_estado": {
                     "type": "object",
                     "description": "estado de cada uma das 4 fases fixas — chaves obrigatórias: honorarios, conceito, projeto, orcamento",
@@ -975,8 +1010,16 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
 
 <section>
   <h2>Documentos</h2>
-  <div class="campo"><label>Apresentação do projeto (url do PDF)</label><input type="text" id="f-doc-apresentacao"></div>
-  <div class="campo"><label>Orçamento detalhado (url do PDF)</label><input type="text" id="f-doc-orcamento"></div>
+  <div class="campo">
+    <label>Apresentação do projeto (PDF)</label>
+    <div id="preview-doc-apresentacao"></div>
+    <input type="file" accept="application/pdf" id="f-doc-apresentacao-ficheiro">
+  </div>
+  <div class="campo">
+    <label>Orçamento detalhado (PDF)</label>
+    <div id="preview-doc-orcamento"></div>
+    <input type="file" accept="application/pdf" id="f-doc-orcamento-ficheiro">
+  </div>
 </section>
 
 <section>
@@ -1013,8 +1056,6 @@ document.getElementById('f-validade').value = projeto.validade || '';
 document.getElementById('f-honorarios-total').value = projeto.honorarios.total ?? '';
 document.getElementById('f-conceito-leitura').value = projeto.conceito.leitura || '';
 document.getElementById('f-conceito-materiais').value = projeto.conceito.materiais || '';
-document.getElementById('f-doc-apresentacao').value = projeto.documentos.apresentacao || '';
-document.getElementById('f-doc-orcamento').value = projeto.documentos.orcamento || '';
 document.getElementById('f-valor-produto').value = projeto.valorProduto ?? '';
 document.getElementById('f-valor-produto-com-iva').checked = projeto.valorProduto != null;
 
@@ -1035,22 +1076,28 @@ document.getElementById('f-conceito-imagem-ficheiro').addEventListener('change',
   leitor.readAsDataURL(ficheiro);
 });
 
-let conceitoDocumentoAtual = projeto.documentos.conceito || null;
-function _atualizarPreviewDocConceito(nome) {
-  document.getElementById('preview-conceito-doc').textContent =
-    conceitoDocumentoAtual ? `PDF atual: ${nome || 'anexado'}` : '(sem documento)';
+function configurarUploadPdf(idPreview, idFicheiro, valorInicial) {
+  const estado = {valor: valorInicial || null};
+  const preview = document.getElementById(idPreview);
+  function atualizar(nome) {
+    preview.textContent = estado.valor ? `PDF atual: ${nome || 'anexado'}` : '(sem documento)';
+  }
+  atualizar(estado.valor ? 'já anexado' : null);
+  document.getElementById(idFicheiro).addEventListener('change', function(e){
+    const ficheiro = e.target.files[0];
+    if (!ficheiro) return;
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      estado.valor = leitor.result;
+      atualizar(ficheiro.name);
+    };
+    leitor.readAsDataURL(ficheiro);
+  });
+  return estado;
 }
-_atualizarPreviewDocConceito(conceitoDocumentoAtual ? 'já anexado' : null);
-document.getElementById('f-conceito-doc-ficheiro').addEventListener('change', function(e){
-  const ficheiro = e.target.files[0];
-  if (!ficheiro) return;
-  const leitor = new FileReader();
-  leitor.onload = () => {
-    conceitoDocumentoAtual = leitor.result;
-    _atualizarPreviewDocConceito(ficheiro.name);
-  };
-  leitor.readAsDataURL(ficheiro);
-});
+const conceitoDocumento = configurarUploadPdf('preview-conceito-doc', 'f-conceito-doc-ficheiro', projeto.documentos.conceito);
+const docApresentacao = configurarUploadPdf('preview-doc-apresentacao', 'f-doc-apresentacao-ficheiro', projeto.documentos.apresentacao);
+const docOrcamento = configurarUploadPdf('preview-doc-orcamento', 'f-doc-orcamento-ficheiro', projeto.documentos.orcamento);
 
 function addLinhaHonorario(dados) {
   dados = dados || {t:'', d:'', v:''};
@@ -1158,10 +1205,10 @@ function guardar() {
       imagem: conceitoImagemAtual,
       leitura: document.getElementById('f-conceito-leitura').value || null,
       materiais: document.getElementById('f-conceito-materiais').value || null,
-      documento: conceitoDocumentoAtual,
+      documento: conceitoDocumento.valor,
     },
-    documento_apresentacao: document.getElementById('f-doc-apresentacao').value || null,
-    documento_orcamento: document.getElementById('f-doc-orcamento').value || null,
+    documento_apresentacao: docApresentacao.valor,
+    documento_orcamento: docOrcamento.valor,
     ambientes,
     valor_produto: valorProdutoTexto === '' ? null : parseFloat(valorProdutoTexto),
     valor_produto_com_iva: document.getElementById('f-valor-produto-com-iva').checked,
