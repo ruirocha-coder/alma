@@ -1403,9 +1403,13 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
   .contagem{font-size:12.5px;color:var(--stone);white-space:nowrap}
   .vazio{padding:60px 0;text-align:center;color:var(--stone);font-size:14px}
   .grelha{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
-  .tile{border:1px solid var(--line);border-radius:10px;padding:20px;background:#fff;
-       display:flex;flex-direction:column;gap:16px;transition:.15s}
+  .tile{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;
+       display:flex;flex-direction:column;transition:.15s}
   .tile:hover{border-color:var(--clay);box-shadow:0 6px 18px rgba(28,26,23,.06);transform:translateY(-1px)}
+  .tile-img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--line)}
+  .tile-img-vazio{width:100%;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;
+                 background:linear-gradient(135deg,var(--line),var(--paper));color:var(--stone);font-size:11.5px}
+  .tile-corpo{padding:18px 20px 20px;display:flex;flex-direction:column;gap:16px;flex:1}
   .tile-topo .cliente{font-size:16.5px;font-weight:500;color:var(--ink);margin:0 0 3px}
   .tile-topo .ref{font-size:11.5px;color:var(--stone);font-weight:600;letter-spacing:.03em;text-transform:uppercase}
   .passos{display:flex;gap:4px}
@@ -1460,21 +1464,26 @@ function desenhar(filtro){
     <div class="grelha">
       ${visiveis.map(p => `
         <div class="tile">
-          <div class="tile-topo">
-            <p class="cliente">${p.cliente || '(sem nome)'}</p>
-            <p class="ref">${p.ref || ''} · card ${p.card_id}</p>
-          </div>
-          <div class="passos">
-            ${p.fases.map(f => `<span class="passo ${f.estado}"></span>`).join('')}
-          </div>
-          <div class="fases">
-            ${p.fases.map(f => `<span class="fase-chip ${f.estado}">${rotuloFase(f)}</span>`).join('')}
-          </div>
-          <div class="tile-rodape">
-            <span class="tile-data">atualizado a ${formatarData(p.criado_em)}</span>
-            <div class="acoes">
-              <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
-              <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
+          ${p.imagem
+            ? `<img class="tile-img" src="${p.imagem}" alt="Imagem de conceito de ${p.cliente || 'projeto'}">`
+            : `<div class="tile-img-vazio">Sem imagem de conceito</div>`}
+          <div class="tile-corpo">
+            <div class="tile-topo">
+              <p class="cliente">${p.cliente || '(sem nome)'}</p>
+              <p class="ref">${p.ref || ''} · card ${p.card_id}</p>
+            </div>
+            <div class="passos">
+              ${p.fases.map(f => `<span class="passo ${f.estado}"></span>`).join('')}
+            </div>
+            <div class="fases">
+              ${p.fases.map(f => `<span class="fase-chip ${f.estado}">${rotuloFase(f)}</span>`).join('')}
+            </div>
+            <div class="tile-rodape">
+              <span class="tile-data">atualizado a ${formatarData(p.criado_em)}</span>
+              <div class="acoes">
+                <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
+                <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
+              </div>
             </div>
           </div>
         </div>`).join('')}
