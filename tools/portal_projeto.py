@@ -1392,31 +1392,36 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
   :root{--paper:#FBFAF8; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#B96D4E; --ok:#5A7D5A; --err:#B94E4E;}
   *{box-sizing:border-box}
   body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
-      max-width:920px;margin:0 auto;padding:36px 20px 100px}
+      max-width:1240px;margin:0 auto;padding:36px 24px 100px}
   h1{font-size:24px;font-weight:500;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--stone);margin:0 0 28px}
-  .barra{display:flex;gap:12px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--paper);
+  .barra{display:flex;gap:12px;align-items:center;margin-bottom:26px;position:sticky;top:0;background:var(--paper);
         padding:10px 0;border-bottom:1px solid var(--line);z-index:1}
-  .barra input{flex:1;padding:11px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;
+  .barra input{flex:1;max-width:420px;padding:11px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;
               font-family:inherit;font-size:14.5px;color:var(--ink)}
   .barra input:focus{outline:2px solid var(--clay);outline-offset:1px}
   .contagem{font-size:12.5px;color:var(--stone);white-space:nowrap}
   .vazio{padding:60px 0;text-align:center;color:var(--stone);font-size:14px}
-  .linha{border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:10px;
-        display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
-        transition:.12s;text-decoration:none}
-  .linha:hover{border-color:var(--clay)}
-  .info{min-width:0}
-  .cliente{font-size:16px;font-weight:500;color:var(--ink);margin:0 0 3px}
-  .meta{font-size:12px;color:var(--stone)}
-  .meta b{color:var(--stone);font-weight:600}
-  .fases{display:flex;gap:6px;margin-top:9px}
+  .grelha{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
+  .tile{border:1px solid var(--line);border-radius:10px;padding:20px;background:#fff;
+       display:flex;flex-direction:column;gap:16px;transition:.15s}
+  .tile:hover{border-color:var(--clay);box-shadow:0 6px 18px rgba(28,26,23,.06);transform:translateY(-1px)}
+  .tile-topo .cliente{font-size:16.5px;font-weight:500;color:var(--ink);margin:0 0 3px}
+  .tile-topo .ref{font-size:11.5px;color:var(--stone);font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+  .passos{display:flex;gap:4px}
+  .passo{flex:1;height:5px;border-radius:3px;background:var(--line)}
+  .passo.validada{background:var(--ok)}
+  .passo.aguarda{background:var(--clay)}
+  .fases{display:flex;flex-wrap:wrap;gap:6px}
   .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--stone);
             white-space:nowrap}
   .fase-chip.validada{background:#EDF2EA;border-color:#CFDECB;color:var(--ok)}
   .fase-chip.aguarda{background:#FBEFE8;border-color:#E9D3C3;color:var(--clay)}
-  .acoes{display:flex;gap:8px;flex-shrink:0}
-  .acoes a{display:inline-block;padding:9px 16px;border-radius:5px;font-size:13px;text-decoration:none;
+  .tile-rodape{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:auto;
+              padding-top:14px;border-top:1px solid var(--line)}
+  .tile-data{font-size:11px;color:var(--stone)}
+  .acoes{display:flex;gap:6px}
+  .acoes a{display:inline-block;padding:7px 13px;border-radius:5px;font-size:12.5px;text-decoration:none;
           border:1px solid var(--ink);color:var(--ink);transition:.12s}
   .acoes a.editar{background:var(--ink);color:var(--paper)}
   .acoes a:hover{opacity:.75}
@@ -1451,20 +1456,29 @@ function desenhar(filtro){
   document.getElementById('contagem').textContent =
     visiveis.length === portais.length ? `${portais.length} portais` : `${visiveis.length} de ${portais.length}`;
 
-  document.getElementById('lista').innerHTML = visiveis.length ? visiveis.map(p => `
-    <div class="linha">
-      <div class="info">
-        <p class="cliente">${p.cliente || '(sem nome)'}</p>
-        <p class="meta"><b>${p.ref || ''}</b> · card ${p.card_id} · atualizado a ${formatarData(p.criado_em)}</p>
-        <div class="fases">
-          ${p.fases.map(f => `<span class="fase-chip ${f.estado}">${rotuloFase(f)}</span>`).join('')}
-        </div>
-      </div>
-      <div class="acoes">
-        <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
-        <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
-      </div>
-    </div>`).join('') : `<p class="vazio">Nenhum portal encontrado para "${filtro}".</p>`;
+  document.getElementById('lista').innerHTML = !visiveis.length ? `<p class="vazio">Nenhum portal encontrado para "${filtro}".</p>` : `
+    <div class="grelha">
+      ${visiveis.map(p => `
+        <div class="tile">
+          <div class="tile-topo">
+            <p class="cliente">${p.cliente || '(sem nome)'}</p>
+            <p class="ref">${p.ref || ''} · card ${p.card_id}</p>
+          </div>
+          <div class="passos">
+            ${p.fases.map(f => `<span class="passo ${f.estado}"></span>`).join('')}
+          </div>
+          <div class="fases">
+            ${p.fases.map(f => `<span class="fase-chip ${f.estado}">${rotuloFase(f)}</span>`).join('')}
+          </div>
+          <div class="tile-rodape">
+            <span class="tile-data">atualizado a ${formatarData(p.criado_em)}</span>
+            <div class="acoes">
+              <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
+              <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
 document.getElementById('pesquisa').addEventListener('input', e => desenhar(e.target.value));
