@@ -96,7 +96,7 @@ def _texto_aviso(regiao: str, marco: str, inicio_semana_entrega: date,
     fim_semana_entrega = inicio_semana_entrega + timedelta(days=4)
     tarefa = _DESCRICAO_MARCO[marco].format(regiao=regiao)
     linhas = [
-        f"Alma Logística — hoje é o dia, segundo o documento \"GESTÃO DAS AGENDAS\", para {tarefa}, "
+        f"Hoje é o dia, segundo o documento \"GESTÃO DAS AGENDAS\", para {tarefa}, "
         f"da semana de entrega de {inicio_semana_entrega.strftime('%d/%m')} a {fim_semana_entrega.strftime('%d/%m')}.",
         "",
     ]

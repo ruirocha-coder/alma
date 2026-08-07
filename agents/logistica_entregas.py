@@ -266,9 +266,9 @@ def _gerar_texto_fg_h(condicao: str, dados: dict, documentos_texto: str) -> str:
     secao = {"F": "8.1 (previsão de entrega)", "G": "8.2 (confirmação final)",
              "H": "8.3 (follow-up pós-entrega)"}[condicao]
     if not documentos_texto:
-        return (f"Alma Logística: era altura de enviar a comunicação da secção {secao} para a "
-                f"encomenda {dados.get('numero_encomenda') or '[N.º a preencher]'}, mas não consegui "
-                "aceder aos documentos de referência — segue por favor o procedimento manual. "
+        return (f"Era altura de enviar a comunicação da secção {secao} para a encomenda "
+                f"{dados.get('numero_encomenda') or '[N.º a preencher]'}, mas não consegui aceder aos "
+                "documentos de referência — segue por favor o procedimento manual. "
                 "Responsável: @Conceição Costa.")
     missao = f"""Preparas uma proposta de comunicação de logística da Interior Guider / Boa Safra,
 para a Conceição Costa validar e enviar — tu nunca envias nada diretamente.
@@ -295,9 +295,11 @@ Documentos de referência disponíveis (projeto Alma Data e outros documentos
 confirmados pela equipa como atuais):
 {documentos_texto}
 
-Escreve só o comentário final a publicar no Basecamp, sem comentário teu à volta.
-Começa sempre com "Alma Logística —". Termina sempre a indicar o responsável (a
-Conceição Costa, ou o designer responsável no caso do follow-up pós-entrega)."""
+Escreve só o comentário final a publicar no Basecamp, sem comentário teu à volta
+e sem te identificares no texto (o Basecamp já mostra "Alma" como autora do
+comentário — repetir isso no texto é redundante). Termina sempre a indicar o
+responsável (a Conceição Costa, ou o designer responsável no caso do
+follow-up pós-entrega)."""
     resposta = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=800,
         system=missao,

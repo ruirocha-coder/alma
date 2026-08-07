@@ -229,15 +229,14 @@ def gerar_texto_condicao_fixa(condicao: str, dados: dict) -> str:
     data_entrega = _campo(_fmt_data(dados.get("data_entrega_cliente")), "data de entrega ao cliente")
 
     if condicao == "A":
-        return ("Alma Logística: esta encomenda não tem data de entrada em armazém ou data de "
-                "entrega ao cliente registada. Por favor preenche estes campos para eu poder "
-                "monitorizar. CC: @Isa Moreira")
+        return ("Esta encomenda não tem data de entrada em armazém ou data de entrega ao cliente "
+                "registada. Por favor preenche estes campos para eu poder monitorizar. CC: @Isa Moreira")
 
     if condicao == "B":
         data_entrada_dt = dados.get("data_entrada_armazem")
         data_limite = _campo(_fmt_data(data_entrada_dt + timedelta(days=2)) if data_entrada_dt else None,
                              "data limite de resposta")
-        return f"""Alma Logística — proposta de email ao fornecedor (para envio pela Conceição após validação):
+        return f"""Proposta de email ao fornecedor (para envio pela Conceição após validação):
 
 Assunto: Confirmação de expedição — Encomenda {numero} — {projeto_cliente}
 
@@ -246,18 +245,17 @@ Exmo(a) Sr(a) {fornecedor}, gostaríamos de confirmar o estado da encomenda {num
 Responsável: @Conceição Costa — por favor valida e envia."""
 
     if condicao == "C":
-        return ("Alma Logística: ainda não há registo de resposta do fornecedor ao email de "
-                "confirmação enviado há 48h. Sugere-se contacto telefónico. "
-                "CC: @Conceição Costa @Isa Moreira")
+        return ("Ainda não há registo de resposta do fornecedor ao email de confirmação enviado há "
+                "48h. Sugere-se contacto telefónico. CC: @Conceição Costa @Isa Moreira")
 
     if condicao == "D":
-        return (f"Alma Logística: a data de entrada em armazém prevista ({data_entrada}) já passou "
-                "sem registo de confirmação. É necessário apurar o estado com o fornecedor e, se "
-                "houver atraso, comunicar ao cliente em menos de 24h. Proposta de email ao cliente "
-                "disponível a pedido. CC: @Conceição Costa @Isa Moreira")
+        return (f"A data de entrada em armazém prevista ({data_entrada}) já passou sem registo de "
+                "confirmação. É necessário apurar o estado com o fornecedor e, se houver atraso, "
+                "comunicar ao cliente em menos de 24h. Proposta de email ao cliente disponível a "
+                "pedido. CC: @Conceição Costa @Isa Moreira")
 
     if condicao == "E":
-        return f"""Alma Logística — proposta de email ao cliente (para envio após validação):
+        return f"""Proposta de email ao cliente (para envio após validação):
 
 Assunto: Atualização da sua encomenda {numero} — {projeto_cliente}
 
@@ -266,9 +264,9 @@ Exmo(a) Sr(a) {_campo(dados.get('cliente'), 'nome do cliente')}, gostaríamos de
 Responsável: @Conceição Costa ou @Isa Moreira — por favor valida, preenche os campos em falta e envia."""
 
     if condicao == "I":
-        return (f"Alma Logística: esta encomenda tem data de entrega passada há mais de 7 dias "
-                f"({data_entrega}) e o card ainda está em aberto. Por favor confirma se a entrega "
-                "foi concluída e fecha o card se sim. CC: @Conceição Costa @Isa Moreira")
+        return (f"Esta encomenda tem data de entrega passada há mais de 7 dias ({data_entrega}) e o "
+                "card ainda está em aberto. Por favor confirma se a entrega foi concluída e fecha o "
+                "card se sim. CC: @Conceição Costa @Isa Moreira")
 
     raise ValueError(f"condição sem texto fixo definido: {condicao!r}")
 
