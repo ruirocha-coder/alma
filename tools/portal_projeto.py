@@ -122,6 +122,12 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
     except Exception as exc:
         return {"erro": f"não consegui abrir o ficheiro como PDF: {exc}"}
 
+    # o PDF original, embutido como data URI — para o link de download do
+    # próprio documento no portal (a cliente não tem acesso ao Basecamp,
+    # por isso o download_url original não lhe serve; o ficheiro tem de
+    # estar dentro da própria página, tal como as imagens).
+    pdf_base64 = f"data:application/pdf;base64,{base64.b64encode(bruto).decode('ascii')}"
+
     from collections import Counter
     frequencia_dims = Counter()
     for pagina in doc:
@@ -153,7 +159,7 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
             paginas_ambiente.append({"titulo": titulo, "imagem_base64": imagem_b64})
 
     if paginas_ambiente:
-        return {"paginas": paginas_ambiente}
+        return {"paginas": paginas_ambiente, "pdf_base64": pdf_base64}
 
     # PDF sem a estrutura "Conceito Psicoestético" (ex: template antigo
     # "Imagem Guia") — usa a maior imagem de todo o documento, sem título,
@@ -167,7 +173,7 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
     imagem_b64 = _imagem_pagina_para_base64(doc, pagina_maior, dims_recorrentes)
     if not imagem_b64:
         return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
-    return {"paginas": [{"titulo": None, "imagem_base64": imagem_b64}]}
+    return {"paginas": [{"titulo": None, "imagem_base64": imagem_b64}], "pdf_base64": pdf_base64}
 
 
 def _validar_fases_estado(fases_estado: dict) -> str:
@@ -275,7 +281,11 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     devia mostrar a primeira imagem de espaço (ex: a Sala). As restantes
     imagens de ambiente do mesmo PDF são associadas automaticamente a
     cada item de `ambientes` pelo nome — nunca precisas de indicar tu
-    mesma qual imagem pertence a qual ambiente.
+    mesma qual imagem pertence a qual ambiente. O próprio PDF do conceito
+    fica também disponível para a cliente descarregar na fase "Conceito"
+    (embutido na página, tal como as imagens — a cliente não tem acesso
+    ao Basecamp, por isso não seria possível abrir o download_url
+    original diretamente).
     `conceito_materiais` e `conceito_leitura` são ambos opcionais (deixa
     a None) — só os preenchas se existir texto literal e real no PDF ou
     num comentário da designer (ex: uma linha curta "Natural | Eclético |
@@ -345,6 +355,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          "\"conceito\" como \"prevista\" em vez disso.")}
 
     conceito_imagem = None
+    documento_conceito = None
     imagens_por_ambiente = {}
     if conceito_pdf_download_url is not None:
         resultado_imagens = _extrair_imagens_conceito_pdf(conceito_pdf_download_url)
@@ -352,6 +363,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
             return {"erro": f"não consegui extrair a imagem do conceito: {resultado_imagens['erro']}"}
         paginas = resultado_imagens["paginas"]
         conceito_imagem = paginas[0]["imagem_base64"]
+        documento_conceito = resultado_imagens["pdf_base64"]
         for pagina in paginas:
             if pagina["titulo"]:
                 imagens_por_ambiente[_normalizar_texto(pagina["titulo"])] = pagina["imagem_base64"]
@@ -368,13 +380,14 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
 
     return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
-                               conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento)
+                               conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento,
+                               documento_conceito)
 
 
 def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
                         honorarios_linhas: list, ambientes: list, fases_estado: dict, valor_produto: float,
                         conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
-                        documento_apresentacao: str, documento_orcamento: str) -> dict:
+                        documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None) -> dict:
     """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
     por gerar_portal_projeto (extração a partir do PDF) e
     atualizar_portal_projeto_edicao (valores já editados à mão pela
@@ -397,7 +410,8 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
             {"t": l["titulo"], "d": l["descricao"], "v": l["valor"]} for l in honorarios_linhas
         ]},
         "conceito": {"imagem": conceito_imagem, "leitura": conceito_leitura, "materiais": conceito_materiais},
-        "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento},
+        "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento,
+                      "conceito": documento_conceito},
         "ambientes": ambientes,
         "valorProduto": valor_produto,
         "fases": fases_json,
@@ -464,7 +478,7 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["fases_estado"], campos.get("valor_produto"),
                                campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
-                               campos.get("documento_orcamento"))
+                               campos.get("documento_orcamento"), campos["conceito"].get("documento"))
 
 TOOLS_PORTAL_PROJETO = [
     {
@@ -615,6 +629,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .fase{border-top:1px solid var(--line);padding:44px 0;scroll-margin-top:16px}
   .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
+  .demo{pointer-events:none}
   .fase-topo{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
   .fase-topo h2{font-weight:400;font-size:20px;display:flex;align-items:baseline;gap:12px}
   .fase-topo h2 .n{font-size:12px;color:var(--stone);font-weight:300}
@@ -764,7 +779,11 @@ const conteudo = {
   conceito: () => `
     <div class="imagem">${projeto.conceito.imagem?`<img src="${projeto.conceito.imagem}" alt="Imagem guia">`:''}</div>
     ${projeto.conceito.leitura?`<p class="leitura">${projeto.conceito.leitura}</p>`:''}
-    ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}`,
+    ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}
+    <div class="docs">
+      <a class="doc ${projeto.documentos.conceito?'':'off'}" ${projeto.documentos.conceito?`href="${projeto.documentos.conceito}" download target="_blank" rel="noopener"`:''}>
+        <span>Conceito psicoestético</span><span>PDF</span></a>
+    </div>`,
 
   projeto: () => `
     ${projeto.ambientes.map(a=>`
@@ -837,7 +856,8 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
   } else {
     const anterior = projeto.fases[i-1];
     estado = `<span class="estado">por abrir</span>`;
-    bloco  = `<p class="espera">Abre depois da validação${anterior ? ` — ${anterior.titulo.toLowerCase()}` : ''}.</p>`;
+    bloco  = `<div class="demo">${conteudo[f.id]()}</div>
+      <p class="espera">Esta secção abre para validação depois${anterior ? ` — ${anterior.titulo.toLowerCase()}` : ''}.</p>`;
   }
 
   return `<section class="fase ${f.estado==='prevista'?'prevista':''}" id="${f.id}">
@@ -940,6 +960,11 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
   </div>
   <div class="campo"><label>Leitura do conceito (texto, opcional)</label><textarea id="f-conceito-leitura"></textarea></div>
   <div class="campo"><label>Materiais/estilo (linha curta, opcional)</label><input type="text" id="f-conceito-materiais"></div>
+  <div class="campo">
+    <label>Documento do conceito (PDF, para a cliente poder descarregar)</label>
+    <div id="preview-conceito-doc"></div>
+    <input type="file" accept="application/pdf" id="f-conceito-doc-ficheiro">
+  </div>
 </section>
 
 <section>
@@ -1006,6 +1031,23 @@ document.getElementById('f-conceito-imagem-ficheiro').addEventListener('change',
     conceitoImagemAtual = leitor.result;
     document.getElementById('preview-conceito').innerHTML =
       `<img class="miniatura" src="${conceitoImagemAtual}" alt="Nova imagem do conceito">`;
+  };
+  leitor.readAsDataURL(ficheiro);
+});
+
+let conceitoDocumentoAtual = projeto.documentos.conceito || null;
+function _atualizarPreviewDocConceito(nome) {
+  document.getElementById('preview-conceito-doc').textContent =
+    conceitoDocumentoAtual ? `PDF atual: ${nome || 'anexado'}` : '(sem documento)';
+}
+_atualizarPreviewDocConceito(conceitoDocumentoAtual ? 'já anexado' : null);
+document.getElementById('f-conceito-doc-ficheiro').addEventListener('change', function(e){
+  const ficheiro = e.target.files[0];
+  if (!ficheiro) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    conceitoDocumentoAtual = leitor.result;
+    _atualizarPreviewDocConceito(ficheiro.name);
   };
   leitor.readAsDataURL(ficheiro);
 });
@@ -1116,6 +1158,7 @@ function guardar() {
       imagem: conceitoImagemAtual,
       leitura: document.getElementById('f-conceito-leitura').value || null,
       materiais: document.getElementById('f-conceito-materiais').value || null,
+      documento: conceitoDocumentoAtual,
     },
     documento_apresentacao: document.getElementById('f-doc-apresentacao').value || null,
     documento_orcamento: document.getElementById('f-doc-orcamento').value || null,
