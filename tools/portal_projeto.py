@@ -1664,6 +1664,7 @@ async function eliminarPortal(id, botao){
   const portal = portais.find(p => p.id === id);
   const nome = portal ? (portal.cliente || `card ${portal.card_id}`) : 'este portal';
   if (!confirm(`Eliminar o portal de ${nome}? Esta ação é irreversível — o link deixa de funcionar para a cliente.`)) return;
+  if (!confirm(`Tens mesmo a certeza? Vais eliminar definitivamente o portal de ${nome} — não há como desfazer.`)) return;
   botao.disabled = true;
   botao.textContent = 'A eliminar…';
   try {
