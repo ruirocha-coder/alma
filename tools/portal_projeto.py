@@ -1369,3 +1369,107 @@ function guardar() {
 </body>
 </html>
 """
+
+
+def pagina_lista(portais: list) -> str:
+    """Página interna (nunca linkada à cliente) onde a equipa consulta
+    todos os portais de projeto já gerados, com pesquisa — ver
+    db.listar_portais_projeto. Cada portal aponta para o seu link público
+    (só leitura) e para a sua página de edição, exatamente como já
+    existem hoje."""
+    portais_json = json.dumps(portais, ensure_ascii=False).replace("</", "<\\/")
+    return _TEMPLATE_LISTA.replace("__PORTAIS_JSON__", portais_json)
+
+
+_TEMPLATE_LISTA = r"""<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Portais de projeto — uso interno</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root{--paper:#FBFAF8; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#B96D4E; --ok:#5A7D5A; --err:#B94E4E;}
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
+      max-width:920px;margin:0 auto;padding:36px 20px 100px}
+  h1{font-size:24px;font-weight:500;margin:0 0 4px}
+  .sub{font-size:13.5px;color:var(--stone);margin:0 0 28px}
+  .barra{display:flex;gap:12px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--paper);
+        padding:10px 0;border-bottom:1px solid var(--line);z-index:1}
+  .barra input{flex:1;padding:11px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;
+              font-family:inherit;font-size:14.5px;color:var(--ink)}
+  .barra input:focus{outline:2px solid var(--clay);outline-offset:1px}
+  .contagem{font-size:12.5px;color:var(--stone);white-space:nowrap}
+  .vazio{padding:60px 0;text-align:center;color:var(--stone);font-size:14px}
+  .linha{border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:10px;
+        display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+        transition:.12s;text-decoration:none}
+  .linha:hover{border-color:var(--clay)}
+  .info{min-width:0}
+  .cliente{font-size:16px;font-weight:500;color:var(--ink);margin:0 0 3px}
+  .meta{font-size:12px;color:var(--stone)}
+  .meta b{color:var(--stone);font-weight:600}
+  .fases{display:flex;gap:6px;margin-top:9px}
+  .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--stone);
+            white-space:nowrap}
+  .fase-chip.validada{background:#EDF2EA;border-color:#CFDECB;color:var(--ok)}
+  .fase-chip.aguarda{background:#FBEFE8;border-color:#E9D3C3;color:var(--clay)}
+  .acoes{display:flex;gap:8px;flex-shrink:0}
+  .acoes a{display:inline-block;padding:9px 16px;border-radius:5px;font-size:13px;text-decoration:none;
+          border:1px solid var(--ink);color:var(--ink);transition:.12s}
+  .acoes a.editar{background:var(--ink);color:var(--paper)}
+  .acoes a:hover{opacity:.75}
+</style>
+</head>
+<body>
+  <h1>Portais de projeto</h1>
+  <p class="sub">Todos os portais de acompanhamento gerados para clientes — o link de "Ver" é o que a cliente recebe.</p>
+  <div class="barra">
+    <input type="text" id="pesquisa" placeholder="Procurar por cliente, referência ou nº do card…" autofocus>
+    <span class="contagem" id="contagem"></span>
+  </div>
+  <div id="lista"></div>
+
+<script>
+const portais = __PORTAIS_JSON__;
+
+const rotuloFase = f => f.estado === 'validada' ? `${f.titulo} ✓` :
+                        f.estado === 'aguarda'  ? `${f.titulo} — a aguardar` : `${f.titulo}`;
+
+function formatarData(iso){
+  return new Date(iso).toLocaleDateString('pt-PT', {day: 'numeric', month: 'long', year: 'numeric'});
+}
+
+function desenhar(filtro){
+  const alvo = (filtro || '').trim().toLowerCase();
+  const visiveis = portais.filter(p => !alvo ||
+    (p.cliente || '').toLowerCase().includes(alvo) ||
+    (p.ref || '').toLowerCase().includes(alvo) ||
+    String(p.card_id).includes(alvo));
+
+  document.getElementById('contagem').textContent =
+    visiveis.length === portais.length ? `${portais.length} portais` : `${visiveis.length} de ${portais.length}`;
+
+  document.getElementById('lista').innerHTML = visiveis.length ? visiveis.map(p => `
+    <div class="linha">
+      <div class="info">
+        <p class="cliente">${p.cliente || '(sem nome)'}</p>
+        <p class="meta"><b>${p.ref || ''}</b> · card ${p.card_id} · atualizado a ${formatarData(p.criado_em)}</p>
+        <div class="fases">
+          ${p.fases.map(f => `<span class="fase-chip ${f.estado}">${rotuloFase(f)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="acoes">
+        <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
+        <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
+      </div>
+    </div>`).join('') : `<p class="vazio">Nenhum portal encontrado para "${filtro}".</p>`;
+}
+
+document.getElementById('pesquisa').addEventListener('input', e => desenhar(e.target.value));
+desenhar('');
+</script>
+</body>
+</html>
+"""
