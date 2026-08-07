@@ -34,6 +34,14 @@ def contexto_data_atual() -> str:
     return f"Hoje é {_DIAS_SEMANA[d.weekday()]}, {_formatar_extenso(d)}."
 
 
+def data_extenso_hoje() -> str:
+    """A data de hoje por extenso, sem prefixo de dia da semana (ex: "6 de
+    agosto de 2026") — para usar em texto gerado em código (nunca pelo
+    modelo) que precise só da data, como o comentário de validação de fase
+    do portal de projeto (ver tools/portal_projeto.validar_fase_portal)."""
+    return _formatar_extenso(datetime.now(FUSO_HORARIO).date())
+
+
 def agora() -> dict:
     """O relógio da Alma: data e hora reais, agora, em Portugal (Europe/
     Lisbon) — nunca adivinhes a data ou o dia da semana de hoje, usa
