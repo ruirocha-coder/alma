@@ -189,6 +189,101 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
     return {"paginas": [{"titulo": None, "imagem_base64": imagem_b64}], "pdf_base64": pdf_base64}
 
 
+# páginas cujo título (ver _extrair_imagem_apresentacao_pdf) nunca são um
+# ambiente real, mesmo tendo o rodapé recorrente do documento — moodboard
+# (colagem de materiais), plantas técnicas e a página de anexos/materiais.
+_TITULOS_BLOQUEADOS_APRESENTACAO = {"moodboard", "anexos"}
+_PREFIXOS_BLOQUEADOS_APRESENTACAO = ("planta",)
+
+
+def _extrair_imagem_apresentacao_pdf(download_url: str) -> dict:
+    """Extrai, do PDF "Apresentação do Projeto" anexado a um card do
+    Basecamp, a primeira imagem de ambiente (a que serve de capa da fase
+    "Projeto" no portal — tal como a imagem de conceito serve de capa da
+    fase "Conceito"). Nunca a do "Moodboard", de uma "Planta" (desenho
+    técnico) nem da página de "Anexos" — verificado ao vivo contra um
+    PDF real (2026-08-07): estas três nunca são a imagem certa.
+
+    Ao contrário do PDF do conceito (uma página por ambiente, sempre com
+    o mesmo cabeçalho fixo "CONCEITO PSICOESTÉTICO"), o template de
+    apresentação varia por designer — não há um cabeçalho fixo a
+    procurar. Em vez disso, deteta-se o texto que se REPETE em quase
+    todas as páginas de conteúdo (o rodapé "Projecto de Design de
+    Interiores..." num PDF real inspecionado) para distinguir páginas de
+    conteúdo da capa/página final (que não têm esse rodapé); dentro
+    dessas, o título da página é o texto curto que não é o rodapé. Se o
+    documento não tiver esse rodapé recorrente (template sem essa
+    estrutura), cai para a maior imagem de todo o documento, sem título
+    — mesmo comportamento de reserva de _extrair_imagens_conceito_pdf.
+
+    Uso interno de gerar_portal_projeto — nunca exposta como tool ao
+    modelo (mesmo motivo de _extrair_imagens_conceito_pdf: nunca passar
+    um base64 grande pelos tokens do modelo)."""
+    try:
+        bruto = basecamp._get_bytes(download_url)
+    except Exception as exc:
+        return {"erro": f"não consegui descarregar o PDF em {download_url}: {exc}"}
+
+    try:
+        doc = fitz.open(stream=bruto, filetype="pdf")
+    except Exception as exc:
+        return {"erro": f"não consegui abrir o ficheiro como PDF: {exc}"}
+
+    pdf_base64 = f"data:application/pdf;base64,{base64.b64encode(bruto).decode('ascii')}"
+
+    from collections import Counter
+    n_paginas = len(doc)
+
+    textos_por_pagina = []
+    for pagina in doc:
+        blocos = pagina.get_text("blocks")
+        textos_por_pagina.append([b[4].strip() for b in blocos if b[4].strip()])
+
+    frequencia_texto = Counter()
+    for textos in textos_por_pagina:
+        for t in textos:
+            frequencia_texto[_normalizar_texto(t)] += 1
+    rodape_recorrente = {t for t, c in frequencia_texto.items() if c >= max(3, n_paginas * 0.4)}
+
+    frequencia_dims = Counter()
+    for pagina in doc:
+        for im in pagina.get_images(full=True):
+            frequencia_dims[(im[2], im[3])] += 1
+    dims_recorrentes = {d for d, c in frequencia_dims.items() if c >= 3}
+
+    def _pagina_valida(titulo: str) -> bool:
+        t = _normalizar_texto(titulo)
+        return t not in _TITULOS_BLOQUEADOS_APRESENTACAO and not t.startswith(_PREFIXOS_BLOQUEADOS_APRESENTACAO)
+
+    if rodape_recorrente:
+        for pagina, textos in zip(doc, textos_por_pagina):
+            if not any(_normalizar_texto(t) in rodape_recorrente for t in textos):
+                continue  # capa ou página final, sem o rodapé de conteúdo
+            candidatos_titulo = [t for t in textos
+                                 if _normalizar_texto(t) not in rodape_recorrente and "|" not in t and len(t) < 40]
+            if not candidatos_titulo:
+                continue
+            titulo = min(candidatos_titulo, key=len)
+            if not _pagina_valida(titulo):
+                continue
+            imagem_b64 = _imagem_pagina_para_base64(doc, pagina, dims_recorrentes)
+            if imagem_b64:
+                return {"imagem_base64": imagem_b64, "pdf_base64": pdf_base64}
+
+    # sem rodapé recorrente detetável (template sem essa estrutura) — cai
+    # para a maior imagem de todo o documento, sem título, só como capa.
+    candidatas = [(p, im) for p in doc for im in p.get_images(full=True) if (im[2], im[3]) not in dims_recorrentes]
+    if not candidatas:
+        candidatas = [(p, im) for p in doc for im in p.get_images(full=True)]
+    if not candidatas:
+        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
+    pagina_maior, _ = max(candidatas, key=lambda pi: pi[1][2] * pi[1][3])
+    imagem_b64 = _imagem_pagina_para_base64(doc, pagina_maior, dims_recorrentes)
+    if not imagem_b64:
+        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
+    return {"imagem_base64": imagem_b64, "pdf_base64": pdf_base64}
+
+
 def _validar_fases_estado(fases_estado: dict) -> str:
     """Devolve uma mensagem de erro (string) se `fases_estado` não tiver
     exatamente as 4 fases esperadas, estados válidos, data sempre que
@@ -352,7 +447,20 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     lado — ver a mesma nota em `conceito_pdf_download_url`). São
     descarregados e embutidos aqui dentro, tal como o PDF do conceito —
     a cliente não tem acesso ao Basecamp, por isso um download_url
-    original nunca lhe serviria diretamente."""
+    original nunca lhe serviria diretamente.
+
+    Tal como a fase "conceito" precisa do PDF do conceito, a fase
+    "projeto" precisa de `documento_apresentacao_download_url` (o PDF de
+    apresentação do projeto) e a fase "orcamento" precisa de
+    `documento_orcamento_download_url` (o PDF do orçamento discriminado)
+    para poderem estar "aguarda" ou "validada" — sem o respetivo PDF
+    anexado ao card, mantém essa fase como "prevista" (fica visível à
+    cliente a cinzento, em modo demonstrativo, em vez de aberta sem
+    conteúdo real). Do PDF de apresentação extrai-se automaticamente,
+    aqui dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
+    planta técnica) para servir de capa da fase "projeto" — tal como a
+    imagem de conceito serve de capa da fase "conceito"; nunca precisas
+    de indicar tu mesma essa imagem."""
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
@@ -374,6 +482,18 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          "\"Conceito Psicoestético\"/\"Imagem Guia\" (usa listar_pdfs_anexados_por_data para "
                          "encontrar o download_url). Se esse PDF ainda não está anexado ao card, mantém a fase "
                          "\"conceito\" como \"prevista\" em vez disso.")}
+    if fases_estado["projeto"]["estado"] != "prevista" and documento_apresentacao_download_url is None:
+        return {"erro": ("documento_apresentacao_download_url é obrigatório quando a fase \"projeto\" não é "
+                         "\"prevista\" — o cliente vai ver essa secção e precisa pelo menos da imagem do "
+                         "projeto, extraída do PDF de apresentação (usa listar_pdfs_anexados_por_data para "
+                         "encontrar o download_url, procurando por \"Apresentação\"). Se esse PDF ainda não "
+                         "está anexado ao card, mantém a fase \"projeto\" como \"prevista\" em vez disso.")}
+    if fases_estado["orcamento"]["estado"] != "prevista" and documento_orcamento_download_url is None:
+        return {"erro": ("documento_orcamento_download_url é obrigatório quando a fase \"orcamento\" não é "
+                         "\"prevista\" — o cliente vai ver essa secção e precisa do PDF do orçamento "
+                         "discriminado (usa listar_pdfs_anexados_por_data para encontrar o download_url, "
+                         "procurando por \"Orçamento\"/\"ORÇ\"). Se esse PDF ainda não está anexado ao card, "
+                         "mantém a fase \"orcamento\" como \"prevista\" em vez disso.")}
 
     conceito_imagem = None
     documento_conceito = None
@@ -400,11 +520,13 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                             "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem")} for a in ambientes]
 
     documento_apresentacao = None
+    projeto_imagem = None
     if documento_apresentacao_download_url is not None:
-        resultado = _baixar_pdf_base64(documento_apresentacao_download_url)
+        resultado = _extrair_imagem_apresentacao_pdf(documento_apresentacao_download_url)
         if "erro" in resultado:
             return {"erro": f"não consegui obter o documento de apresentação: {resultado['erro']}"}
         documento_apresentacao = resultado["pdf_base64"]
+        projeto_imagem = resultado["imagem_base64"]
 
     documento_orcamento = None
     if documento_orcamento_download_url is not None:
@@ -416,13 +538,14 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
                                conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento,
-                               documento_conceito)
+                               documento_conceito, projeto_imagem)
 
 
 def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
                         honorarios_linhas: list, ambientes: list, fases_estado: dict, valor_produto: float,
                         conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
-                        documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None) -> dict:
+                        documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None,
+                        projeto_imagem: str = None) -> dict:
     """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
     por gerar_portal_projeto (extração a partir do PDF) e
     atualizar_portal_projeto_edicao (valores já editados à mão pela
@@ -449,6 +572,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
         "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento,
                       "conceito": documento_conceito},
         "ambientes": ambientes,
+        "projetoImagem": projeto_imagem,
         "valorProduto": valor_produto,
         "fases": fases_json,
         "acoes": acoes_json,
@@ -471,7 +595,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
 
 
 def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
-                           fases_estado: dict, conceito_imagem) -> str:
+                           fases_estado: dict, conceito_imagem, documento_apresentacao, documento_orcamento) -> str:
     """As mesmas regras de gerar_portal_projeto, reaproveitadas por
     atualizar_portal_projeto_edicao — nunca duplicadas à parte, para as
     duas nunca poderem divergir sobre o que é seguro publicar."""
@@ -486,9 +610,15 @@ def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_
     if valor_produto is None and fases_estado["orcamento"]["estado"] != "prevista":
         return ("é obrigatório um valor de orçamento de produto quando a fase \"Orçamento\" não está como "
                "\"por abrir\" — a cliente vai ver essa secção e precisa de um valor real.")
+    if fases_estado["orcamento"]["estado"] != "prevista" and not documento_orcamento:
+        return ("é obrigatório o documento de orçamento discriminado quando a fase \"Orçamento\" não está como "
+               "\"por abrir\" — a cliente vai ver essa secção e precisa do PDF do orçamento.")
     if fases_estado["conceito"]["estado"] != "prevista" and not conceito_imagem:
         return ("é obrigatória uma imagem de conceito quando a fase \"Conceito\" não está como \"por abrir\" "
                "— a cliente vai ver essa secção e precisa de uma imagem.")
+    if fases_estado["projeto"]["estado"] != "prevista" and not documento_apresentacao:
+        return ("é obrigatório o documento de apresentação do projeto quando a fase \"Projeto\" não está como "
+               "\"por abrir\" — a cliente vai ver essa secção e precisa do PDF/imagem do projeto.")
     return ""
 
 
@@ -505,7 +635,8 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
 
     erro = _validar_campos_edicao(campos["honorarios_total_com_iva"], campos.get("valor_produto"),
                                   campos.get("valor_produto_com_iva", False), campos["fases_estado"],
-                                  campos["conceito"].get("imagem"))
+                                  campos["conceito"].get("imagem"), campos.get("documento_apresentacao"),
+                                  campos.get("documento_orcamento"))
     if erro:
         return {"erro": erro}
 
@@ -514,7 +645,8 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["fases_estado"], campos.get("valor_produto"),
                                campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
-                               campos.get("documento_orcamento"), campos["conceito"].get("documento"))
+                               campos.get("documento_orcamento"), campos["conceito"].get("documento"),
+                               campos.get("projeto_imagem"))
 
 
 def validar_fase_portal(card_id: int, fase: str) -> dict:
@@ -550,6 +682,8 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
                          for l in projeto["honorarios"]["linhas"]]
     valor_produto = projeto.get("valorProduto")
     conceito_imagem = projeto["conceito"].get("imagem")
+    documento_apresentacao = projeto["documentos"].get("apresentacao")
+    documento_orcamento = projeto["documentos"].get("orcamento")
 
     aviso = None
     if seguinte and fases_estado[seguinte]["estado"] == "prevista":
@@ -557,8 +691,9 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         tentativa[seguinte] = {"estado": "aguarda"}
         # com_iva a True: são valores já publicados, confirmados quando o
         # portal foi gerado — esta chamada só verifica se a fase seguinte
-        # já tem o conteúdo (imagem/valor) obrigatório para abrir agora.
-        if not _validar_campos_edicao(True, valor_produto, True, tentativa, conceito_imagem):
+        # já tem o conteúdo (imagem/valor/documento) obrigatório para abrir agora.
+        if not _validar_campos_edicao(True, valor_produto, True, tentativa, conceito_imagem,
+                                      documento_apresentacao, documento_orcamento):
             fases_estado = tentativa
         else:
             aviso = (f"a fase \"{titulo_fase}\" foi validada, mas a fase seguinte ainda não abriu — "
@@ -568,8 +703,8 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         "cliente (via portal)", card_id, projeto["cliente"], projeto["validade"],
         projeto["honorarios"]["total"], honorarios_linhas, projeto["ambientes"], fases_estado,
         valor_produto, conceito_imagem, projeto["conceito"].get("materiais"), projeto["conceito"].get("leitura"),
-        projeto["documentos"].get("apresentacao"), projeto["documentos"].get("orcamento"),
-        projeto["documentos"].get("conceito"))
+        documento_apresentacao, documento_orcamento,
+        projeto["documentos"].get("conceito"), projeto.get("projetoImagem"))
 
     try:
         basecamp.comentar(card_id, f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
@@ -905,6 +1040,7 @@ const conteudo = {
     </div>`,
 
   projeto: () => `
+    <div class="imagem">${projeto.projetoImagem?`<img src="${projeto.projetoImagem}" alt="Imagem do projeto">`:''}</div>
     ${projeto.ambientes.map(a=>`
       <div class="amb">
         <div class="img">${a.imagem?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
@@ -914,8 +1050,6 @@ const conteudo = {
     <div class="docs">
       <a class="doc ${projeto.documentos.apresentacao?'':'off'}" ${projeto.documentos.apresentacao?`href="${projeto.documentos.apresentacao}" target="_blank" rel="noopener"`:''}>
         <span>Apresentação do projeto</span><span>PDF</span></a>
-      <a class="doc ${projeto.documentos.orcamento?'':'off'}" ${projeto.documentos.orcamento?`href="${projeto.documentos.orcamento}" target="_blank" rel="noopener"`:''}>
-        <span>Orçamento detalhado</span><span>PDF</span></a>
     </div>`,
 
   orcamento: () => !temProduto ? `
@@ -957,6 +1091,10 @@ const conteudo = {
       <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
       <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
       <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
+    </div>
+    <div class="docs">
+      <a class="doc ${projeto.documentos.orcamento?'':'off'}" ${projeto.documentos.orcamento?`href="${projeto.documentos.orcamento}" target="_blank" rel="noopener"`:''}>
+        <span>Orçamento detalhado</span><span>PDF</span></a>
     </div>
     <div class="pag-tit">Como se paga</div>
     <div class="pag">
@@ -1142,6 +1280,11 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
 <section>
   <h2>Documentos</h2>
   <div class="campo">
+    <label>Imagem do projeto (capa da fase "Projeto")</label>
+    <div id="preview-projeto-imagem"></div>
+    <input type="file" accept="image/*" id="f-projeto-imagem-ficheiro">
+  </div>
+  <div class="campo">
     <label>Apresentação do projeto (PDF)</label>
     <div id="preview-doc-apresentacao"></div>
     <input type="file" accept="application/pdf" id="f-doc-apresentacao-ficheiro">
@@ -1203,6 +1346,23 @@ document.getElementById('f-conceito-imagem-ficheiro').addEventListener('change',
     conceitoImagemAtual = leitor.result;
     document.getElementById('preview-conceito').innerHTML =
       `<img class="miniatura" src="${conceitoImagemAtual}" alt="Nova imagem do conceito">`;
+  };
+  leitor.readAsDataURL(ficheiro);
+});
+
+let projetoImagemAtual = projeto.projetoImagem || null;
+if (projetoImagemAtual) {
+  document.getElementById('preview-projeto-imagem').innerHTML =
+    `<img class="miniatura" src="${projetoImagemAtual}" alt="Imagem atual do projeto">`;
+}
+document.getElementById('f-projeto-imagem-ficheiro').addEventListener('change', function(e){
+  const ficheiro = e.target.files[0];
+  if (!ficheiro) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    projetoImagemAtual = leitor.result;
+    document.getElementById('preview-projeto-imagem').innerHTML =
+      `<img class="miniatura" src="${projetoImagemAtual}" alt="Nova imagem do projeto">`;
   };
   leitor.readAsDataURL(ficheiro);
 });
@@ -1340,6 +1500,7 @@ function guardar() {
     },
     documento_apresentacao: docApresentacao.valor,
     documento_orcamento: docOrcamento.valor,
+    projeto_imagem: projetoImagemAtual,
     ambientes,
     valor_produto: valorProdutoTexto === '' ? null : parseFloat(valorProdutoTexto),
     valor_produto_com_iva: document.getElementById('f-valor-produto-com-iva').checked,
