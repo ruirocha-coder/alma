@@ -1043,7 +1043,7 @@ const conteudo = {
     <div class="imagem">${projeto.projetoImagem?`<img src="${projeto.projetoImagem}" alt="Imagem do projeto">`:''}</div>
     ${projeto.ambientes.map(a=>`
       <div class="amb">
-        <div class="img">${a.imagem?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
+        <div class="img">${(projeto.projetoImagem && a.imagem)?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
         <h3>${a.nome}</h3>
         <p>${a.nota}</p>
       </div>`).join('')}
@@ -1590,6 +1590,11 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
           border:1px solid var(--ink);color:var(--ink);transition:.12s}
   .acoes a.editar{background:var(--ink);color:var(--paper)}
   .acoes a:hover{opacity:.75}
+  .acoes button.del{display:inline-block;padding:9px 13px;border-radius:5px;font-size:12.5px;
+                    border:1px solid var(--line);background:none;color:var(--stone);cursor:pointer;
+                    font-family:inherit;transition:.12s}
+  .acoes button.del:hover{border-color:var(--err);color:var(--err)}
+  .acoes button.del:disabled{opacity:.5;cursor:default}
 </style>
 </head>
 <body>
@@ -1602,7 +1607,7 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
   <div id="lista"></div>
 
 <script>
-const portais = __PORTAIS_JSON__;
+let portais = __PORTAIS_JSON__;
 
 const rotuloFase = f => f.estado === 'validada' ? `${f.titulo} ✓` :
                         f.estado === 'aguarda'  ? `${f.titulo} — a aguardar` : `${f.titulo}`;
@@ -1644,6 +1649,7 @@ function desenhar(filtro){
               <div class="acoes">
                 <a href="/documentos-gerados/${p.id}" target="_blank" rel="noopener">Ver</a>
                 <a class="editar" href="/documentos-gerados/${p.id}/editar" target="_blank" rel="noopener">Editar</a>
+                <button type="button" class="del" onclick="eliminarPortal(${p.id}, this)">Eliminar</button>
               </div>
             </div>
           </div>
@@ -1653,6 +1659,24 @@ function desenhar(filtro){
 
 document.getElementById('pesquisa').addEventListener('input', e => desenhar(e.target.value));
 desenhar('');
+
+async function eliminarPortal(id, botao){
+  const portal = portais.find(p => p.id === id);
+  const nome = portal ? (portal.cliente || `card ${portal.card_id}`) : 'este portal';
+  if (!confirm(`Eliminar o portal de ${nome}? Esta ação é irreversível — o link deixa de funcionar para a cliente.`)) return;
+  botao.disabled = true;
+  botao.textContent = 'A eliminar…';
+  try {
+    const r = await fetch(`/documentos-gerados/${id}`, {method: 'DELETE'});
+    if (!r.ok) throw new Error('não foi possível eliminar');
+    portais = portais.filter(p => p.id !== id);
+    desenhar(document.getElementById('pesquisa').value);
+  } catch (e) {
+    botao.disabled = false;
+    botao.textContent = 'Eliminar';
+    alert('Falha ao eliminar — tenta outra vez.');
+  }
+}
 </script>
 </body>
 </html>
