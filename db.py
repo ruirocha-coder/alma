@@ -683,6 +683,34 @@ def obter_documento_gerado_por_card_id(card_id: int) -> dict:
                     "conteudo_markdown": linha["conteudo_markdown"]}
                     if linha else None)
 
+def listar_portais_projeto() -> list:
+    """Todos os portais de acompanhamento de projeto já gerados (ver
+    tools/portal_projeto), para a página interna de listagem/pesquisa da
+    equipa (ver tools/portal_projeto.pagina_lista) — mais recentes
+    primeiro. Extrai só os campos pequenos do JSON guardado (cliente, ref,
+    validade, fases, imagem de conceito) diretamente em SQL, para nunca
+    ter de ler os PDFs em base64 embutidos em `conteudo_markdown` só para
+    montar uma lista — a imagem de conceito é a única imagem trazida
+    (para o tile de cada projeto), por já ser a imagem-capa do próprio
+    portal."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, card_id, titulo, criado_em,
+                          conteudo_markdown::json -> 'projeto' ->> 'cliente' AS cliente,
+                          conteudo_markdown::json -> 'projeto' ->> 'ref' AS ref,
+                          conteudo_markdown::json -> 'projeto' ->> 'validade' AS validade,
+                          conteudo_markdown::json -> 'projeto' -> 'fases' AS fases,
+                          conteudo_markdown::json -> 'projeto' -> 'conceito' ->> 'imagem' AS imagem
+                   FROM documentos_gerados
+                   WHERE formato = 'html' AND card_id IS NOT NULL
+                   ORDER BY criado_em DESC"""
+            )
+            linhas = cur.fetchall()
+            return [{"id": l["id"], "card_id": l["card_id"], "titulo": l["titulo"],
+                    "criado_em": l["criado_em"].isoformat(), "cliente": l["cliente"], "ref": l["ref"],
+                    "validade": l["validade"], "fases": l["fases"] or [], "imagem": l["imagem"]} for l in linhas]
+
 def documentos_gerados_recentes(utilizador: str, limite: int = 5) -> list:
     """Últimos documentos que a Alma gerou para esta pessoa (ver gerar_pdf e
     gerar_excel) — usado para ela saber, sem perguntar, do que já falámos/

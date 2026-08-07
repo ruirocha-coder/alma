@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
-                obter_documento_gerado, avaliacoes_cargas_toros_ano)
+                obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -431,6 +431,13 @@ def portal_projeto_editar_gravar(id: int, campos: dict = Body(...)):
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
+
+@app.get("/portais-projeto", response_class=HTMLResponse)
+def portais_projeto_lista():
+    """Página interna (nunca linkada à cliente) onde a equipa consulta
+    todos os portais de projeto já gerados, com pesquisa — ver
+    tools/portal_projeto.pagina_lista."""
+    return HTMLResponse(portal_projeto.pagina_lista(listar_portais_projeto()))
 
 @app.post("/portal/{card_id}/validar-fase")
 def portal_projeto_validar_fase(card_id: int, corpo: dict = Body(...)):
