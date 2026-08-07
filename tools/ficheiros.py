@@ -10,6 +10,11 @@ from tools import visao
 TIPOS_DE_TEXTO = {"text/plain", "text/csv", "text/markdown"}
 EXTENSOES_DE_TEXTO = (".txt", ".csv", ".md")
 
+# ver tools/documentos_empresa.LIMITE_CARATERES_DOCUMENTO — mesma razão e
+# mesmo valor: uma folha de cálculo com uma folha por mês facilmente passa
+# de limites mais baixos, perdendo meses inteiros sem aviso.
+LIMITE_CARATERES_XLSX = 150000
+
 # o browser nem sempre reporta um content_type de imagem fiável para um
 # upload (fica genérico ou vazio, dependendo do browser/sistema) — a
 # extensão do nome do ficheiro é o sinal de reserva, tal como já se faz
@@ -49,16 +54,36 @@ def extrair_texto(bruto: bytes, content_type: str, filename: str = "") -> str | 
     if (content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             or nome.endswith(".xlsx")):
         livro = load_workbook(io.BytesIO(bruto), data_only=True, read_only=True)
-        blocos = []
-        for nome_folha in livro.sheetnames:
+
+        def _texto_folha(nome_folha):
             linhas_texto = []
             for linha in livro[nome_folha].iter_rows(values_only=True):
                 celulas = ["" if v is None else str(v) for v in linha]
                 if any(c.strip() for c in celulas):
                     linhas_texto.append(" | ".join(celulas))
-            if linhas_texto:
-                blocos.append(f"[Folha: {nome_folha}]\n" + "\n".join(linhas_texto))
-        return "\n\n".join(blocos).strip()
+            return "\n".join(linhas_texto)
+
+        # nunca corta uma folha a meio — pára sempre num limite de folha
+        # completa, e diz claramente quais ficaram de fora, se alguma (bug
+        # real, 2026-08-06: um inventário com 12 folhas foi cortado a meio,
+        # perdendo meses inteiros sem nenhum aviso na resposta).
+        blocos, folhas_omitidas, total = [], [], 0
+        for nome_folha in livro.sheetnames:
+            texto_folha = _texto_folha(nome_folha)
+            if not texto_folha:
+                continue
+            bloco = f"[Folha: {nome_folha}]\n{texto_folha}"
+            if blocos and total + len(bloco) > LIMITE_CARATERES_XLSX:
+                folhas_omitidas.append(nome_folha)
+                continue
+            blocos.append(bloco)
+            total += len(bloco)
+        texto_final = "\n\n".join(blocos).strip()
+        if folhas_omitidas:
+            texto_final += (f"\n\n(nota: ficheiro extenso — {len(folhas_omitidas)} folha(s) não incluída(s) "
+                            f"aqui: {', '.join(folhas_omitidas)}. Pede para reenviar só essa folha em separado "
+                            "se precisares dela.)")
+        return texto_final
 
     if content_type in TIPOS_DE_TEXTO or nome.endswith(EXTENSOES_DE_TEXTO):
         return bruto.decode("utf-8", errors="ignore")
