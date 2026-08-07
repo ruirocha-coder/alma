@@ -683,6 +683,18 @@ def obter_documento_gerado_por_card_id(card_id: int) -> dict:
                     "conteudo_markdown": linha["conteudo_markdown"]}
                     if linha else None)
 
+def eliminar_documento_gerado(id: int) -> bool:
+    """Elimina definitivamente um documento gerado (PDF, Excel ou portal de
+    projeto) — usado pelo botão "Eliminar" da página de listagem de
+    portais (ver tools/portal_projeto.pagina_lista). Devolve False se não
+    existia nenhum documento com este id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM documentos_gerados WHERE id = %s", (id,))
+            eliminado = cur.rowcount > 0
+        conn.commit()
+    return eliminado
+
 def listar_portais_projeto() -> list:
     """Todos os portais de acompanhamento de projeto já gerados (ver
     tools/portal_projeto), para a página interna de listagem/pesquisa da

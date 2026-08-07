@@ -12,7 +12,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_STREAM
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
-                obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto)
+                obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
+                eliminar_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -438,6 +439,16 @@ def portais_projeto_lista():
     todos os portais de projeto já gerados, com pesquisa — ver
     tools/portal_projeto.pagina_lista."""
     return HTMLResponse(portal_projeto.pagina_lista(listar_portais_projeto()))
+
+@app.delete("/documentos-gerados/{id}")
+def documento_gerado_eliminar(id: int):
+    """Elimina definitivamente um documento gerado (usado pelo botão
+    "Eliminar" da página de listagem de portais — ver
+    tools/portal_projeto.pagina_lista). Ação irreversível: o link que a
+    cliente tinha deixa de funcionar."""
+    if not eliminar_documento_gerado(id):
+        raise HTTPException(status_code=404, detail="documento não encontrado")
+    return JSONResponse({"ok": True})
 
 @app.post("/portal/{card_id}/validar-fase")
 def portal_projeto_validar_fase(card_id: int, corpo: dict = Body(...)):
