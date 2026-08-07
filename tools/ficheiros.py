@@ -4,6 +4,7 @@
 import io, os
 from pypdf import PdfReader
 from docx import Document as DocxDocument
+from openpyxl import load_workbook
 from tools import visao
 
 TIPOS_DE_TEXTO = {"text/plain", "text/csv", "text/markdown"}
@@ -44,6 +45,20 @@ def extrair_texto(bruto: bytes, content_type: str, filename: str = "") -> str | 
             or nome.endswith(".docx")):
         doc = DocxDocument(io.BytesIO(bruto))
         return "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
+
+    if (content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            or nome.endswith(".xlsx")):
+        livro = load_workbook(io.BytesIO(bruto), data_only=True, read_only=True)
+        blocos = []
+        for nome_folha in livro.sheetnames:
+            linhas_texto = []
+            for linha in livro[nome_folha].iter_rows(values_only=True):
+                celulas = ["" if v is None else str(v) for v in linha]
+                if any(c.strip() for c in celulas):
+                    linhas_texto.append(" | ".join(celulas))
+            if linhas_texto:
+                blocos.append(f"[Folha: {nome_folha}]\n" + "\n".join(linhas_texto))
+        return "\n\n".join(blocos).strip()
 
     if content_type in TIPOS_DE_TEXTO or nome.endswith(EXTENSOES_DE_TEXTO):
         return bruto.decode("utf-8", errors="ignore")

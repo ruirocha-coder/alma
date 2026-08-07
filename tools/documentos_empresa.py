@@ -11,6 +11,7 @@ from email.parser import BytesParser
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from docx import Document as DocxDocument
+from openpyxl import load_workbook
 from tools import basecamp, visao
 
 _cache = {}  # {"lista": (timestamp, lista)}
@@ -30,14 +31,19 @@ TIPOS_DE_FICHEIRO_LEGIVEIS = {
     "text/plain",
     "text/csv",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "message/rfc822",
 }
 
-# quando alguém arrasta um email (.eml) para o Basecamp, o browser nem
-# sempre reporta um content_type útil (fica "application/octet-stream" ou
-# vazio) — a extensão do ficheiro é o sinal mais fiável nesses casos. Só
-# serve de reserva quando o content_type não identifica nada por si só.
-_EXTENSAO_PARA_TIPO = {".eml": "message/rfc822"}
+# quando alguém arrasta um email (.eml) ou uma folha de cálculo (.xlsx)
+# para o Basecamp, o browser nem sempre reporta um content_type útil
+# (fica "application/octet-stream" ou vazio) — a extensão do ficheiro é o
+# sinal mais fiável nesses casos. Só serve de reserva quando o
+# content_type não identifica nada por si só.
+_EXTENSAO_PARA_TIPO = {
+    ".eml": "message/rfc822",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 _TIPOS_INCONCLUSIVOS = {"", "application/octet-stream", "binary/octet-stream"}
 
 def _tipo_efetivo(ctype: str, filename: str) -> str:
@@ -122,6 +128,23 @@ def procurar_documentos_empresa(pesquisa: str) -> list[dict]:
     return [{k: v for k, v in item.items() if k in ("id", "tipo", "titulo", "projeto", "pasta")}
             for item in correspondem[:40]]
 
+def _extrair_xlsx(bruto: bytes) -> str:
+    """Converte uma folha de cálculo (.xlsx) em texto tabular simples, uma
+    secção por folha — usa valores já calculados (data_only=True), nunca
+    fórmulas em bruto, para a Alma ler o mesmo que uma pessoa vê ao abrir
+    o ficheiro. Ignora linhas completamente vazias."""
+    livro = load_workbook(io.BytesIO(bruto), data_only=True, read_only=True)
+    blocos = []
+    for nome_folha in livro.sheetnames:
+        linhas_texto = []
+        for linha in livro[nome_folha].iter_rows(values_only=True):
+            celulas = ["" if v is None else str(v) for v in linha]
+            if any(c.strip() for c in celulas):
+                linhas_texto.append(" | ".join(celulas))
+        if linhas_texto:
+            blocos.append(f"[Folha: {nome_folha}]\n" + "\n".join(linhas_texto))
+    return "\n\n".join(blocos).strip()
+
 def _extrair_por_tipo(bruto: bytes, ctype: str) -> str:
     """Extrai texto de bytes crus dado o content_type — partilhado entre
     ficheiros (Uploads) e anexos embutidos dentro de Documentos nativos do
@@ -143,6 +166,8 @@ def _extrair_por_tipo(bruto: bytes, ctype: str) -> str:
     if ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         doc = DocxDocument(io.BytesIO(bruto))
         return "\n".join(paragrafo.text for paragrafo in doc.paragraphs).strip()
+    if ctype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return _extrair_xlsx(bruto)
     if ctype in ("text/plain", "text/csv"):
         return bruto.decode("utf-8", errors="ignore")
     if ctype == "message/rfc822":
@@ -190,7 +215,9 @@ def _ler_conteudo(item: dict) -> str:
 def ler_documento_empresa(id: int) -> dict:
     """Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id
     (de listar_documentos_empresa). Suporta documentos nativos do Basecamp,
-    PDF, Word (.docx), email (.eml), texto simples e CSV."""
+    PDF, Word (.docx), Excel (.xlsx — cada folha de cálculo é convertida em
+    texto tabular, com valores já calculados, nunca fórmulas em bruto),
+    email (.eml), texto simples e CSV."""
     item = next((i for i in _listar_bruto() if i["id"] == id), None)
     if not item:
         return {"erro": "documento não encontrado — confirma o id com procurar_documentos_empresa"}
@@ -259,7 +286,7 @@ TOOLS_DOCUMENTOS_EMPRESA = [
     },
     {
         "name": "ler_documento_empresa",
-        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF (mesmo quando o PDF é só design/imagem sem texto), Word (.docx), email (.eml — lê de/para/assunto/data e o corpo do email), imagens (JPG, PNG, GIF, WebP — descritas/transcritas por visão), texto simples e CSV — outros formatos (folhas de cálculo, etc.) devolvem um erro com o link para abrir manualmente.",
+        "description": "Lê o conteúdo de texto de um documento ou ficheiro da empresa, pelo id devolvido por procurar_documentos_empresa. Suporta documentos nativos do Basecamp, PDF (mesmo quando o PDF é só design/imagem sem texto), Word (.docx), Excel (.xlsx — cada folha vem como texto tabular, com os valores já calculados, nunca fórmulas em bruto), email (.eml — lê de/para/assunto/data e o corpo do email), imagens (JPG, PNG, GIF, WebP — descritas/transcritas por visão), texto simples e CSV — outros formatos devolvem um erro com o link para abrir manualmente.",
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "integer"}},
