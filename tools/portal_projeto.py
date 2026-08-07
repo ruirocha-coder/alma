@@ -363,6 +363,22 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                 return imagem
         return None
 
+    ambientes_com_imagem = [{"nome": a["nome"], "nota": a["nota"],
+                            "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem")} for a in ambientes]
+
+    return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
+                               ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
+                               conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento)
+
+
+def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
+                        honorarios_linhas: list, ambientes: list, fases_estado: dict, valor_produto: float,
+                        conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
+                        documento_apresentacao: str, documento_orcamento: str) -> dict:
+    """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
+    por gerar_portal_projeto (extração a partir do PDF) e
+    atualizar_portal_projeto_edicao (valores já editados à mão pela
+    designer na página de edição, sem voltar a tocar no PDF)."""
     ref = f"IG-{card_id}"
     fases_json = [{
         "id": f["id"], "titulo": f["titulo"], "acao": f["acao"], "obs": f["obs"],
@@ -382,8 +398,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         ]},
         "conceito": {"imagem": conceito_imagem, "leitura": conceito_leitura, "materiais": conceito_materiais},
         "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento},
-        "ambientes": [{"nome": a["nome"], "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem"),
-                      "nota": a["nota"]} for a in ambientes],
+        "ambientes": ambientes,
         "valorProduto": valor_produto,
         "fases": fases_json,
         "acoes": acoes_json,
@@ -399,8 +414,57 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     conteudo_fonte = json.dumps({"card_id": card_id, "projeto": projeto}, ensure_ascii=False)
     id_gerado = db.guardar_ou_atualizar_documento_gerado(utilizador, titulo, html.encode("utf-8"), conteudo_fonte,
                                                           card_id, formato="html")
-    url = f"{os.environ['ALMA_APP_URL'].rstrip('/')}/documentos-gerados/{id_gerado}"
-    return {"titulo": titulo, "url": url, "ref": ref}
+    app_url = os.environ["ALMA_APP_URL"].rstrip("/")
+    url = f"{app_url}/documentos-gerados/{id_gerado}"
+    url_edicao = f"{app_url}/documentos-gerados/{id_gerado}/editar"
+    return {"titulo": titulo, "url": url, "url_edicao": url_edicao, "ref": ref}
+
+
+def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
+                           fases_estado: dict, conceito_imagem) -> str:
+    """As mesmas regras de gerar_portal_projeto, reaproveitadas por
+    atualizar_portal_projeto_edicao — nunca duplicadas à parte, para as
+    duas nunca poderem divergir sobre o que é seguro publicar."""
+    erro = _validar_fases_estado(fases_estado)
+    if erro:
+        return erro
+    if not honorarios_total_com_iva:
+        return "honorarios_total_com_iva tem de estar confirmado — o valor mostrado à cliente tem de incluir IVA."
+    if valor_produto is not None and not valor_produto_com_iva:
+        return ("valor_produto_com_iva tem de estar confirmado quando valor_produto não é nulo — o valor "
+               "mostrado à cliente tem de incluir IVA.")
+    if valor_produto is None and fases_estado["orcamento"]["estado"] != "prevista":
+        return ("é obrigatório um valor de orçamento de produto quando a fase \"Orçamento\" não está como "
+               "\"por abrir\" — a cliente vai ver essa secção e precisa de um valor real.")
+    if fases_estado["conceito"]["estado"] != "prevista" and not conceito_imagem:
+        return ("é obrigatória uma imagem de conceito quando a fase \"Conceito\" não está como \"por abrir\" "
+               "— a cliente vai ver essa secção e precisa de uma imagem.")
+    return ""
+
+
+def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos: dict) -> dict:
+    """Grava as alterações feitas na página de edição do portal (uso
+    interno, chamado pelo endpoint POST /documentos-gerados/{id}/editar
+    em main.py — nunca pela Alma/LLM). Ao contrário de
+    gerar_portal_projeto, não volta a tocar no PDF do Basecamp: as
+    imagens que a designer não trocar mantêm-se as que já lá estavam."""
+    registo = db.obter_documento_gerado(id_documento)
+    if not registo or registo["formato"] != "html" or registo["card_id"] is None:
+        return {"erro": "este documento não é um portal de projeto editável"}
+    card_id = registo["card_id"]
+
+    erro = _validar_campos_edicao(campos["honorarios_total_com_iva"], campos.get("valor_produto"),
+                                  campos.get("valor_produto_com_iva", False), campos["fases_estado"],
+                                  campos["conceito"].get("imagem"))
+    if erro:
+        return {"erro": erro}
+
+    return _construir_e_gravar(editado_por, card_id, campos["cliente"], campos["validade"],
+                               campos["honorarios_total"], campos["honorarios_linhas"], campos["ambientes"],
+                               campos["fases_estado"], campos.get("valor_produto"),
+                               campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
+                               campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
+                               campos.get("documento_orcamento"))
 
 TOOLS_PORTAL_PROJETO = [
     {
@@ -440,7 +504,12 @@ TOOLS_PORTAL_PROJETO = [
             "outro campo qualquer, chama a função mesmo assim com o que "
             "tiveres a certeza, deixa os campos incertos vazios/nulos, e "
             "diz claramente no teu comentário de resposta quais campos "
-            "precisam de ser confirmados antes de o link ir para o cliente."
+            "precisam de ser confirmados antes de o link ir para o cliente. "
+            "O resultado tem dois urls: \"url\" (a página que a cliente vê "
+            "— só este vai para a cliente) e \"url_edicao\" (uma página só "
+            "para a equipa corrigir/completar campos à mão, sem teres de "
+            "gerar o portal outra vez — partilha este só internamente, "
+            "num comentário do Basecamp, NUNCA com a cliente)."
         ),
         "input_schema": {
             "type": "object",
@@ -776,6 +845,305 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
     <div class="corpo">${bloco}</div>
   </section>`;
 }).join('');
+</script>
+</body>
+</html>
+"""
+
+
+def pagina_edicao(id_documento: int, projeto: dict) -> str:
+    """Página interna (nunca linkada ao cliente) onde a equipa corrige ou
+    completa os campos de um portal já gerado, sem precisar de pedir à
+    Alma para gerar tudo de novo. Ao gravar, chama
+    atualizar_portal_projeto_edicao, que mantém o mesmo link (ver
+    db.guardar_ou_atualizar_documento_gerado)."""
+    projeto_json = json.dumps(projeto, ensure_ascii=False).replace("</", "<\\/")
+    html = _TEMPLATE_EDICAO.replace("__PROJETO_JSON__", projeto_json).replace("__ID__", str(id_documento))
+    return html
+
+
+_TEMPLATE_EDICAO = r"""<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Editar portal — uso interno</title>
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{--paper:#FBFAF8; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#B96D4E; --ok:#5A7D5A; --err:#B94E4E;}
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
+      max-width:760px;margin:0 auto;padding:36px 20px 100px}
+  h1{font-size:24px;font-weight:500;margin:0 0 4px}
+  .aviso{background:#FBEFE8;border:1px solid #E9D3C3;border-radius:6px;padding:12px 14px;font-size:13px;
+        color:var(--stone);margin:16px 0 32px}
+  section{border-top:1px solid var(--line);padding:24px 0}
+  section h2{font-size:15px;font-weight:600;margin:0 0 14px;text-transform:uppercase;letter-spacing:.04em;color:var(--stone)}
+  label{display:block;font-size:12.5px;color:var(--stone);margin-bottom:4px}
+  input[type=text],input[type=number],textarea{
+      width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;
+      font-family:inherit;font-size:14.5px;color:var(--ink)}
+  textarea{resize:vertical;min-height:70px}
+  .campo{margin-bottom:14px}
+  .linha2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .linha3{display:grid;grid-template-columns:2fr 3fr 1fr;gap:10px;align-items:end}
+  .check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);margin:10px 0}
+  .check input{width:auto}
+  .linha-tabela{border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:10px;position:relative}
+  .remover{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--stone);cursor:pointer;font-size:16px}
+  .remover:hover{color:var(--err)}
+  .add{background:none;border:1px dashed var(--line);border-radius:5px;padding:8px 14px;font-size:13px;
+      color:var(--stone);cursor:pointer;width:100%;margin-top:4px}
+  .add:hover{border-color:var(--clay);color:var(--clay)}
+  .miniatura{max-width:160px;max-height:110px;border-radius:5px;display:block;margin-bottom:8px;border:1px solid var(--line)}
+  .fase-bloco{border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:10px}
+  .fase-bloco h3{font-size:14px;margin:0 0 10px;font-weight:500}
+  select{padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;font-family:inherit;font-size:14.5px}
+  .rodape{position:sticky;bottom:0;background:var(--paper);border-top:1px solid var(--line);
+        padding:16px 0;margin-top:20px;display:flex;align-items:center;gap:14px}
+  .guardar{background:var(--ink);color:#fff;border:none;border-radius:5px;padding:12px 26px;
+          font-size:14.5px;cursor:pointer}
+  .guardar:disabled{opacity:.5;cursor:default}
+  .estado-msg{font-size:13.5px}
+  .estado-msg.ok{color:var(--ok)}
+  .estado-msg.err{color:var(--err)}
+  .estado-msg a{color:inherit;text-decoration:underline}
+</style>
+</head>
+<body>
+
+<h1>Editar portal — <span id="tit-cliente"></span></h1>
+<div class="aviso">Página de uso interno — nunca partilhes este link com a cliente. Serve para corrigir ou completar campos sem pedir à Alma para gerar tudo outra vez. Gravar mantém o mesmo link do portal.</div>
+
+<section>
+  <h2>Identificação</h2>
+  <div class="campo"><label>Cliente</label><input type="text" id="f-cliente"></div>
+  <div class="campo"><label>Validade da proposta</label><input type="text" id="f-validade"></div>
+</section>
+
+<section>
+  <h2>Honorários</h2>
+  <div class="campo linha2">
+    <div><label>Total (com IVA)</label><input type="number" step="0.01" id="f-honorarios-total"></div>
+    <div class="check" style="margin-top:22px"><input type="checkbox" id="f-honorarios-com-iva" checked>
+      <label style="margin:0">Este valor já inclui IVA</label></div>
+  </div>
+  <div id="linhas-honorarios"></div>
+  <button type="button" class="add" onclick="addLinhaHonorario()">+ adicionar linha de honorários</button>
+</section>
+
+<section>
+  <h2>Conceito</h2>
+  <div class="campo">
+    <label>Imagem do conceito</label>
+    <div id="preview-conceito"></div>
+    <input type="file" accept="image/*" id="f-conceito-imagem-ficheiro">
+  </div>
+  <div class="campo"><label>Leitura do conceito (texto, opcional)</label><textarea id="f-conceito-leitura"></textarea></div>
+  <div class="campo"><label>Materiais/estilo (linha curta, opcional)</label><input type="text" id="f-conceito-materiais"></div>
+</section>
+
+<section>
+  <h2>Ambientes</h2>
+  <div id="linhas-ambientes"></div>
+  <button type="button" class="add" onclick="addAmbiente()">+ adicionar ambiente</button>
+</section>
+
+<section>
+  <h2>Documentos</h2>
+  <div class="campo"><label>Apresentação do projeto (url do PDF)</label><input type="text" id="f-doc-apresentacao"></div>
+  <div class="campo"><label>Orçamento detalhado (url do PDF)</label><input type="text" id="f-doc-orcamento"></div>
+</section>
+
+<section>
+  <h2>Orçamento de produto</h2>
+  <div class="campo linha2">
+    <div><label>Valor total (com IVA) — deixa vazio se ainda não existir</label>
+      <input type="number" step="0.01" id="f-valor-produto"></div>
+    <div class="check" style="margin-top:22px"><input type="checkbox" id="f-valor-produto-com-iva">
+      <label style="margin:0">Este valor já inclui IVA</label></div>
+  </div>
+</section>
+
+<section>
+  <h2>Estado das fases</h2>
+  <div id="fases-blocos"></div>
+</section>
+
+<div class="rodape">
+  <button class="guardar" id="btn-guardar" onclick="guardar()">Guardar alterações</button>
+  <span class="estado-msg" id="msg-estado"></span>
+</div>
+
+<script>
+const projeto = __PROJETO_JSON__;
+const idDocumento = "__ID__";
+const FASES = [
+  {id:"honorarios", titulo:"Honorários"}, {id:"conceito", titulo:"Conceito"},
+  {id:"projeto", titulo:"Projeto"}, {id:"orcamento", titulo:"Orçamento"},
+];
+
+document.getElementById('tit-cliente').textContent = projeto.cliente;
+document.getElementById('f-cliente').value = projeto.cliente || '';
+document.getElementById('f-validade').value = projeto.validade || '';
+document.getElementById('f-honorarios-total').value = projeto.honorarios.total ?? '';
+document.getElementById('f-conceito-leitura').value = projeto.conceito.leitura || '';
+document.getElementById('f-conceito-materiais').value = projeto.conceito.materiais || '';
+document.getElementById('f-doc-apresentacao').value = projeto.documentos.apresentacao || '';
+document.getElementById('f-doc-orcamento').value = projeto.documentos.orcamento || '';
+document.getElementById('f-valor-produto').value = projeto.valorProduto ?? '';
+document.getElementById('f-valor-produto-com-iva').checked = projeto.valorProduto != null;
+
+let conceitoImagemAtual = projeto.conceito.imagem || null;
+if (conceitoImagemAtual) {
+  document.getElementById('preview-conceito').innerHTML =
+    `<img class="miniatura" src="${conceitoImagemAtual}" alt="Imagem atual do conceito">`;
+}
+document.getElementById('f-conceito-imagem-ficheiro').addEventListener('change', function(e){
+  const ficheiro = e.target.files[0];
+  if (!ficheiro) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    conceitoImagemAtual = leitor.result;
+    document.getElementById('preview-conceito').innerHTML =
+      `<img class="miniatura" src="${conceitoImagemAtual}" alt="Nova imagem do conceito">`;
+  };
+  leitor.readAsDataURL(ficheiro);
+});
+
+function addLinhaHonorario(dados) {
+  dados = dados || {t:'', d:'', v:''};
+  const div = document.createElement('div');
+  div.className = 'linha-tabela linha-honorario';
+  div.innerHTML = `
+    <button type="button" class="remover" onclick="this.parentElement.remove()">&times;</button>
+    <div class="linha3">
+      <div><label>Título</label><input type="text" class="lh-titulo" value="${dados.t.replace(/"/g,'&quot;')}"></div>
+      <div><label>Descrição</label><input type="text" class="lh-descricao" value="${(dados.d||'').replace(/"/g,'&quot;')}"></div>
+      <div><label>Valor</label><input type="number" step="0.01" class="lh-valor" value="${dados.v}"></div>
+    </div>`;
+  document.getElementById('linhas-honorarios').appendChild(div);
+}
+(projeto.honorarios.linhas || []).forEach(addLinhaHonorario);
+
+function addAmbiente(dados) {
+  dados = dados || {nome:'', nota:'', imagem:null};
+  const div = document.createElement('div');
+  div.className = 'linha-tabela linha-ambiente';
+  div.dataset.imagem = dados.imagem || '';
+  div.innerHTML = `
+    <button type="button" class="remover" onclick="this.parentElement.remove()">&times;</button>
+    <div class="campo"><label>Nome</label><input type="text" class="amb-nome" value="${dados.nome.replace(/"/g,'&quot;')}"></div>
+    <div class="campo"><label>Nota</label><textarea class="amb-nota">${dados.nota || ''}</textarea></div>
+    <div class="campo"><label>Imagem</label>
+      <div class="amb-preview">${dados.imagem?`<img class="miniatura" src="${dados.imagem}">`:''}</div>
+      <input type="file" accept="image/*" class="amb-imagem-ficheiro">
+    </div>`;
+  div.querySelector('.amb-imagem-ficheiro').addEventListener('change', function(e){
+    const ficheiro = e.target.files[0];
+    if (!ficheiro) return;
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      div.dataset.imagem = leitor.result;
+      div.querySelector('.amb-preview').innerHTML = `<img class="miniatura" src="${leitor.result}">`;
+    };
+    leitor.readAsDataURL(ficheiro);
+  });
+  document.getElementById('linhas-ambientes').appendChild(div);
+}
+(projeto.ambientes || []).forEach(addAmbiente);
+
+const fasesEstadoAtual = {};
+(projeto.fases || []).forEach(f => { fasesEstadoAtual[f.id] = {estado: f.estado, data: f.data}; });
+const blocosFases = document.getElementById('fases-blocos');
+FASES.forEach(f => {
+  const atual = fasesEstadoAtual[f.id] || {estado: 'prevista', data: ''};
+  const div = document.createElement('div');
+  div.className = 'fase-bloco';
+  div.dataset.faseId = f.id;
+  div.innerHTML = `
+    <h3>${f.titulo}</h3>
+    <div class="linha2">
+      <div><label>Estado</label>
+        <select class="fase-estado">
+          <option value="validada" ${atual.estado==='validada'?'selected':''}>Validada</option>
+          <option value="aguarda" ${atual.estado==='aguarda'?'selected':''}>A aguardar validação</option>
+          <option value="prevista" ${atual.estado==='prevista'?'selected':''}>Por abrir</option>
+        </select>
+      </div>
+      <div class="fase-data-bloco"><label>Data da validação (por extenso, ex: "8 de janeiro de 2026")</label>
+        <input type="text" class="fase-data" value="${atual.data || ''}"></div>
+    </div>`;
+  blocosFases.appendChild(div);
+  const selo = div.querySelector('.fase-estado');
+  const blocoData = div.querySelector('.fase-data-bloco');
+  const atualizarVisibilidadeData = () => { blocoData.style.display = selo.value === 'validada' ? '' : 'none'; };
+  selo.addEventListener('change', atualizarVisibilidadeData);
+  atualizarVisibilidadeData();
+});
+
+function guardar() {
+  const btn = document.getElementById('btn-guardar');
+  const msg = document.getElementById('msg-estado');
+  btn.disabled = true;
+  msg.textContent = 'A gravar…';
+  msg.className = 'estado-msg';
+
+  const honorarios_linhas = [...document.querySelectorAll('.linha-honorario')].map(el => ({
+    titulo: el.querySelector('.lh-titulo').value,
+    descricao: el.querySelector('.lh-descricao').value,
+    valor: parseFloat(el.querySelector('.lh-valor').value) || 0,
+  }));
+  const ambientes = [...document.querySelectorAll('.linha-ambiente')].map(el => ({
+    nome: el.querySelector('.amb-nome').value,
+    nota: el.querySelector('.amb-nota').value,
+    imagem: el.dataset.imagem || null,
+  }));
+  const fases_estado = {};
+  document.querySelectorAll('.fase-bloco').forEach(div => {
+    const estado = div.querySelector('.fase-estado').value;
+    const data = div.querySelector('.fase-data').value;
+    fases_estado[div.dataset.faseId] = estado === 'validada' ? {estado, data} : {estado};
+  });
+  const valorProdutoTexto = document.getElementById('f-valor-produto').value;
+
+  const campos = {
+    cliente: document.getElementById('f-cliente').value,
+    validade: document.getElementById('f-validade').value,
+    honorarios_total: parseFloat(document.getElementById('f-honorarios-total').value) || 0,
+    honorarios_total_com_iva: document.getElementById('f-honorarios-com-iva').checked,
+    honorarios_linhas,
+    conceito: {
+      imagem: conceitoImagemAtual,
+      leitura: document.getElementById('f-conceito-leitura').value || null,
+      materiais: document.getElementById('f-conceito-materiais').value || null,
+    },
+    documento_apresentacao: document.getElementById('f-doc-apresentacao').value || null,
+    documento_orcamento: document.getElementById('f-doc-orcamento').value || null,
+    ambientes,
+    valor_produto: valorProdutoTexto === '' ? null : parseFloat(valorProdutoTexto),
+    valor_produto_com_iva: document.getElementById('f-valor-produto-com-iva').checked,
+    fases_estado,
+  };
+
+  fetch(`/documentos-gerados/${idDocumento}/editar`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(campos)
+  }).then(r => r.json().then(corpo => ({ok: r.ok, corpo})))
+    .then(({ok, corpo}) => {
+      btn.disabled = false;
+      if (ok) {
+        msg.className = 'estado-msg ok';
+        msg.innerHTML = `Gravado. <a href="${corpo.url}" target="_blank">Ver portal</a>`;
+      } else {
+        msg.className = 'estado-msg err';
+        msg.textContent = corpo.erro || 'Não consegui gravar.';
+      }
+    })
+    .catch(() => {
+      btn.disabled = false;
+      msg.className = 'estado-msg err';
+      msg.textContent = 'Falha de rede — tenta outra vez.';
+    });
+}
 </script>
 </body>
 </html>

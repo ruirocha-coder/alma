@@ -660,9 +660,11 @@ def guardar_ou_atualizar_documento_gerado(utilizador: str, titulo: str, ficheiro
 def obter_documento_gerado(id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT titulo, pdf, formato FROM documentos_gerados WHERE id = %s", (id,))
+            cur.execute("SELECT titulo, pdf, formato, card_id, conteudo_markdown FROM documentos_gerados "
+                       "WHERE id = %s", (id,))
             linha = cur.fetchone()
-            return ({"titulo": linha["titulo"], "pdf": bytes(linha["pdf"]), "formato": linha["formato"]}
+            return ({"titulo": linha["titulo"], "pdf": bytes(linha["pdf"]), "formato": linha["formato"],
+                    "card_id": linha["card_id"], "conteudo_markdown": linha["conteudo_markdown"]}
                     if linha else None)
 
 def documentos_gerados_recentes(utilizador: str, limite: int = 5) -> list:
