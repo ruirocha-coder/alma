@@ -1043,7 +1043,7 @@ const conteudo = {
     <div class="imagem">${projeto.projetoImagem?`<img src="${projeto.projetoImagem}" alt="Imagem do projeto">`:''}</div>
     ${projeto.ambientes.map(a=>`
       <div class="amb">
-        <div class="img">${a.imagem?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
+        <div class="img">${(projeto.projetoImagem && a.imagem)?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
         <h3>${a.nome}</h3>
         <p>${a.nota}</p>
       </div>`).join('')}
