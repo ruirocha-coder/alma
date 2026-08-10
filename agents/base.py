@@ -1,4 +1,5 @@
 import anthropic, json, threading
+from datetime import date
 from tools import (bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos,
                    documentos_gerados, portal_projeto, tempo, calculadora)
 from agents import agendamento_entregas
@@ -281,6 +282,42 @@ TOOLS_SUGESTAO = [
     }
 ]
 
+# Pausa das publicações automáticas: pedido explícito do Rui (2026-08-07,
+# post "Boas férias!" no Mural da Gestão) — durante férias ou paragens da
+# equipa, a mensagem diária, os alertas de atraso e os avisos de agendas/
+# logística não se devem publicar nem marcar ninguém. Ao contrário de
+# registar_sugestao_comportamento (texto livre, só lido dentro de uma
+# conversa), isto é uma janela de datas concreta que os próprios jobs
+# agendados consultam antes de publicarem (ver db.pausa_automatica_ativa) —
+# por isso as duas ferramentas coexistem, cada uma para o tipo de mudança
+# que serve melhor. Mesma restrição de quem pode pedir uma publicação no
+# mural a partir do Basecamp (só Rui, Beatriz ou Isa).
+TOOLS_PAUSA_AUTOMATICA = [
+    {
+        "name": "pausar_publicacoes_automaticas",
+        "description": "Suspende, entre duas datas (inclusive), as publicações automáticas da Alma no Mural e as menções/tags que elas fazem (mensagem diária, alertas de atraso, avisos de agendas/logística) — usa isto sempre que reconheceres, pelo sentido da conversa, que alguém autorizado está a avisar de férias, de uma paragem da equipa, ou a pedir explicitamente para não publicares/marcares pessoas durante um período, mesmo que não use estas palavras exatas. NÃO afeta respostas a quem te mencionar diretamente nesse período — só o que publicarias por iniciativa própria. Só quem está autorizado a pedir uma publicação no mural a partir do Basecamp (Rui, Beatriz ou Isa) pode usar isto.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data_inicio": {"type": "string", "description": "AAAA-MM-DD"},
+                "data_fim": {"type": "string", "description": "AAAA-MM-DD"},
+                "motivo": {"type": "string", "description": "razão da pausa, ex: 'férias da equipa'"}
+            },
+            "required": ["data_inicio", "data_fim", "motivo"]
+        }
+    },
+    {
+        "name": "retomar_publicacoes_automaticas",
+        "description": "Termina, antes da data prevista, a pausa das publicações automáticas ativa neste momento (ver pausar_publicacoes_automaticas) — usa quando alguém autorizado pedir para retomar mais cedo. Mesma restrição: só a partir do Basecamp, só Rui, Beatriz ou Isa.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "listar_pausas_automaticas",
+        "description": "Lista as pausas de publicações automáticas registadas, ativas e passadas (datas, motivo, quem pediu) — usa quando alguém perguntar se, ou até quando, as publicações automáticas estão suspensas. Disponível em qualquer canal, sem restrição — é só consulta.",
+        "input_schema": {"type": "object", "properties": {}}
+    }
+]
+
 # pedido explícito do Rui (2026-07-27): corrigir a empresa registada no
 # perfil de OUTRA pessoa (não o de quem está a falar) afeta o routing dela
 # em toda a aplicação — só o Rui e a Beatriz podem fazer isto, em qualquer
@@ -346,6 +383,16 @@ def _publicar_mural_restrito(utilizador: str, assunto: str, mensagem: str, orige
         return {"erro": "só o Rui, a Beatriz ou a Isa podem pedir uma publicação no mural a partir do Basecamp"}
     return basecamp.publicar_mural(assunto, mensagem, projeto=projeto)
 
+def _pausar_publicacoes_restrito(utilizador: str, origem: str, data_inicio: str, data_fim: str, motivo: str) -> dict:
+    if origem == "basecamp" and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
+        return {"erro": "só o Rui, a Beatriz ou a Isa podem pausar as publicações automáticas a partir do Basecamp"}
+    return db.marcar_pausa_automatica(data_inicio, data_fim, motivo, utilizador)
+
+def _retomar_publicacoes_restrito(utilizador: str, origem: str) -> dict:
+    if origem == "basecamp" and not any(nome in utilizador.lower() for nome in _AUTORIZADOS_MURAL):
+        return {"erro": "só o Rui, a Beatriz ou a Isa podem retomar as publicações automáticas a partir do Basecamp"}
+    return db.terminar_pausa_automatica(date.today())
+
 def _system_com_cache(system_prompt: str, contexto: str) -> list:
     """A parte fixa do system prompt (persona + missão do agente) é sempre a
     mesma entre pedidos — marcá-la para cache poupa reprocessar os mesmos
@@ -410,7 +457,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
                                        db.contexto_utilizador(utilizador)) if c)
     system = _system_com_cache(system_prompt, contexto)
     tools_completas = _tools_com_cache(
-        tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS
+        tools + TOOLS_MEMORIA + TOOLS_MURAL + TOOLS_SUGESTAO + TOOLS_PAUSA_AUTOMATICA
+        + documentos_gerados.TOOLS_DOCUMENTOS_GERADOS
         + portal_projeto.TOOLS_PORTAL_PROJETO + tempo.TOOLS_TEMPO + calculadora.TOOLS_CALCULADORA)
     funcoes_utilizador = {
         "memorizar_facto": lambda facto: db.memorizar_facto(utilizador, facto),
@@ -431,6 +479,10 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
             utilizador, eventos),
         "publicar_mural": lambda assunto, mensagem: _publicar_mural_restrito(
             utilizador, assunto, mensagem, origem, projeto_mural),
+        "pausar_publicacoes_automaticas": lambda data_inicio, data_fim, motivo: _pausar_publicacoes_restrito(
+            utilizador, origem, data_inicio, data_fim, motivo),
+        "retomar_publicacoes_automaticas": lambda: _retomar_publicacoes_restrito(utilizador, origem),
+        "listar_pausas_automaticas": lambda: db.pausas_automaticas_lista(),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
         "ler_mensagem_mural_basecamp": lambda url: basecamp.ler_mensagem_mural(url),
         "gerar_pdf": lambda titulo, conteudo_markdown: documentos_gerados.gerar_pdf(

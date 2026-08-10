@@ -448,6 +448,11 @@ def correr_monitorizacao_logistica() -> dict:
 
     try:
         hoje = date.today()
+        pausa = db.pausa_automatica_ativa(hoje)
+        if pausa:
+            print(f"[logistica_entregas] pausa automática ativa ({pausa['motivo']}, "
+                  f"até {pausa['data_fim']}) — sem monitorização hoje")
+            return {"info": f"pausa automática ativa: {pausa['motivo']}"}
         try:
             itens = [i for i in basecamp._itens_ativos(forcar=True)
                     if i.get("type") == "Kanban::Card"

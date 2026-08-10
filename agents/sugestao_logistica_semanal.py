@@ -750,6 +750,11 @@ def correr_sugestao_semanal_logistica() -> dict:
         return {"erro": "já está a correr uma sugestão semanal"}
 
     try:
+        pausa = db.pausa_automatica_ativa(date.today())
+        if pausa:
+            print(f"[sugestao_logistica_semanal] pausa automática ativa ({pausa['motivo']}, "
+                  f"até {pausa['data_fim']}) — sem sugestão hoje")
+            return {"info": f"pausa automática ativa: {pausa['motivo']}"}
         try:
             (cards_por_regiao, moradas_por_regiao, nao_confirmados, itens_prontos,
              entregas_por_regiao, textos_pdf_por_id) = _cards_prontos_a_entregar()

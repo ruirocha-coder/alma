@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp, ecos_largos
+import db
 
 _a_correr_interior_guider = threading.Lock()
 _a_correr_ecos_largos = threading.Lock()
@@ -169,6 +170,11 @@ def correr_resumo_semanal():
     tem a sua própria corrida e o seu próprio mural (ver
     correr_resumo_semanal_ecos_largos). Pensado para correr uma vez por
     semana (agendado), mas pode ser disparado manualmente."""
+    pausa = db.pausa_automatica_ativa(date.today())
+    if pausa:
+        print(f"[resumo_semanal:interior_guider] pausa automática ativa ({pausa['motivo']}, "
+              f"até {pausa['data_fim']}) — sem resumo hoje")
+        return
     _correr(_a_correr_interior_guider, "interior_guider",
             lambda projeto: not _e_projeto_ecos_largos(projeto), "Gestão")
 

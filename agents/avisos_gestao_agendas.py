@@ -29,6 +29,7 @@
 import threading
 from datetime import date, timedelta
 from tools import basecamp, logistica
+import db
 
 _a_correr = threading.Lock()
 
@@ -139,6 +140,11 @@ def correr_avisos_gestao_agendas() -> dict:
         return {"erro": "já está a correr uma verificação de avisos"}
     try:
         hoje = date.today()
+        pausa = db.pausa_automatica_ativa(hoje)
+        if pausa:
+            print(f"[avisos_gestao_agendas] pausa automática ativa ({pausa['motivo']}, "
+                  f"até {pausa['data_fim']}) — sem avisos hoje")
+            return {"info": f"pausa automática ativa: {pausa['motivo']}"}
         marcos_hoje = _marcos_de_hoje(hoje)
         if not marcos_hoje:
             return {"avisos_publicados": 0, "marcos": []}

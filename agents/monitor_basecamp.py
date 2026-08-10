@@ -1,4 +1,5 @@
 import threading
+from datetime import date
 from persona import PERSONA
 from agents.base import client
 from tools import basecamp, procedimentos
@@ -91,6 +92,12 @@ def correr_monitorizacao() -> list[dict]:
         return [{"erro": "já está a correr uma monitorização", "ok": False}]
 
     try:
+        pausa = db.pausa_automatica_ativa(date.today())
+        if pausa:
+            print(f"[monitor_basecamp] pausa automática ativa ({pausa['motivo']}, "
+                  f"até {pausa['data_fim']}) — sem alertas hoje")
+            return [{"info": f"pausa automática ativa: {pausa['motivo']}", "ok": True}]
+
         procedimentos_texto = _procedimentos_ou_aviso()
 
         try:
