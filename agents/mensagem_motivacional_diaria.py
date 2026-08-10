@@ -198,6 +198,11 @@ def correr_mensagem_diaria_motivacional():
         print("[mensagem_motivacional_diaria] já há uma corrida em curso — ignorado")
         return
     try:
+        pausa = db.pausa_automatica_ativa(date.today())
+        if pausa:
+            print(f"[mensagem_motivacional_diaria] pausa automática ativa ({pausa['motivo']}, "
+                  f"até {pausa['data_fim']}) — sem publicação hoje")
+            return
         analise = _analisar_projetos()
         contexto = _contexto_do_dia()
         texto = _gerar_mensagem(analise, contexto)

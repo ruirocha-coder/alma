@@ -186,6 +186,40 @@ CREATE TABLE IF NOT EXISTS estimativas_montagem (
     real_registado_em TIMESTAMPTZ,
     calibrado BOOLEAN NOT NULL DEFAULT false
 );
+
+-- pausa das publicações automáticas da Alma (mensagem diária, alertas de
+-- atraso, avisos de agendas/logística) — pedido explícito do Rui
+-- (2026-08-07, post "Boas férias!" no Mural da Gestão): durante férias ou
+-- paragens da equipa, os jobs agendados não devem publicar nem marcar
+-- pessoas. `ativa` permite terminar uma pausa antes da data prevista (ver
+-- retomar_publicacoes_automaticas) sem apagar o histórico.
+CREATE TABLE IF NOT EXISTS pausas_automaticas (
+    id SERIAL PRIMARY KEY,
+    data_inicio DATE NOT NULL,
+    data_fim DATE NOT NULL,
+    motivo TEXT,
+    criado_por TEXT,
+    ativa BOOLEAN NOT NULL DEFAULT true,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+"""
+
+# período de férias já anunciado pelo Rui no Mural da Gestão (post "Boas
+# férias!", 2026-08-07): "não precisas de publicar as mensagens de início
+# de dia, nem tagar durante este período porque estamos de férias". Antes
+# desta tabela existir, esse pedido só gerava, no máximo, um comentário
+# isolado de resposta — nada persistia para os jobs agendados consultarem,
+# por isso a Alma continuava a publicar e a marcar pessoas todos os dias
+# durante a própria pausa que lhe tinham pedido (bug real, 2026-08-10).
+# Semeado aqui (em vez de só pela ferramenta pausar_publicacoes_automaticas)
+# para valer já a partir do próximo arranque, sem depender de a Alma voltar
+# a processar aquele post. WHERE NOT EXISTS evita duplicar em cada arranque.
+SEED_PAUSA_FERIAS_AGOSTO_2026 = """
+INSERT INTO pausas_automaticas (data_inicio, data_fim, motivo, criado_por)
+SELECT '2026-08-10', '2026-08-23', 'férias da equipa (post de Rui Rocha no Mural, 2026-08-07)', 'Rui Rocha'
+WHERE NOT EXISTS (
+    SELECT 1 FROM pausas_automaticas WHERE data_inicio = '2026-08-10' AND data_fim = '2026-08-23'
+);
 """
 
 # valores exatamente os do "Procedimento Tempos de Montagem para Logística"
@@ -276,6 +310,7 @@ def inicializar_schema():
             cur.execute(MIGRACOES)
             cur.execute(MIGRACAO_CLIENTE_RESUMO_NULAVEL)
             cur.execute(SEED_PARAMETROS_ESTIMATIVA)
+            cur.execute(SEED_PAUSA_FERIAS_AGOSTO_2026)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
@@ -575,6 +610,65 @@ def esquecer_factos_globais(termo: str) -> dict:
             apagados = cur.rowcount
         conn.commit()
     return {"apagados": apagados}
+
+def marcar_pausa_automatica(data_inicio: str, data_fim: str, motivo: str, criado_por: str) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO pausas_automaticas (data_inicio, data_fim, motivo, criado_por)
+                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                (data_inicio, data_fim, motivo, criado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return {"registado": True, "id": id_gerado, "data_inicio": data_inicio, "data_fim": data_fim}
+
+def pausa_automatica_ativa(hoje) -> dict:
+    """A pausa ativa que cobre `hoje`, se houver uma — consultada pelos
+    próprios jobs agendados (ver agents/monitor_basecamp.py e outros) antes
+    de publicarem no Mural ou marcarem alguém, para nunca o fazerem durante
+    uma pausa pedida (ver marcar_pausa_automatica). None se não houver
+    nenhuma a cobrir esta data."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, data_inicio, data_fim, motivo, criado_por
+                   FROM pausas_automaticas
+                   WHERE ativa AND %s BETWEEN data_inicio AND data_fim
+                   ORDER BY data_inicio DESC LIMIT 1""",
+                (hoje,)
+            )
+            l = cur.fetchone()
+            if not l:
+                return None
+            return {"id": l["id"], "data_inicio": l["data_inicio"].isoformat(),
+                    "data_fim": l["data_fim"].isoformat(), "motivo": l["motivo"], "criado_por": l["criado_por"]}
+
+def terminar_pausa_automatica(hoje) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE pausas_automaticas SET ativa = false
+                   WHERE ativa AND %s BETWEEN data_inicio AND data_fim""",
+                (hoje,)
+            )
+            terminadas = cur.rowcount
+        conn.commit()
+    return {"terminadas": terminadas}
+
+def pausas_automaticas_lista(limite: int = 20) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, data_inicio, data_fim, motivo, criado_por, ativa, criado_em
+                   FROM pausas_automaticas ORDER BY data_inicio DESC LIMIT %s""",
+                (limite,)
+            )
+            return [{
+                "id": l["id"], "data_inicio": l["data_inicio"].isoformat(), "data_fim": l["data_fim"].isoformat(),
+                "motivo": l["motivo"], "criado_por": l["criado_por"], "ativa": l["ativa"],
+                "criado_em": l["criado_em"].isoformat(),
+            } for l in cur.fetchall()]
 
 def contexto_global() -> str:
     """Bloco de texto com a memória global aprovada (ver
