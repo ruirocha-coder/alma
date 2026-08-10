@@ -186,6 +186,7 @@ def _processar(payload: dict):
 
     comments_url = f"{basecamp._base_url()}/recordings/{alvo_id}/comments.json"
     comentarios = basecamp.ler_comentarios(comments_url)
+    eventos = basecamp.ler_eventos(alvo_id)
     titulo = alvo_completo.get("title") or alvo.get("title") or "(sem título)"
     notas = _texto_simples(alvo_completo.get("description", ""))
     estado = (alvo_completo.get("parent") or {}).get("title") or "(sem estado)"
@@ -193,12 +194,14 @@ def _processar(payload: dict):
     url_alvo = alvo_completo.get("url") or alvo.get("url") or ""
 
     def _linha_comentario(c):
+        if "conteudo" not in c:
+            return f"- {c['autor']} {c['acao']}"
         linha = f"- [url: {c.get('url') or '(sem url)'}] {c['autor']}: {c['conteudo']}"
         if c.get("anexos"):
             linha += f" (ficheiros anexados aqui: {', '.join(c['anexos'])})"
         return linha
 
-    historico = "\n".join(_linha_comentario(c) for c in comentarios) or "(sem comentários ainda)"
+    historico = "\n".join(_linha_comentario(c) for c in basecamp.ordenar_por_data(comentarios, eventos)) or "(sem comentários ainda)"
     contexto = f"""Foste mencionada nesta tarefa/card do Basecamp: {titulo}
 Url da tarefa/card: {url_alvo}
 Url dos comentários desta tarefa/card (usa este exato valor em
@@ -210,8 +213,9 @@ Responsáveis: {responsaveis}
 Notas da tarefa/card:
 {notas or "(sem notas)"}
 
-Conversa/comentários existentes (cada um com o seu url, e os ficheiros que
-tenha anexados diretamente, se houver):
+Conversa/comentários existentes e mudanças de coluna/estado, por ordem
+cronológica (cada comentário com o seu url, e os ficheiros que tenha
+anexados diretamente, se houver):
 {historico}
 
 Se a pergunta precisar de informação que só está num ficheiro anexado —

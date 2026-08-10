@@ -49,8 +49,14 @@ def _procedimentos_ou_aviso() -> str:
         print(f"[monitor_basecamp] procedimentos indisponíveis: {e!r}")
         return "(Documento de procedimentos ainda não está configurado.)"
 
-def _gerar_comentario(item: dict, comentarios: list, procedimentos_texto: str) -> str:
-    historico = "\n".join(f"- {c['autor']}: {c['conteudo']}" for c in comentarios) or "(sem comentários ainda)"
+def _linha_historico(item: dict) -> str:
+    if "conteudo" in item:
+        return f"- {item['autor']}: {item['conteudo']}"
+    return f"- {item['autor']} {item['acao']}"
+
+def _gerar_comentario(item: dict, comentarios: list, eventos: list, procedimentos_texto: str) -> str:
+    historico_itens = basecamp.ordenar_por_data(comentarios, eventos)
+    historico = "\n".join(_linha_historico(c) for c in historico_itens) or "(sem comentários ainda)"
     contexto = f"""Tarefa/card: {item['titulo']}
 Projeto: {item['projeto']}
 Tipo: {item['tipo']}
@@ -61,7 +67,7 @@ Prazo: {item['prazo']} ({item['dias_atraso']} dias de atraso)
 Notas da tarefa/card:
 {item.get('notas') or '(sem notas)'}
 
-Comentários existentes:
+Histórico (comentários e mudanças de coluna/estado, por ordem cronológica):
 {historico}
 
 Procedimentos da empresa:
@@ -106,7 +112,8 @@ def correr_monitorizacao() -> list[dict]:
         for item in a_processar:
             try:
                 comentarios = basecamp.ler_comentarios(item["comments_url"]) if item["comments_url"] else []
-                texto = _gerar_comentario(item, comentarios, procedimentos_texto)
+                eventos = basecamp.ler_eventos(item["id"])
+                texto = _gerar_comentario(item, comentarios, eventos, procedimentos_texto)
                 basecamp.comentar(item["id"], texto, projeto=item["projeto"])
                 db.registar_alerta(item["id"], item["prazo"], texto)
                 resultado.append({"item": item, "comentario": texto, "ok": True})
