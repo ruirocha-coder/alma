@@ -434,6 +434,58 @@ def ler_comentarios(comments_url: str) -> list[dict]:
         })
     return resultado
 
+_ACOES_EVENTO = {
+    "moved": "moveu o card/tarefa de coluna/lista",
+    "completed": "marcou como concluído",
+    "uncompleted": "desmarcou como concluído",
+    "assignment_changed": "alterou responsáveis",
+    "due_on_changed": "alterou o prazo",
+    "renamed": "renomeou",
+    "content_changed": "alterou as notas/conteúdo",
+    "archived": "arquivou",
+    "trashed": "eliminou",
+    "restored": "restaurou",
+}
+
+def ler_eventos(item_id: int) -> list[dict]:
+    """Lê o histórico de eventos (mudanças estruturais) de uma tarefa/card —
+    ex: "moveu para outra coluna", "arquivou", "alterou responsáveis". Isto
+    é diferente de ler_comentarios: um evento não é um comentário escrito por
+    alguém, é o registo de atividade que o Basecamp mantém à parte
+    (endpoint /events.json) e que NUNCA aparece em comments.json — inclui o
+    "X moved this card to <coluna>" que se vê na timeline do card. Sem isto,
+    o histórico visto pela Alma ficava preso ao último comentário escrito,
+    mesmo que o card já tivesse avançado de coluna depois disso (bug real,
+    2026-08-10: um card foi movido para "Agendamento" e a Alma continuou a
+    tratá-lo como se estivesse ainda pendente de validação, porque só via os
+    comentários, nunca a mudança de coluna). Tolerante a falhas — se o
+    endpoint de eventos falhar, não deve impedir a Alma de comentar com o
+    que já tem (comentários e estado atual)."""
+    try:
+        eventos = _get_paginado(f"{_base_url()}/recordings/{item_id}/events.json")
+    except httpx.HTTPError as e:
+        print(f"[basecamp] não consegui ler eventos de {item_id}: {e!r}")
+        return []
+    resultado = []
+    for e in eventos:
+        acao = e.get("action") or ""
+        if acao in ("created", ""):
+            continue  # a criação não interessa para saber em que fase o card está agora
+        resultado.append({
+            "autor": (e.get("creator") or {}).get("name"),
+            "acao": _ACOES_EVENTO.get(acao, acao.replace("_", " ")),
+            "criado_em": e.get("created_at"),
+        })
+    return resultado
+
+def ordenar_por_data(*listas: list[dict]) -> list[dict]:
+    """Junta várias listas de itens com histórico (comentários, eventos, ...)
+    numa só, ordenada cronologicamente por 'criado_em' — para a Alma ver a
+    sequência real dos acontecimentos num card (ex: um comentário seguido de
+    uma mudança de coluna), não só os comentários isolados do resto."""
+    todos = [item for lista in listas for item in lista]
+    return sorted(todos, key=lambda i: i.get("criado_em") or "")
+
 def listar_pdfs_anexados_por_data(comments_url: str) -> list[dict]:
     """Lista todos os PDFs anexados nos comentários de uma tarefa/card,
     ordenados do MAIS RECENTE para o mais antigo — pedido real (Rui,
