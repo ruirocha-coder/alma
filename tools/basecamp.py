@@ -434,6 +434,33 @@ def ler_comentarios(comments_url: str) -> list[dict]:
         })
     return resultado
 
+def ler_texto_comentarios(comments_url: str) -> list[dict]:
+    """Lê o TEXTO escrito diretamente nos comentários de uma tarefa/card
+    (não ficheiros anexados) — usa isto sempre que a informação que
+    precisas foi escrita como comentário normal (ex: uma nota, uma
+    aprovação, um feedback), e não está num PDF/imagem anexado. Bug real
+    (2026-08-07): sem esta ferramenta, a Alma só conseguia ler ficheiros
+    anexados aos comentários (ver ler_anexos_registo_basecamp,
+    procurar_anexo_em_comentarios, listar_pdfs_anexados_por_data) e não
+    tinha nenhuma forma de ler o texto normal escrito por alguém — teve
+    de pedir à pessoa para copiar e colar o texto do comentário.
+
+    Devolve cada comentário com autor, data e o texto já limpo de tags
+    HTML, do mais antigo para o mais recente (ordem real da conversa).
+    Comentários sem texto (ex: só uma imagem ou reação) não aparecem
+    aqui — usa as ferramentas de anexos para esses."""
+    comentarios = _get_paginado(comments_url)
+    resultado = []
+    for c in comentarios:
+        texto = _texto_simples(c.get("content"))
+        if texto:
+            resultado.append({
+                "autor": (c.get("creator") or {}).get("name"),
+                "criado_em": c.get("created_at"),
+                "texto": texto,
+            })
+    return resultado
+
 def listar_pdfs_anexados_por_data(comments_url: str) -> list[dict]:
     """Lista todos os PDFs anexados nos comentários de uma tarefa/card,
     ordenados do MAIS RECENTE para o mais antigo — pedido real (Rui,
@@ -1115,6 +1142,17 @@ TOOLS_ESTADO_PROJETO = [
     {
         "name": "listar_pdfs_anexados_por_data",
         "description": "Lista todos os PDFs anexados nos comentários de uma tarefa/card, já ordenados do mais recente para o mais antigo. Usa isto SEMPRE antes de decidires qual é a versão mais atual de um documento (ex: honorários, orçamento, uma proposta que foi revista várias vezes) — nunca tentes tu mesma perceber qual comentário é mais recente lendo o texto corrido, mesmo que pareça óbvio; esta lista já vem ordenada por código. O primeiro item cujo nome de ficheiro corresponder ao que procuras é sempre o mais recente; passa o \"comentario_url\" desse item a ler_anexos_registo_basecamp para leres o conteúdo, ou o \"download_url\" a extrair_imagem_conceito_pdf. Usa sempre o \"download_url\" tal como vem daqui — nunca um obtido de outro lado (ex: de um preview_url, ou de um link dentro do HTML de um comentário), que pode dar 404.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "comments_url": {"type": "string", "description": "o campo \"comments_url\" do card (devolvido por procurar_cards_basecamp, estado_projeto_basecamp, etc.) — nunca inventado"}
+            },
+            "required": ["comments_url"]
+        }
+    },
+    {
+        "name": "ler_texto_comentarios",
+        "description": "Lê o TEXTO escrito diretamente nos comentários de uma tarefa/card (não ficheiros anexados) — usa isto sempre que a informação que precisas foi escrita como um comentário normal (ex: uma nota, uma aprovação, um feedback de alguém), em vez de estar num PDF/imagem anexado. Devolve cada comentário com \"autor\", \"criado_em\" e \"texto\" (já sem tags HTML), do mais antigo para o mais recente — a ordem real da conversa. Comentários sem texto (ex: só uma imagem) não aparecem aqui; para esses usa ler_anexos_registo_basecamp ou listar_pdfs_anexados_por_data.",
         "input_schema": {
             "type": "object",
             "properties": {
