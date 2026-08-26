@@ -721,11 +721,28 @@ def _adicionar_arroba_em_nomes_conhecidos(texto: str, pessoas: list) -> str:
     texto. Nomes mais longos são tentados primeiro, para "Rui Rocha" não
     ficar só parcialmente tagado por causa de outra pessoa chamada só
     "Rui". Uma ocorrência já precedida de "@" nunca é tocada (evita
-    "@@Nome")."""
+    "@@Nome").
+
+    URLs ficam protegidos deste passo — bug real, 2026-08-26: "Alma" é
+    uma pessoa registada no Basecamp, e o link do portal
+    ("alma-ia.up.railway.app") tem "alma" como palavra isolada (a
+    fronteira de palavra do regex conta o "-" como limite) — sem esta
+    proteção, o link ficava com um "@" a mais logo depois de "https://",
+    partindo-o (o browser interpretava "@alma-ia..." como
+    utilizador/password na URL, nunca como o domínio certo)."""
+    urls = []
+    def _proteger(m):
+        urls.append(m.group(0))
+        return f"@@URL{len(urls) - 1}@@"
+    texto = re.sub(r"https?://\S+", _proteger, texto)
+
     nomes = sorted({p["name"] for p in pessoas if p.get("name")}, key=len, reverse=True)
     for nome in nomes:
         padrao = re.compile(r"(?<!@)\b" + re.escape(nome) + r"\b", re.IGNORECASE)
         texto = padrao.sub(lambda m: "@" + m.group(0), texto)
+
+    for i, url in enumerate(urls):
+        texto = texto.replace(f"@@URL{i}@@", url)
     return texto
 
 def _resolver_mencoes(texto: str, projeto: str) -> tuple:
