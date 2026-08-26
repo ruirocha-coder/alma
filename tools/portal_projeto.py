@@ -706,9 +706,17 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         documento_apresentacao, documento_orcamento,
         projeto["documentos"].get("conceito"), projeto.get("projetoImagem"))
 
+    comentario = (f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
+                  f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
+    if aviso:
+        # sem isto, o aviso só existia na resposta HTTP da chamada — que
+        # ninguém da equipa vê — e a fase seguinte ficava presa sem botão
+        # nenhum para a cliente, sem ninguém dar por isso (bug real,
+        # 2026-08-26: portal do Gerel Yunden preso assim, sem aviso a
+        # ninguém). Tem de ir para o Basecamp, que a equipa acompanha.
+        comentario += f"\n\n⚠️ {aviso}"
     try:
-        basecamp.comentar(card_id, f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
-                                    f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
+        basecamp.comentar(card_id, comentario)
     except Exception as exc:
         aviso = (aviso + " " if aviso else "") + f"(não consegui postar o comentário no Basecamp: {exc})"
 
