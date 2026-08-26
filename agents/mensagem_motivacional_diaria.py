@@ -62,7 +62,10 @@ O que esta mensagem É:
   o trabalho e a atenção, não sobre o exterior.
 
 Regras de escrita, além do tom de voz geral acima:
-- Curta: um a dois parágrafos curtos, nunca mais.
+- Muito curta (pedido do Rui, 2026-08-26 — encurtada de "um a dois
+  parágrafos" para isto): um único parágrafo curto, no máximo 3 a 4
+  frases, sem contar a citação final. Nunca dois parágrafos de texto
+  próprio antes da citação.
 - Nunca nomeies ninguém, nem apontes a nenhuma pessoa ou situação em
   concreto — é para toda a equipa, sem exceções nem casos particulares.
 - Nunca uses linguagem motivacional batida ("vamos conseguir", "força",
@@ -137,13 +140,21 @@ def _analisar_projetos() -> str:
     hoje = date.today()
     return "\n".join(_analisar_projeto(projeto, hoje) for projeto in PROJETOS)
 
+# localização real da equipa (pedido do Rui, 2026-08-26, depois de a
+# mensagem de 24 de agosto falar de calor sem estar calor aqui) — a
+# previsão do tempo tem de ser sempre a desta cidade, nunca uma média
+# nacional de Portugal (o país tem climas bem diferentes norte/sul; calor
+# no sul não significa calor no Porto/Gaia). O mesmo local usado no
+# rodapé do portal de projeto (ver tools/portal_projeto.py).
+_LOCALIZACAO_EQUIPA = "Vila Nova de Gaia"
+
 def _contexto_do_dia() -> str:
-    """Pesquisa na internet um resumo factual e muito breve sobre Portugal
-    hoje (tempo, estação, festas próximas, notícias principais) — só
-    contexto interno para a mensagem final, nunca para citar em concreto.
-    web_search/web_fetch correm do lado do servidor da Anthropic (ver
-    TOOLS_INTERNET em agents/base.py), por isso só é preciso lidar com
-    pause_turn, nunca com tool_use local.
+    """Pesquisa na internet um resumo factual e muito breve sobre o dia de
+    hoje na localização real da equipa (tempo, estação, festas próximas,
+    notícias principais) — só contexto interno para a mensagem final,
+    nunca para citar em concreto. web_search/web_fetch correm do lado do
+    servidor da Anthropic (ver TOOLS_INTERNET em agents/base.py), por
+    isso só é preciso lidar com pause_turn, nunca com tool_use local.
 
     A data de hoje é sempre calculada aqui em Python e passada explícita no
     pedido — nunca deixada para o modelo inferir da data dos resultados de
@@ -151,20 +162,32 @@ def _contexto_do_dia() -> str:
     de 2025", a data da notícia mais recente encontrada, não a real).
     Nome do mês escrito à mão (nunca strftime("%B")) — esse formato depende
     da locale do servidor, que aqui não está em português, e sairia em
-    inglês ("August")."""
+    inglês ("August").
+
+    A previsão do tempo é sempre pesquisada e ancorada a _LOCALIZACAO_EQUIPA
+    especificamente, nunca "Portugal" em geral (bug real, 2026-08-24: a
+    mensagem falou de calor, mas não estava calor na cidade onde a equipa
+    está — a pesquisa genérica por "Portugal" tinha apanhado a previsão de
+    outra região do país)."""
     hoje_data = date.today()
     hoje = f"{hoje_data.day} de {_MESES_PT[hoje_data.month - 1]} de {hoje_data.year}"
-    mensagens = [{"role": "user", "content": f"Hoje é {hoje}. Contexto de hoje em Portugal."}]
+    mensagens = [{"role": "user",
+                 "content": f"Hoje é {hoje}. Contexto de hoje para a equipa, em {_LOCALIZACAO_EQUIPA}."}]
     system = (
         f"Hoje é mesmo {hoje} — usa sempre esta data como \"hoje\", nunca a "
         f"data de nenhum resultado de pesquisa que encontrares (uma notícia "
-        f"recente não é hoje, só é recente). Pesquisa na internet e devolve "
-        f"um resumo factual muito breve (no máximo 6 linhas, sem opinião "
-        f"nem floreados) sobre Portugal, para esta data exata: previsão do "
-        f"tempo, a estação do ano, se há algum feriado ou festa/tradição "
-        f"relevante nos próximos dias, e as principais notícias mais "
-        f"recentes que encontrares. Isto é só contexto interno para outra "
-        f"escrita, não é para mostrar a ninguém tal como está."
+        f"recente não é hoje, só é recente). A equipa trabalha em "
+        f"{_LOCALIZACAO_EQUIPA} — pesquisa a previsão do tempo especificamente "
+        f"para {_LOCALIZACAO_EQUIPA}, NUNCA uma média nacional de Portugal (o "
+        f"país tem climas bem diferentes norte/sul; calor no sul não "
+        f"significa calor em {_LOCALIZACAO_EQUIPA}). Devolve um resumo "
+        f"factual muito breve (no máximo 6 linhas, sem opinião nem "
+        f"floreados) para esta data exata: a previsão do tempo em "
+        f"{_LOCALIZACAO_EQUIPA}, a estação do ano, se há algum feriado ou "
+        f"festa/tradição relevante nos próximos dias (nacional ou local), e "
+        f"as principais notícias mais recentes que encontrares. Isto é só "
+        f"contexto interno para outra escrita, não é para mostrar a ninguém "
+        f"tal como está."
     )
     while True:
         resposta = client.messages.create(
