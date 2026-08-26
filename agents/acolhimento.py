@@ -1,5 +1,6 @@
+import threading
 from persona import PERSONA
-from agents.base import client, _system_com_cache, _tools_com_cache, _executar_tool_uses
+from agents.base import client, _system_com_cache, _tools_com_cache, _executar_tool_uses, _INTERVALO_SINAL_DE_VIDA
 from tools import basecamp
 import db
 
@@ -96,5 +97,13 @@ def responder_stream(utilizador: str, mensagens: list):
             return
 
         mensagens.append({"role": "assistant", "content": resposta.content})
-        resultados, _ = _executar_tool_uses(resposta.content, funcoes)
-        mensagens.append({"role": "user", "content": resultados})
+        resultado = {}
+        def _correr_tools():
+            resultado["saida"], _ = _executar_tool_uses(resposta.content, funcoes)
+        tarefa = threading.Thread(target=_correr_tools, daemon=True)
+        tarefa.start()
+        while tarefa.is_alive():
+            tarefa.join(timeout=_INTERVALO_SINAL_DE_VIDA)
+            if tarefa.is_alive():
+                yield None
+        mensagens.append({"role": "user", "content": resultado["saida"]})
