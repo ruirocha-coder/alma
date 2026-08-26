@@ -109,16 +109,26 @@ buscar isto ao PDF.
 como está escrito nas notas (não reformates).
 
 REGRA ESPECIAL E ABSOLUTA para "valor_a_receber" e "lembrete" (pedido do
-Rui, 2026-07-30): a equipa vai passar a acrescentar, a partir de agora,
-campos rotulados explicitamente "Valor a receber" e "Lembrete" nas notas
-dos cards (tolera variações óbvias de maiúsculas/espaçamento/pontuação,
-ex: "Valor a Receber:", "VALOR A RECEBER -", "Lembrete:"). Usa nestes dois
-campos SÓ E APENAS o texto que vier a seguir a essas etiquetas específicas
-— nunca um valor ou observação inferidos de outro sítio das notas (ex:
-"Valor a pagar", "OBS." ou qualquer outro texto solto NÃO contam, mesmo
-que pareçam semelhantes). Hoje a maioria dos cards ainda não tem estas
-etiquetas — usa null sempre que não existirem, isso é o esperado e
-normal, não é um erro.
+Rui, 2026-07-30, reforçada a 2026-08-25 depois de "valor_a_receber" sair
+errado): a equipa vai passar a acrescentar, a partir de agora, campos
+rotulados explicitamente "Valor a receber" e "Lembrete" NAS NOTAS dos
+cards (tolera variações óbvias de maiúsculas/espaçamento/pontuação, ex:
+"Valor a Receber:", "VALOR A RECEBER -", "Lembrete:"). Usa nestes dois
+campos SÓ E APENAS o texto que vier a seguir a essas etiquetas
+específicas, DENTRO DAS NOTAS — nunca um valor ou observação inferidos
+de outro sítio (ex: "Valor a pagar", "OBS." ou qualquer outro texto
+solto dentro das notas NÃO contam, mesmo que pareçam semelhantes).
+NUNCA uses o TÍTULO do card para "valor_a_receber", mesmo que o título
+contenha um valor monetário (ex: um título "Cliente X 06052026 | 1
+500€", muito comum neste Basecamp, é um valor de referência/orçamento do
+próprio título — NUNCA é o "valor a receber", que só pode vir da
+etiqueta explícita nas notas). Bug real, 2026-08-25: um valor do título
+foi usado como "valor_a_receber" porque o título também é passado ao
+extrator (ver _chamar_extracao_llm) — mas só serve para "cliente",
+"numero_encomenda" e os outros campos que genuinamente podem estar no
+título, nunca para "valor_a_receber"/"lembrete". Hoje a maioria dos
+cards ainda não tem estas etiquetas nas notas — usa null sempre que não
+existirem lá, isso é o esperado e normal, não é um erro.
 
 REGRA ESPECIAL para "data_entrega_cliente" (pedido explícito do Rui,
 2026-07-30, depois de a Alma pedir esta data num comentário quando ela já
