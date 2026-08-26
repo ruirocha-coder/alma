@@ -174,19 +174,20 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
     if paginas_ambiente:
         return {"paginas": paginas_ambiente, "pdf_base64": pdf_base64}
 
-    # PDF sem a estrutura "Conceito Psicoestético" (ex: template antigo
-    # "Imagem Guia") — usa a maior imagem de todo o documento, sem título,
-    # só como preview; não há como associar a ambientes com confiança.
-    candidatas = [(p, im) for p in doc for im in p.get_images(full=True) if (im[2], im[3]) not in dims_recorrentes]
-    if not candidatas:
-        candidatas = [(p, im) for p in doc for im in p.get_images(full=True)]
-    if not candidatas:
-        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
-    pagina_maior, _ = max(candidatas, key=lambda pi: pi[1][2] * pi[1][3])
-    imagem_b64 = _imagem_pagina_para_base64(doc, pagina_maior, dims_recorrentes)
-    if not imagem_b64:
-        return {"erro": "não encontrei nenhuma imagem dentro deste PDF"}
-    return {"paginas": [{"titulo": None, "imagem_base64": imagem_b64}], "pdf_base64": pdf_base64}
+    # PDF sem a estrutura "Conceito Psicoestético" (ex: outros templates,
+    # como "CONCEITO"/"Imagem GUIA") — nunca adivinhar aqui qual imagem é o
+    # conceito. Bug real, 2026-08-26 (Mafalda Pinheiro): a maior imagem do
+    # documento era uma fotografia "antes" do apartamento da própria
+    # cliente (maior em pixels do que os renders reais, que estavam
+    # noutras páginas) — ia parar ao portal como se fosse o conceito.
+    # Sem forma fiável de distinguir "antes" de render sem perceber o
+    # layout de cada template, é preferível falhar alto e pedir para
+    # escolher a imagem à mão na página de edição do que arriscar mostrar
+    # a fotografia errada à cliente.
+    return {"erro": ("este PDF não tem a estrutura \"Conceito Psicoestético\" que permite escolher a imagem "
+                     "automaticamente — para nunca arriscar mostrar a imagem errada à cliente (ex: uma "
+                     "fotografia \"antes\" em vez do render), não adivinho aqui qual imagem usar. Usa a "
+                     "página de edição do portal para carregar a imagem certa à mão.")}
 
 
 # páginas cujo título (ver _extrair_imagem_apresentacao_pdf) nunca são um
@@ -706,9 +707,17 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         documento_apresentacao, documento_orcamento,
         projeto["documentos"].get("conceito"), projeto.get("projetoImagem"))
 
+    comentario = (f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
+                  f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
+    if aviso:
+        # sem isto, o aviso só existia na resposta HTTP da chamada — que
+        # ninguém da equipa vê — e a fase seguinte ficava presa sem botão
+        # nenhum para a cliente, sem ninguém dar por isso (bug real,
+        # 2026-08-26: portal do Gerel Yunden preso assim, sem aviso a
+        # ninguém). Tem de ir para o Basecamp, que a equipa acompanha.
+        comentario += f"\n\n⚠️ {aviso}"
     try:
-        basecamp.comentar(card_id, f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
-                                    f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
+        basecamp.comentar(card_id, comentario)
     except Exception as exc:
         aviso = (aviso + " " if aviso else "") + f"(não consegui postar o comentário no Basecamp: {exc})"
 
