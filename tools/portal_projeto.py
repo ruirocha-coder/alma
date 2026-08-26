@@ -193,7 +193,12 @@ def _extrair_imagens_conceito_pdf(download_url: str) -> dict:
 # páginas cujo título (ver _extrair_imagem_apresentacao_pdf) nunca são um
 # ambiente real, mesmo tendo o rodapé recorrente do documento — moodboard
 # (colagem de materiais), plantas técnicas e a página de anexos/materiais.
-_TITULOS_BLOQUEADOS_APRESENTACAO = {"moodboard", "anexos"}
+# "conceito" também bloqueado: bug real, 2026-08-26 (Mafalda Pinheiro) — a
+# página de introdução "CONCEITO" de uma apresentação de projeto completa
+# reutiliza a fotografia "antes" da própria cliente como ilustração, e essa
+# era a maior imagem do documento a seguir à capa; sem este bloqueio, a
+# função apanhava-a como se fosse o primeiro render de ambiente.
+_TITULOS_BLOQUEADOS_APRESENTACAO = {"moodboard", "anexos", "conceito"}
 _PREFIXOS_BLOQUEADOS_APRESENTACAO = ("planta",)
 
 
@@ -884,7 +889,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .imagem{aspect-ratio:16/10;background:linear-gradient(135deg,#EDE8DF,#C9BEAC);margin-bottom:22px}
   .imagem img{width:100%;height:100%;object-fit:cover;display:block}
-  .leitura{font-size:17px;line-height:1.7;max-width:48ch;text-align:justify}
+  .leitura{font-size:17px;line-height:1.7;text-align:justify}
   .leitura+.leitura{margin-top:14px}
   .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
 
