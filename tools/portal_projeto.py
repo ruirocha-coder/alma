@@ -1005,6 +1005,30 @@ const projeto = __PROJETO_JSON__;
 const eur = v => v.toLocaleString('pt-PT') + ' €';
 const $ = id => document.getElementById(id);
 
+// PDFs grandes (a apresentação do projeto passa facilmente dos 4-5MB em
+// base64) não abrem de forma fiável como href="data:..." direto — o
+// Safari/iOS em particular falha ou fica preso a abrir um separador em
+// branco com data URIs grandes. Converter para Blob antes de abrir
+// resolve isto em todos os browsers testados.
+function abrirDocumento(dataUri, nomeFicheiro){
+  try {
+    const [cabecalho, base64] = dataUri.split(',');
+    const mime = cabecalho.match(/data:(.*?);/)[1];
+    const bytes = atob(base64);
+    const array = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+    const blob = new File([array], nomeFicheiro, {type: mime});
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    // último recurso: se algo correr mal a converter, tenta na mesma a
+    // navegação direta em vez de deixar o botão sem fazer nada
+    window.open(dataUri, '_blank', 'noopener');
+  }
+  return false;
+}
+
 const totalProduto = projeto.valorProduto;
 const temProduto   = totalProduto != null;
 const credito      = temProduto ? Math.round(totalProduto/10) : 0;
@@ -1059,7 +1083,7 @@ const conteudo = {
     ${projeto.conceito.leitura?projeto.conceito.leitura.split(/\n\s*\n/).map(p=>`<p class="leitura">${p.trim()}</p>`).join(''):''}
     ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}
     <div class="docs">
-      <a class="doc ${projeto.documentos.conceito?'':'off'}" ${projeto.documentos.conceito?`href="${projeto.documentos.conceito}" download target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.conceito?'':'off'}" href="#" ${projeto.documentos.conceito?`onclick="return abrirDocumento(projeto.documentos.conceito, 'Conceito psicoestético - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Conceito psicoestético</span><span>PDF</span></a>
     </div>`,
 
@@ -1072,7 +1096,7 @@ const conteudo = {
         <p>${a.nota}</p>
       </div>`).join('')}
     <div class="docs">
-      <a class="doc ${projeto.documentos.apresentacao?'':'off'}" ${projeto.documentos.apresentacao?`href="${projeto.documentos.apresentacao}" target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.apresentacao?'':'off'}" href="#" ${projeto.documentos.apresentacao?`onclick="return abrirDocumento(projeto.documentos.apresentacao, 'Apresentação do projeto - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Apresentação do projeto</span><span>PDF</span></a>
     </div>`,
 
@@ -1117,7 +1141,7 @@ const conteudo = {
       <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
     </div>
     <div class="docs">
-      <a class="doc ${projeto.documentos.orcamento?'':'off'}" ${projeto.documentos.orcamento?`href="${projeto.documentos.orcamento}" target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Orçamento detalhado</span><span>PDF</span></a>
     </div>
     <div class="pag-tit">Como se paga</div>
