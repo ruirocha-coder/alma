@@ -1650,8 +1650,8 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
   .passo.validada{background:var(--sienna)}
   .passo.aguarda{background:var(--clay)}
   .fases{display:flex;flex-wrap:wrap;gap:6px}
-  .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid rgba(164,58,35,.3);
-            background:rgba(164,58,35,.2);color:#000;white-space:nowrap}
+  .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid #E8A05F;
+            background:#F8B681;color:#000;white-space:nowrap}
   .tile-rodape{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:auto;
               padding-top:14px;border-top:1px solid var(--line)}
   .tile-data{font-size:11px;color:var(--stone)}
