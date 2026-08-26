@@ -935,7 +935,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   a{color:inherit}
 
   header{padding:44px 0 0;display:flex;justify-content:flex-end;align-items:center}
-  header img{height:58px;width:auto;opacity:.9}
+  header img{height:64px;width:auto;opacity:.9}
   .ref{font-size:15px;color:var(--stone)}
 
   .nome{padding:60px 0 40px}
