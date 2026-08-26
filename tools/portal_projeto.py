@@ -1622,7 +1622,7 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-  :root{--paper:#FBFAF8; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#B96D4E; --ok:#5A7D5A; --err:#B94E4E;}
+  :root{--paper:#fdfaee; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#B96D4E; --ok:#5A7D5A; --err:#B94E4E; --sienna:#A43A23;}
   *{box-sizing:border-box}
   body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
       max-width:1240px;margin:0 auto;padding:36px 24px 100px}
@@ -1647,13 +1647,11 @@ _TEMPLATE_LISTA = r"""<!DOCTYPE html>
   .tile-topo .ref{font-size:11.5px;color:var(--stone);font-weight:600;letter-spacing:.03em;text-transform:uppercase}
   .passos{display:flex;gap:4px}
   .passo{flex:1;height:5px;border-radius:3px;background:var(--line)}
-  .passo.validada{background:var(--ok)}
+  .passo.validada{background:var(--sienna)}
   .passo.aguarda{background:var(--clay)}
   .fases{display:flex;flex-wrap:wrap;gap:6px}
-  .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--stone);
-            white-space:nowrap}
-  .fase-chip.validada{background:#EDF2EA;border-color:#CFDECB;color:var(--ok)}
-  .fase-chip.aguarda{background:#FBEFE8;border-color:#E9D3C3;color:var(--clay)}
+  .fase-chip{font-size:10.5px;padding:3px 9px;border-radius:20px;border:1px solid rgba(164,58,35,.3);
+            background:rgba(164,58,35,.2);color:#000;white-space:nowrap}
   .tile-rodape{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:auto;
               padding-top:14px;border-top:1px solid var(--line)}
   .tile-data{font-size:11px;color:var(--stone)}
