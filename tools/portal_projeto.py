@@ -884,7 +884,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .imagem{aspect-ratio:16/10;background:linear-gradient(135deg,#EDE8DF,#C9BEAC);margin-bottom:22px}
   .imagem img{width:100%;height:100%;object-fit:cover;display:block}
-  .leitura{font-size:17px;line-height:1.7;max-width:48ch}
+  .leitura{font-size:17px;line-height:1.7;max-width:48ch;text-align:justify}
+  .leitura+.leitura{margin-top:14px}
   .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
 
   .amb{margin-top:34px}
@@ -1041,7 +1042,7 @@ const conteudo = {
 
   conceito: () => `
     <div class="imagem">${projeto.conceito.imagem?`<img src="${projeto.conceito.imagem}" alt="Imagem guia">`:''}</div>
-    ${projeto.conceito.leitura?`<p class="leitura">${projeto.conceito.leitura}</p>`:''}
+    ${projeto.conceito.leitura?projeto.conceito.leitura.split(/\n\s*\n/).map(p=>`<p class="leitura">${p.trim()}</p>`).join(''):''}
     ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}
     <div class="docs">
       <a class="doc ${projeto.documentos.conceito?'':'off'}" ${projeto.documentos.conceito?`href="${projeto.documentos.conceito}" download target="_blank" rel="noopener"`:''}>
