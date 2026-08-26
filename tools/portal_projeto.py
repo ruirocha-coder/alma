@@ -475,10 +475,35 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     costuma começar por "Apresentação" mas nunca tem "Projeto" no nome
     (ex: "IG Apresentação IMAGEM GUIA [Nome cliente]", ver
     `conceito_pdf_download_url`). Se houver mais do que um com "Projeto"
-    no nome, usa o mais recente."""
+    no nome, usa o mais recente.
+
+    REGRA ESPECIAL E ABSOLUTA sobre fases já validadas: se este card já
+    tiver um portal gerado antes, e alguma fase já lá estiver "validada"
+    (porque a cliente clicou mesmo no botão dela), NUNCA passes essa
+    mesma fase como "aguarda" ou "prevista" aqui — mantém-na "validada",
+    com a mesma data. Bug real, 2026-08-26 (Mafalda Pinheiro): ao chamar
+    esta função só para abrir a fase "orçamento", as fases "conceito" e
+    "projeto" (já validadas pela cliente, uma delas com um clique real
+    dela no botão) foram recompostas como "prevista" — a cliente, ao
+    voltar ao portal, via as próprias validações desfeitas. Esta função
+    recusa-se agora a gravar nesse caso (ver verificação a seguir); mas
+    o mais seguro é sempre perceberes o estado atual antes de chamares,
+    para nunca dependeres só desta rede de segurança."""
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
+    registo_existente = db.obter_documento_gerado_por_card_id(card_id)
+    if registo_existente and registo_existente["formato"] == "html":
+        try:
+            fases_existentes = json.loads(registo_existente["conteudo_markdown"])["projeto"]["fases"]
+        except Exception:
+            fases_existentes = []
+        for f in fases_existentes:
+            if f["estado"] == "validada" and fases_estado.get(f["id"], {}).get("estado") != "validada":
+                return {"erro": (f"a fase \"{f['id']}\" já está validada pela cliente (a {f.get('data')}) no "
+                                 f"portal atual — não posso desfazer isso. Mantém fases_estado[\"{f['id']}\"] "
+                                 f"como {{\"estado\": \"validada\", \"data\": \"{f.get('data')}\"}} e chama "
+                                 f"outra vez.")}
     if not honorarios_total_com_iva:
         return {"erro": ("honorarios_total_com_iva tem de ser True — o valor mostrado ao cliente tem de incluir "
                          "IVA. Confirma o valor final (com IVA) na fonte certa (ver Notas do card) antes de "
