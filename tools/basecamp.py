@@ -752,12 +752,25 @@ def _resolver_mencoes(texto: str, projeto: str) -> tuple:
     sgids = []
 
     def _substituir(m):
+        # tenta do nome completo capturado (até 4 palavras) para baixo —
+        # bug real em produção (2026-08-26): Alma escreve por vezes
+        # "Beatriz Barbosa Vou ler o orçamento..." sem pontuação a separar
+        # o nome da frase seguinte; a 1ª palavra da frase ("Vou", maiúscula
+        # por começar frase) ficava agarrada ao nome, "Beatriz Barbosa Vou"
+        # não correspondia a ninguém, e a menção falhava por completo — a
+        # pessoa nunca era notificada. Experimentar prefixos mais curtos
+        # encontra "Beatriz Barbosa" sozinho e devolve "Vou..." como texto
+        # normal a seguir, sem perder a menção real.
+        palavras = m.group(1).split()
+        for n in range(len(palavras), 0, -1):
+            candidato = " ".join(palavras[:n])
+            termo = _normalizar(candidato)
+            for p in pessoas:
+                if _normalizar(p["name"]) == termo and p.get("attachable_sgid"):
+                    sgids.append(p["attachable_sgid"])
+                    resto = " ".join(palavras[n:])
+                    return f"@@MENCAO{len(sgids) - 1}@@" + (" " + resto if resto else "")
         nome = m.group(1)
-        termo = _normalizar(nome)
-        for p in pessoas:
-            if _normalizar(p["name"]) == termo and p.get("attachable_sgid"):
-                sgids.append(p["attachable_sgid"])
-                return f"@@MENCAO{len(sgids) - 1}@@"
         # bug real reportado em produção (2026-07-29): sem este log, uma
         # menção falhada (nome sem correspondência exata a ninguém com
         # acesso a este projeto, ou sem attachable_sgid) fica
