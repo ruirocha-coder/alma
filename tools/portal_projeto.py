@@ -935,11 +935,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   a{color:inherit}
 
   header{padding:44px 0 0;display:flex;justify-content:flex-end;align-items:center}
-  header img{height:44px;width:auto;opacity:.9}
+  header img{height:48px;width:auto;opacity:.9}
   .ref{font-size:15px;color:var(--stone)}
 
   .nome{padding:60px 0 40px}
-  .nome h1{font-weight:300;font-size:clamp(30px,6vw,44px);line-height:1.15;letter-spacing:-.01em}
+  .nome h1{font-weight:300;font-size:20px;line-height:1.15;letter-spacing:-.01em}
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
