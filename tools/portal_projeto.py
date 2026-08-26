@@ -466,7 +466,16 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     aqui dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
     planta técnica) para servir de capa da fase "projeto" — tal como a
     imagem de conceito serve de capa da fase "conceito"; nunca precisas
-    de indicar tu mesma essa imagem."""
+    de indicar tu mesma essa imagem.
+
+    NORMA para encontrar o PDF certo com listar_pdfs_anexados_por_data:
+    o PDF de apresentação do projeto (para `documento_apresentacao_download_url`)
+    tem sempre a palavra "Projeto" no nome (ex: "IG Apresentação PROJETO
+    [Nome cliente]") — nunca confundas com o PDF do conceito, que também
+    costuma começar por "Apresentação" mas nunca tem "Projeto" no nome
+    (ex: "IG Apresentação IMAGEM GUIA [Nome cliente]", ver
+    `conceito_pdf_download_url`). Se houver mais do que um com "Projeto"
+    no nome, usa o mais recente."""
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
@@ -812,7 +821,7 @@ TOOLS_PORTAL_PROJETO = [
                         "required": ["nome", "nota"]
                     }
                 },
-                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. Tem sempre a palavra \"Projeto\" no nome do ficheiro (ex: \"IG Apresentação PROJETO [Nome cliente]\") — nunca confundir com o PDF do conceito, que também costuma começar por \"Apresentação\" mas nunca tem \"Projeto\" no nome. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF do orçamento detalhado, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "fases_estado": {
                     "type": "object",
