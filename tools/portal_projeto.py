@@ -466,7 +466,16 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     aqui dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
     planta técnica) para servir de capa da fase "projeto" — tal como a
     imagem de conceito serve de capa da fase "conceito"; nunca precisas
-    de indicar tu mesma essa imagem."""
+    de indicar tu mesma essa imagem.
+
+    NORMA para encontrar o PDF certo com listar_pdfs_anexados_por_data:
+    o PDF de apresentação do projeto (para `documento_apresentacao_download_url`)
+    tem sempre a palavra "Projeto" no nome (ex: "IG Apresentação PROJETO
+    [Nome cliente]") — nunca confundas com o PDF do conceito, que também
+    costuma começar por "Apresentação" mas nunca tem "Projeto" no nome
+    (ex: "IG Apresentação IMAGEM GUIA [Nome cliente]", ver
+    `conceito_pdf_download_url`). Se houver mais do que um com "Projeto"
+    no nome, usa o mais recente."""
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
@@ -812,7 +821,7 @@ TOOLS_PORTAL_PROJETO = [
                         "required": ["nome", "nota"]
                     }
                 },
-                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. Tem sempre a palavra \"Projeto\" no nome do ficheiro (ex: \"IG Apresentação PROJETO [Nome cliente]\") — nunca confundir com o PDF do conceito, que também costuma começar por \"Apresentação\" mas nunca tem \"Projeto\" no nome. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF do orçamento detalhado, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "fases_estado": {
                     "type": "object",
@@ -996,6 +1005,30 @@ const projeto = __PROJETO_JSON__;
 const eur = v => v.toLocaleString('pt-PT') + ' €';
 const $ = id => document.getElementById(id);
 
+// PDFs grandes (a apresentação do projeto passa facilmente dos 4-5MB em
+// base64) não abrem de forma fiável como href="data:..." direto — o
+// Safari/iOS em particular falha ou fica preso a abrir um separador em
+// branco com data URIs grandes. Converter para Blob antes de abrir
+// resolve isto em todos os browsers testados.
+function abrirDocumento(dataUri, nomeFicheiro){
+  try {
+    const [cabecalho, base64] = dataUri.split(',');
+    const mime = cabecalho.match(/data:(.*?);/)[1];
+    const bytes = atob(base64);
+    const array = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+    const blob = new File([array], nomeFicheiro, {type: mime});
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    // último recurso: se algo correr mal a converter, tenta na mesma a
+    // navegação direta em vez de deixar o botão sem fazer nada
+    window.open(dataUri, '_blank', 'noopener');
+  }
+  return false;
+}
+
 const totalProduto = projeto.valorProduto;
 const temProduto   = totalProduto != null;
 const credito      = temProduto ? Math.round(totalProduto/10) : 0;
@@ -1050,20 +1083,19 @@ const conteudo = {
     ${projeto.conceito.leitura?projeto.conceito.leitura.split(/\n\s*\n/).map(p=>`<p class="leitura">${p.trim()}</p>`).join(''):''}
     ${projeto.conceito.materiais?`<p class="materiais">${projeto.conceito.materiais}</p>`:''}
     <div class="docs">
-      <a class="doc ${projeto.documentos.conceito?'':'off'}" ${projeto.documentos.conceito?`href="${projeto.documentos.conceito}" download target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.conceito?'':'off'}" href="#" ${projeto.documentos.conceito?`onclick="return abrirDocumento(projeto.documentos.conceito, 'Conceito psicoestético - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Conceito psicoestético</span><span>PDF</span></a>
     </div>`,
 
   projeto: () => `
-    <div class="imagem">${projeto.projetoImagem?`<img src="${projeto.projetoImagem}" alt="Imagem do projeto">`:''}</div>
     ${projeto.ambientes.map(a=>`
       <div class="amb">
-        <div class="img">${(projeto.projetoImagem && a.imagem)?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
+        <div class="img">${(projeto.documentos.apresentacao && a.imagem)?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
         <h3>${a.nome}</h3>
         <p>${a.nota}</p>
       </div>`).join('')}
     <div class="docs">
-      <a class="doc ${projeto.documentos.apresentacao?'':'off'}" ${projeto.documentos.apresentacao?`href="${projeto.documentos.apresentacao}" target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.apresentacao?'':'off'}" href="#" ${projeto.documentos.apresentacao?`onclick="return abrirDocumento(projeto.documentos.apresentacao, 'Apresentação do projeto - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Apresentação do projeto</span><span>PDF</span></a>
     </div>`,
 
@@ -1108,7 +1140,7 @@ const conteudo = {
       <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
     </div>
     <div class="docs">
-      <a class="doc ${projeto.documentos.orcamento?'':'off'}" ${projeto.documentos.orcamento?`href="${projeto.documentos.orcamento}" target="_blank" rel="noopener"`:''}>
+      <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span>Orçamento detalhado</span><span>PDF</span></a>
     </div>
     <div class="pag-tit">Como se paga</div>
