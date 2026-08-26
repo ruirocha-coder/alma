@@ -939,7 +939,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ref{font-size:15px;color:var(--stone)}
 
   .nome{padding:60px 0 40px}
-  .nome h1{font-weight:300;font-size:20px;line-height:1.15;letter-spacing:-.01em}
+  .nome h1{font-weight:400;font-size:20px}
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
