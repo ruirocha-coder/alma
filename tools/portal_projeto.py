@@ -983,10 +983,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .l{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}
   .l:last-child{border-bottom:none}
   .l .d{display:block;font-size:12.5px;color:var(--stone);margin-top:1px}
-  .l .v{white-space:nowrap;font-weight:400}
+  .l .v{white-space:nowrap}
   .l.credito{color:var(--clay)}
   .l.destaque{border-bottom:none;padding-top:16px;border-top:1px solid var(--ink);margin-top:4px}
-  .l.destaque .v{font-size:24px;font-weight:300}
 
   .docs{margin-top:28px}
   .doc{padding:14px 0;border-bottom:1px solid var(--line);font-size:14.5px;text-decoration:none;
@@ -1027,9 +1026,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn:disabled{opacity:.5;cursor:default}
   .btn:disabled:hover{background:var(--ink);color:var(--paper)}
   .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
-  .validado{margin-top:30px;padding-top:22px;border-top:1px solid var(--line);
-            font-size:13px;color:var(--clay);display:flex;align-items:center;gap:9px}
-  .validado::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--clay)}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
 
   footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 60px;
@@ -1241,7 +1237,6 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
   if(f.estado === "validada"){
     estado = `<span class="estado ok">validado a ${f.data}</span>`;
     bloco  = conteudo[f.id]() + `
-      <div class="validado">Validado por si a ${f.data}</div>
       <div class="validar">
         <p class="conv">${f.obs}</p>
         <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
