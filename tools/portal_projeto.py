@@ -1020,7 +1020,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .validar{margin-top:34px;padding-top:26px;border-top:1px solid var(--line)}
   .validar .conv{font-size:13px;color:var(--stone);max-width:48ch}
   .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#000;
-       text-decoration:none;font-size:15px;font-weight:400;padding:10px 32px;transition:.15s;
+       text-decoration:none;font-size:13px;font-weight:400;padding:6.9px 32px;transition:.15s;
        font-family:inherit;cursor:pointer}
   .btn:hover{background:transparent;color:var(--ink)}
   .btn:focus-visible{outline:2px solid var(--clay);outline-offset:3px}
