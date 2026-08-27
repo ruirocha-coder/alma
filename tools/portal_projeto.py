@@ -959,9 +959,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
   .demo{pointer-events:none}
-  .fase-topo{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
-  .fase-topo h2{font-weight:400;font-size:20px;display:flex;align-items:baseline;gap:12px}
-  .fase-topo h2 .n{font-size:12px;color:var(--stone);font-weight:300}
+  .fase-topo{display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .fase-topo h2{font-weight:400;font-size:20px}
+  .fase-topo h2 .n{display:block;font-size:12px;color:var(--stone);font-weight:300;margin-bottom:4px}
   .estado{font-size:12px;color:var(--stone);white-space:nowrap}
   .estado.ok{color:var(--clay)}
   .corpo{margin-top:26px}
