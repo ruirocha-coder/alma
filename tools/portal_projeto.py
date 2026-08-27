@@ -943,7 +943,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:4px solid #91A4A7}
   .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
   .tile:hover{background:#F5F2EC}
