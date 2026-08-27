@@ -982,6 +982,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .linhas{width:100%}
   .l{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}
   .l:last-child{border-bottom:none}
+  .l:has(+ .l.destaque){border-bottom:none}
   .l .d{display:block;font-size:12.5px;color:var(--stone);margin-top:1px}
   .l .v{white-space:nowrap}
   .l.credito{color:var(--clay)}
