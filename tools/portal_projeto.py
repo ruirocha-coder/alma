@@ -1007,9 +1007,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
   .exemplo-selo{display:inline-block;font-size:12px;color:var(--clay);font-weight:500;letter-spacing:.01em}
 
-  .pag-tit{margin-top:36px;font-size:13px;font-weight:500;color:var(--stone);display:flex;align-items:center;gap:14px}
-  .pag-tit::after{content:"";flex:1;height:1px;background:var(--line)}
-  .pag{margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line)}
+  .pag-tit{margin-top:36px;font-size:15px;font-weight:500;color:var(--ink);padding-left:26px;
+       background:url(data:image/png;base64,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) no-repeat 0 5px;background-size:15px 15px}
+  .pag{margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:0}
   .pf{padding:20px 18px;border-left:1px solid var(--line)}
   .pf:first-child{border-left:none}
   .pf-topo{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -1197,11 +1197,7 @@ const conteudo = {
         </div>
       </div>
     </div>` : `
-    <div class="credito-bloco">
-      <h3>Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
-      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
-    </div>
-    <div class="linhas" style="margin-top:28px">
+    <div class="linhas">
       <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
       <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
       <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
@@ -1209,6 +1205,10 @@ const conteudo = {
     <div class="docs">
       <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         Orçamento detalhado <span class="ext">. PDF</span></a>
+    </div>
+    <div class="credito-bloco">
+      <h3>Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
+      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
     </div>
     <div class="pag-tit">Como se paga</div>
     <div class="pag">
