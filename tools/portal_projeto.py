@@ -966,7 +966,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .imagem{aspect-ratio:16/10;background:linear-gradient(135deg,#EDE8DF,#C9BEAC);margin-bottom:22px}
   .imagem img{width:100%;height:100%;object-fit:cover;display:block}
-  .leitura{font-size:15px;line-height:1.7;text-align:justify}
+  .leitura{font-size:15px;line-height:1.7;text-align:justify;color:var(--stone)}
   .leitura+.leitura{margin-top:14px}
   .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
 
