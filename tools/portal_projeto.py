@@ -970,11 +970,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .leitura+.leitura{margin-top:14px}
   .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
 
-  .amb{margin-top:34px;display:flex;align-items:center;gap:14px}
+  .amb{margin-top:34px}
   .amb:first-of-type{margin-top:0}
-  .amb .img{flex:1 1 60%;aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
+  .amb .img{aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
   .amb .img img{width:100%;height:100%;object-fit:cover;display:block}
-  .amb-texto{flex:1 1 40%}
+  .amb-texto{text-align:right;margin-top:6px}
   .amb h3{font-weight:400;font-size:15px}
   .amb p{font-size:15px;color:var(--stone);margin-top:3px}
 
