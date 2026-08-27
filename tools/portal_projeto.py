@@ -970,12 +970,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .leitura+.leitura{margin-top:14px}
   .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
 
-  .amb{margin-top:34px}
+  .amb{margin-top:34px;display:flex;align-items:center;gap:14px}
   .amb:first-of-type{margin-top:0}
-  .amb .img{aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
+  .amb .img{flex:1 1 60%;aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
   .amb .img img{width:100%;height:100%;object-fit:cover;display:block}
-  .amb h3{font-weight:400;font-size:17px;margin-top:14px}
-  .amb p{font-size:14px;color:var(--stone);margin-top:3px}
+  .amb-texto{flex:1 1 40%}
+  .amb h3{font-weight:400;font-size:15px}
+  .amb p{font-size:15px;color:var(--stone);margin-top:3px}
 
   .linhas{width:100%}
   .l{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}
@@ -1163,8 +1164,10 @@ const conteudo = {
     ${projeto.ambientes.map(a=>`
       <div class="amb">
         <div class="img">${(projeto.documentos.apresentacao && a.imagem)?`<img src="${a.imagem}" alt="${a.nome}">`:''}</div>
-        <h3>${a.nome}</h3>
-        <p>${a.nota}</p>
+        <div class="amb-texto">
+          <h3>${a.nome}</h3>
+          <p>${a.nota}</p>
+        </div>
       </div>`).join('')}`,
 
   orcamento: () => !temProduto ? `
