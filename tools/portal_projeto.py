@@ -925,7 +925,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <style>
   :root{
     --paper:#fdfaee; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7;
-    --clay:#B96D4E; --err:#B94E4E;
+    --clay:#A43A23; --err:#B94E4E;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
