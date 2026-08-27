@@ -1017,8 +1017,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .pf-q{margin-top:10px;font-size:12.5px;font-weight:500}
   .pf p{margin-top:5px;font-size:12.5px;color:var(--stone);line-height:1.55}
 
-  .validar{margin-top:34px;padding-top:26px;border-top:1px solid var(--line)}
-  .validar .conv{font-size:13px;color:var(--stone);max-width:48ch}
+  .validar{margin-top:34px;padding-top:26px;border-top:1px solid var(--line);text-align:right}
+  .validar .conv{font-size:13px;color:var(--stone);margin-top:14px}
   .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#000;
        text-decoration:none;font-size:13px;font-weight:400;padding:6.9px 32px;transition:.15s;
        font-family:inherit;cursor:pointer}
@@ -1239,15 +1239,15 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
     estado = `<span class="estado ok">validado a ${f.data}</span>`;
     bloco  = conteudo[f.id]() + `
       <div class="validar">
-        <p class="conv">${f.obs}</p>
         <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
+        <p class="conv">${f.obs}</p>
       </div>`;
   } else if(f.estado === "aguarda"){
     estado = `<span class="estado">a aguardar a sua validação</span>`;
     bloco  = conteudo[f.id]() + `
       <div class="validar">
-        <p class="conv">${f.obs}</p>
         <button type="button" class="btn" onclick="validarFase('${f.id}', this)">${f.acao}</button>
+        <p class="conv">${f.obs}</p>
         <p class="validar-msg" id="msg-${f.id}"></p>
       </div>`;
   } else {
