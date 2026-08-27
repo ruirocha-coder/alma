@@ -517,11 +517,15 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
     # devolver o texto da ronda final ignorava por completo o que tivesse
     # sido escrito antes de qualquer chamada a uma tool.
     partes_resposta = []
+    container_id = None
     while True:
-        resposta = client.messages.create(
-            model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
-            system=system, tools=tools_completas, messages=mensagens
-        )
+        pedido = dict(model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
+                      system=system, tools=tools_completas, messages=mensagens)
+        if container_id:
+            pedido["container"] = container_id
+        resposta = client.messages.create(**pedido)
+        if resposta.container:
+            container_id = resposta.container.id
         texto_ronda = "".join(b.text for b in resposta.content if b.type == "text")
         if texto_ronda:
             partes_resposta.append(texto_ronda)
@@ -529,7 +533,11 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
         if resposta.stop_reason == "pause_turn":
             # o próprio servidor atingiu o limite de rondas de uma tool sua
             # (ex: várias pesquisas na internet seguidas, ver TOOLS_INTERNET)
-            # — reenviar a mesma conversa retoma sozinho, sem repetir nada
+            # — reenviar a mesma conversa retoma sozinho, sem repetir nada.
+            # Tem de ir sempre com o container_id da resposta (ver acima) —
+            # bug real, 2026-08-27: sem isto a API rejeita o pedido seguinte
+            # sempre que o pause_turn envolveu execução de código do lado do
+            # servidor (ver agents/mensagem_motivacional_diaria.py).
             mensagens.append({"role": "assistant", "content": resposta.content})
             continue
 
@@ -557,18 +565,23 @@ def correr_agente_stream(system_prompt: str, tools: list, mensagens: list, utili
     parecer parada."""
     system, tools_completas, funcoes_utilizador = _preparar(system_prompt, tools, utilizador, origem, projeto_mural)
 
+    container_id = None
     while True:
-        with client.messages.stream(
-            model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
-            system=system, tools=tools_completas, messages=mensagens
-        ) as stream:
+        pedido = dict(model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
+                      system=system, tools=tools_completas, messages=mensagens)
+        if container_id:
+            pedido["container"] = container_id
+        with client.messages.stream(**pedido) as stream:
             for texto in stream.text_stream:
                 yield texto
             resposta = stream.get_final_message()
+        if resposta.container:
+            container_id = resposta.container.id
 
         if resposta.stop_reason == "pause_turn":
             # ver correr_agente: o servidor atingiu o limite de rondas de uma
-            # tool sua — reenviar a mesma conversa retoma sozinho
+            # tool sua — reenviar a mesma conversa retoma sozinho, sempre com
+            # o container_id (ver acima e correr_agente)
             mensagens.append({"role": "assistant", "content": resposta.content})
             continue
 
