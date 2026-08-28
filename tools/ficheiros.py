@@ -37,14 +37,24 @@ def extrair_texto(bruto: bytes, content_type: str, filename: str = "") -> str | 
     if content_type == "application/pdf" or nome.endswith(".pdf"):
         leitor = PdfReader(io.BytesIO(bruto))
         texto = "\n".join(pagina.extract_text() or "" for pagina in leitor.pages).strip()
-        if texto:
-            return texto
-        # sem texto extraível — provavelmente um PDF só de design/imagem/
-        # scan; descreve página a página em vez de só a primeira
+        if not texto:
+            # sem texto extraível — provavelmente um PDF só de design/imagem/
+            # scan; descreve página a página em vez de só a primeira
+            try:
+                return visao.descrever_pdf_escaneado(bruto)
+            except Exception as e:
+                return f"(não consegui extrair texto nem imagem deste PDF: {e})"
         try:
-            return visao.descrever_pdf_escaneado(bruto)
-        except Exception as e:
-            return f"(não consegui extrair texto nem imagem deste PDF: {e})"
+            # um PDF pode ter texto (códigos de cor, anotações) E imagens/
+            # desenhos vetoriais (o símbolo/tipografia de um logótipo) — só
+            # devolver o texto perdia esse conteúdo visual em silêncio
+            # (bug real, 2026-08-28: logo enviado em PDF só transmitiu os
+            # códigos de cor, nunca o desenho do logótipo em si)
+            if visao.pdf_tem_conteudo_visual(bruto):
+                return f"{texto}\n\n[Conteúdo visual do PDF]\n{visao.descrever_pdf_escaneado(bruto)}"
+        except Exception:
+            pass
+        return texto
 
     if (content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             or nome.endswith(".docx")):
