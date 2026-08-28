@@ -943,7 +943,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:22px solid #91A4A7}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
   .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
   .tile:hover{background:#F5F2EC}
@@ -1011,6 +1011,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nota b{font-weight:500;color:var(--ink)}
 
   .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
+  .painel-resumo{margin-top:18px;padding:24px;border-radius:8px;background:rgba(145,164,167,.15)}
   .exemplo-selo{display:inline-block;font-size:12px;color:var(--clay);font-weight:500;letter-spacing:.01em}
 
   .pag-tit{margin-top:36px;font-size:15px;font-weight:500;color:var(--ink);padding-left:27px;
@@ -1210,31 +1211,33 @@ const conteudo = {
       <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span class="doc-txt">Orçamento detalhado <span class="ext">. PDF</span></span></a>
     </div>
-    <div class="linhas" style="margin-top:18px">
-      <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
-      <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
-      <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
-    </div>
-    <div class="credito-bloco">
-      <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
-      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
-    </div>
-    <div class="pag-tit">Como se paga</div>
-    <div class="pag">
-      <div class="pf">
-        <div class="pf-topo"><span class="pct">50%</span><span class="val">${eur(p50)}</span></div>
-        <div class="pf-q">Na adjudicação</div>
-        <p>Confirma a decisão e inicia a produção das encomendas.</p>
+    <div class="painel-resumo">
+      <div class="linhas">
+        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
+        <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
+        <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
       </div>
-      <div class="pf">
-        <div class="pf-topo"><span class="pct">40%</span><span class="val">${eur(p40)}</span></div>
-        <div class="pf-q">Encomenda concluída</div>
-        <p>Quando o material está pronto a entregar.</p>
+      <div class="credito-bloco">
+        <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
+        <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
       </div>
-      <div class="pf">
-        <div class="pf-topo"><span class="pct">10%</span><span class="val">${eur(p10)}</span></div>
-        <div class="pf-q">Entrega e montagem</div>
-        <p>Com a instalação concluída em sua casa.</p>
+      <div class="pag-tit">Como se paga</div>
+      <div class="pag">
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">50%</span><span class="val">${eur(p50)}</span></div>
+          <div class="pf-q">Na adjudicação</div>
+          <p>Confirma a decisão e inicia a produção das encomendas.</p>
+        </div>
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">40%</span><span class="val">${eur(p40)}</span></div>
+          <div class="pf-q">Encomenda concluída</div>
+          <p>Quando o material está pronto a entregar.</p>
+        </div>
+        <div class="pf">
+          <div class="pf-topo"><span class="pct">10%</span><span class="val">${eur(p10)}</span></div>
+          <div class="pf-q">Entrega e montagem</div>
+          <p>Com a instalação concluída em sua casa.</p>
+        </div>
       </div>
     </div>
     <p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram neste valor. A compra parcial fica a preço de tabela, sem crédito. ${projeto.validade}</p>`
