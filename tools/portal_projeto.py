@@ -943,8 +943,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line);margin-bottom:28px}
-  .tile{padding:18px 16px 28px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr)}
+  .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
   .tile:hover{background:#F5F2EC}
   .tile .t{font-size:14.5px;font-weight:400}
@@ -955,7 +955,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tile.prevista{opacity:.34;pointer-events:none}
 
   .fase{border-top:1px solid var(--line);padding:64px 0;scroll-margin-top:16px}
-  .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
   .demo{pointer-events:none}
   .fase-topo{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
@@ -1011,7 +1010,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nota b{font-weight:500;color:var(--ink)}
 
   .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
-  .painel-resumo{margin-top:18px;padding:24px;border-radius:8px;background:rgba(145,164,167,.15)}
+  .painel-resumo{margin-top:18px;padding:14px;background:rgba(145,164,167,.15)}
   .exemplo-selo{display:inline-block;font-size:12px;color:var(--clay);font-weight:500;letter-spacing:.01em}
 
   .pag-tit{margin-top:36px;font-size:15px;font-weight:500;color:var(--ink);padding-left:27px;
