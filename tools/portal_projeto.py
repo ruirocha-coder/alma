@@ -955,7 +955,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tile.prevista{opacity:.34;pointer-events:none}
 
   .fase{border-top:1px solid var(--line);padding:64px 0;scroll-margin-top:16px}
-  .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
   .demo{pointer-events:none}
   .fase-topo{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
