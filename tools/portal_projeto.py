@@ -943,8 +943,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
-  .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line);margin-bottom:28px}
+  .tile{padding:18px 16px 28px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
   .tile:hover{background:#F5F2EC}
   .tile .t{font-size:14.5px;font-weight:400}
@@ -1217,11 +1217,13 @@ const conteudo = {
         <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
         <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
       </div>
-      <div class="credito-bloco">
-        <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
-        <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
-      </div>
-      <div class="pag-tit">Como se paga</div>
+    </div>
+    <div class="credito-bloco">
+      <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
+      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
+    </div>
+    <div class="pag-tit">Como se paga</div>
+    <div class="painel-resumo">
       <div class="pag">
         <div class="pf">
           <div class="pf-topo"><span class="pct">50%</span><span class="val">${eur(p50)}</span></div>
