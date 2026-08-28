@@ -1215,7 +1215,7 @@ const conteudo = {
       <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
     </div>
     <div class="credito-bloco">
-      <h3>Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
+      <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
       <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
     </div>
     <div class="pag-tit">Como se paga</div>
