@@ -840,17 +840,20 @@ def obter_conteudo_documento_gerado(utilizador: str, id: int) -> dict:
     """Devolve a fonte de um documento já gerado (markdown p/ pdf, JSON de
     colunas/linhas p/ xlsx — ver formato), para a Alma poder reaproveitá-la
     (ex: gerar noutro formato, atualizar, resumir) sem pedir à pessoa para
-    reenviar os dados. Restrito a documentos gerados para o próprio
-    utilizador que pergunta — nunca aos de outra pessoa."""
+    reenviar os dados. Não é restrito a quem o gerou — a rota pública
+    /documentos-gerados/{id} já serve qualquer documento a quem tiver o
+    link (ex: portais de projeto partilhados com clientes), por isso
+    também não faz sentido a Alma recusar reler internamente um documento
+    gerado por outro colega da equipa."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT titulo, conteudo_markdown, formato FROM documentos_gerados WHERE id = %s AND utilizador = %s",
-                (id, utilizador)
+                "SELECT titulo, conteudo_markdown, formato FROM documentos_gerados WHERE id = %s",
+                (id,)
             )
             linha = cur.fetchone()
             if not linha:
-                return {"erro": "não encontrei nenhum documento com este id, gerado para ti"}
+                return {"erro": "não encontrei nenhum documento com este id"}
             if not linha["conteudo_markdown"]:
                 return {"erro": "este documento foi gerado antes de guardarmos a fonte — já não está disponível"}
             return {"titulo": linha["titulo"], "formato": linha["formato"], "conteudo": linha["conteudo_markdown"]}
