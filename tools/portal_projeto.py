@@ -943,7 +943,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nome .ref{display:block;margin-top:10px}
   .nome p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr)}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:64px}
   .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
   .tile:hover{background:#F5F2EC}
@@ -955,7 +955,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tile.prevista{opacity:.34;pointer-events:none}
 
   .fase{border-top:1px solid var(--line);padding:64px 0;scroll-margin-top:16px}
-  .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
   .demo{pointer-events:none}
   .fase-topo{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
