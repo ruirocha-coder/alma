@@ -977,7 +977,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .amb .img{aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
   .amb .img img{width:100%;height:100%;object-fit:cover;display:block}
   .amb-texto{text-align:right;margin-top:6px}
-  .amb h3{font-weight:400;font-size:15px}
+  .amb h3{font-weight:300;font-size:15px}
   .amb p{font-size:15px;color:var(--stone);margin-top:3px}
 
   .linhas{width:100%}
