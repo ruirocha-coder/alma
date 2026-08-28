@@ -124,11 +124,15 @@ def gerar_excel(utilizador: str, titulo: str, colunas: list, linhas: list,
     return {"titulo": titulo, "url": url}
 
 def obter_conteudo_documento_gerado(utilizador: str, id: int) -> dict:
-    """Relê o markdown-fonte de um documento já gerado para esta pessoa (ver
-    gerar_pdf) — usa isto quando pedirem para reaproveitar, atualizar,
-    resumir ou converter para outro formato um documento que já fizeste,
-    em vez de dizeres que não tens acesso a esses dados. O id vem da lista
-    de "Documentos que já geraste para esta pessoa" no teu contexto."""
+    """Relê o markdown-fonte de um documento já gerado (ver gerar_pdf) —
+    usa isto quando pedirem para reaproveitar, atualizar, resumir ou
+    converter para outro formato um documento já feito, em vez de dizeres
+    que não tens acesso a esses dados. O id pode vir da lista de
+    "Documentos que já geraste para esta pessoa" no teu contexto, ou de um
+    url /documentos-gerados/{id} partilhado na conversa — não é preciso
+    teres sido tu a gerar esse documento nem que seja desta sessão: os
+    documentos gerados não são privados por utilizador (a própria rota
+    pública que os serve não tem essa restrição)."""
     return db.obter_conteudo_documento_gerado(utilizador, id)
 
 TOOLS_DOCUMENTOS_GERADOS = [
@@ -168,7 +172,7 @@ TOOLS_DOCUMENTOS_GERADOS = [
     },
     {
         "name": "obter_conteudo_documento_gerado",
-        "description": "Relê o markdown-fonte de um documento que já geraste para esta pessoa (ver gerar_pdf), pelo id listado no teu contexto (\"Documentos que já geraste para esta pessoa\"). Usa isto sempre que pedirem para reaproveitar, atualizar, resumir ou converter para outro formato (ex: Excel) um documento já feito, em vez de dizeres que não tens essa informação.",
+        "description": "Relê o markdown-fonte de um documento já gerado (ver gerar_pdf), pelo id listado no teu contexto (\"Documentos que já geraste para esta pessoa\") ou pelo id num url /documentos-gerados/{id} partilhado na conversa — funciona para qualquer documento gerado, não só os desta sessão ou desta pessoa. Usa isto sempre que pedirem para reaproveitar, atualizar, resumir ou converter para outro formato (ex: Excel) um documento já feito, em vez de dizeres que não tens essa informação.",
         "input_schema": {
             "type": "object",
             "properties": {
