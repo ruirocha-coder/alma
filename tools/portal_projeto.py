@@ -954,7 +954,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tile.aguarda .t{font-weight:500}
   .tile.prevista{opacity:.34;pointer-events:none}
 
-  .fase{padding:44px 0;scroll-margin-top:16px}
+  .fase{border-top:1px solid var(--line);padding:110px 0;scroll-margin-top:16px}
+  .fase:first-of-type{border-top:none}
   .fase.prevista{opacity:.32}
   .demo{pointer-events:none}
   .fase-topo{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
