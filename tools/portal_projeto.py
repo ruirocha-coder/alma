@@ -1010,8 +1010,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .nota b{font-weight:500;color:var(--ink)}
 
   .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
-  .painel-resumo{margin-top:18px;padding:2px 14px;background:rgba(145,164,167,.08)}
-  .painel-resumo:has(.pag){background:none;padding:0}
+  .painel-resumo{margin-top:18px;padding:2px 14px}
+  .painel-resumo:has(.pag){padding:0}
   .exemplo-selo{display:inline-block;font-size:12px;color:var(--clay);font-weight:500;letter-spacing:.01em}
 
   .pag-tit{margin-top:40px;font-size:15px;font-weight:500;color:var(--ink);padding-left:27px;
