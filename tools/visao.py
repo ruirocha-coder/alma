@@ -58,6 +58,15 @@ def renderizar_paginas_pdf(bruto: bytes, limite: int = LIMITE_PAGINAS_PDF_ESCANE
     doc = fitz.open(stream=bruto, filetype="pdf")
     return [doc[i].get_pixmap(dpi=150).tobytes("png") for i in range(min(limite, len(doc)))]
 
+def pdf_tem_conteudo_visual(bruto: bytes) -> bool:
+    """Verifica se alguma página do PDF tem imagens ou desenhos vetoriais
+    (ex: o símbolo/tipografia de um logótipo), para saber se vale a pena
+    também descrever visualmente um PDF que já tem texto extraível (ex:
+    códigos de cor, anotações) mas cujo elemento principal é gráfico —
+    caso contrário esse conteúdo visual é perdido em silêncio."""
+    doc = fitz.open(stream=bruto, filetype="pdf")
+    return any(pagina.get_images() or pagina.get_drawings() for pagina in doc)
+
 def descrever_pdf_escaneado(bruto: bytes) -> str:
     """Descreve/transcreve um PDF sem texto extraível, página a página (até
     LIMITE_PAGINAS_PDF_ESCANEADO) — usado quando o PDF não tem texto
