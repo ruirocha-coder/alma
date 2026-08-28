@@ -377,20 +377,23 @@ def _recorte_sessao_anterior(utilizador: str, sessao_atual: str, limite_mensagen
         {"role": "assistant", "content": "Entendido, tenho isso em conta."}
     ]
 
-def historico_sessao(sessao: str, utilizador: str, limite: int = 20) -> list[dict]:
+def historico_sessao(sessao: str, utilizador: str, limite: int = 40) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT papel, conteudo FROM conversas
-                   WHERE sessao = %s AND utilizador = %s
-                   ORDER BY criado_em ASC
-                   LIMIT %s""",
+                """SELECT papel, conteudo FROM (
+                       SELECT papel, conteudo, criado_em FROM conversas
+                       WHERE sessao = %s AND utilizador = %s
+                       ORDER BY criado_em DESC
+                       LIMIT %s
+                   ) AS recentes
+                   ORDER BY criado_em ASC""",
                 (sessao, utilizador, limite)
             )
             linhas = cur.fetchall()
     return [{"role": l["papel"], "content": l["conteudo"]} for l in linhas]
 
-def historico_sessao_para_modelo(sessao: str, utilizador: str, limite: int = 20) -> list[dict]:
+def historico_sessao_para_modelo(sessao: str, utilizador: str, limite: int = 40) -> list[dict]:
     """Como historico_sessao, mas com o recorte da sessão anterior (ver
     _recorte_sessao_anterior) à frente, quando esta sessão está mesmo a
     começar — só para o que é dado ao modelo como contexto, nunca para o
