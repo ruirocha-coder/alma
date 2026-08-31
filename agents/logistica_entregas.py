@@ -506,7 +506,12 @@ def correr_monitorizacao_logistica() -> dict:
                 dados = {}
             dados["data_entrega_cliente"] = _data_entrega_efetiva(item, dados)
 
-            if not dados.get("data_entrada_armazem") or not dados.get("data_entrega_cliente"):
+            # "data_entrada_armazem" só conta como em falta enquanto a
+            # encomenda ainda está no fornecedor — ver o mesmo raciocínio em
+            # tools.logistica.avaliar_condicao (condição A).
+            fase_atual = logistica.fase_encomenda(estado, coluna_real_on_hold)
+            if ((not dados.get("data_entrada_armazem") and fase_atual == "producao")
+                    or not dados.get("data_entrega_cliente")):
                 resumo["campos_em_falta"] += 1
             if dados.get("data_entrega_cliente"):
                 dias_para_entrega = (dados["data_entrega_cliente"] - hoje).days
@@ -541,11 +546,12 @@ def correr_monitorizacao_logistica() -> dict:
             )
             if resultado is None:
                 continue
-            condicao, _ = resultado
+            condicao, variaveis = resultado
 
             try:
                 if condicao in logistica.CONDICOES_COM_TEXTO_FIXO:
-                    texto = logistica.gerar_texto_condicao_fixa(condicao, dados)
+                    texto = logistica.gerar_texto_condicao_fixa(
+                        condicao, dados, campos_em_falta=variaveis.get("campos_em_falta"))
                 else:
                     if documentos_referencia_texto is None:
                         try:

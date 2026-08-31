@@ -153,12 +153,27 @@ def avaliar_condicao(*, hoje: date, estado: str, criado_em: date,
     por trás de "Produção" seria tratado como já chegado ao armazém."""
     fase = fase_encomenda(estado, coluna_real_on_hold)
 
-    # A — campos críticos em falta, encomenda já em curso há mais de 3 dias úteis
-    if ((data_entrada_armazem is None or data_entrega_cliente is None)
+    # A — campos críticos em falta, encomenda já em curso há mais de 3 dias
+    # úteis. "data_entrada_armazem" só conta como em falta enquanto a
+    # encomenda ainda está no fornecedor ("producao") — pedido explícito
+    # do Rui (2026-08-31): uma vez chegada ao armazém ("pronto_entrega"/
+    # "em_entrega" — On Hold por trás de Lisboa/Porto/Outro, ou já
+    # diretamente numa dessas colunas), a própria coluna do card já prova
+    # a chegada (ver fase_encomenda / condição F), por isso deixa de fazer
+    # sentido continuar a pedir essa data. Bug real: Alma continuava a
+    # pedir "data de entrada em armazém" numa encomenda já em Lisboa/
+    # Porto/Outro, onde essa data deixou de ser usada por qualquer regra
+    # abaixo (só B e D, ambas restritas a fase=="producao", a consultam).
+    campos_em_falta = []
+    if data_entrada_armazem is None and fase == "producao":
+        campos_em_falta.append("data_entrada_armazem")
+    if data_entrega_cliente is None:
+        campos_em_falta.append("data_entrega_cliente")
+    if (campos_em_falta
             and fase in ("producao", "pronto_entrega", "em_entrega")
             and dias_uteis_entre(criado_em, hoje) > DIAS_UTEIS_CAMPOS_EM_FALTA
             and not ja_alertado_recente.get("A")):
-        return "A", {}
+        return "A", {"campos_em_falta": campos_em_falta}
 
     if fase == "producao" and data_entrada_armazem:
         dias_para_entrada = (data_entrada_armazem - hoje).days
@@ -216,12 +231,22 @@ def _campo(valor, rotulo: str) -> str:
 # nunca haver deriva na redação combinada com a equipa.
 CONDICOES_COM_TEXTO_FIXO = {"A", "B", "C", "D", "E", "I"}
 
-def gerar_texto_condicao_fixa(condicao: str, dados: dict) -> str:
+_ROTULO_CAMPO = {"data_entrada_armazem": "data de entrada em armazém",
+                 "data_entrega_cliente": "data de entrega ao cliente"}
+
+def gerar_texto_condicao_fixa(condicao: str, dados: dict, campos_em_falta: list = None) -> str:
     """Texto do comentário para uma condição com redação fixa (A, B, C, D,
     E, I) — ver CONDICOES_COM_TEXTO_FIXO. As condições F, G, H usam antes
     os templates numerados (8.1/8.2/8.3) do documento "Logistica", lidos
     em tempo real (ver agents/logistica_entregas.py) em vez de fixos aqui,
-    porque essa parte do documento não foi transcrita para este ficheiro."""
+    porque essa parte do documento não foi transcrita para este ficheiro.
+
+    `campos_em_falta` (só relevante para a condição A): a lista devolvida
+    por avaliar_condicao em `variaveis["campos_em_falta"]`, para o texto
+    nomear só o(s) campo(s) que realmente falta(m) — nunca "data de
+    entrada em armazém" numa encomenda já chegada ao armazém, onde esse
+    campo deixou de ser pedido (ver avaliar_condicao). Sem isto (chamador
+    antigo), assume os dois campos, tal como o texto original."""
     numero = _campo(dados.get("numero_encomenda"), "N.º da encomenda")
     projeto_cliente = _campo(dados.get("cliente"), "nome do cliente/projeto")
     fornecedor = _campo(dados.get("fornecedor"), "nome do fornecedor")
@@ -229,8 +254,12 @@ def gerar_texto_condicao_fixa(condicao: str, dados: dict) -> str:
     data_entrega = _campo(_fmt_data(dados.get("data_entrega_cliente")), "data de entrega ao cliente")
 
     if condicao == "A":
-        return ("Esta encomenda não tem data de entrada em armazém ou data de entrega ao cliente "
-                "registada. Por favor preenche estes campos para eu poder monitorizar. CC: @Isa Moreira")
+        campos = campos_em_falta if campos_em_falta else ["data_entrada_armazem", "data_entrega_cliente"]
+        rotulos = [_ROTULO_CAMPO[c] for c in campos]
+        campos_texto = " ou ".join(rotulos)
+        verbo = "preenche este campo" if len(rotulos) == 1 else "preenche estes campos"
+        return (f"Esta encomenda não tem {campos_texto} registada. Por favor {verbo} para eu poder "
+                "monitorizar. CC: @Isa Moreira")
 
     if condicao == "B":
         data_entrada_dt = dados.get("data_entrada_armazem")
