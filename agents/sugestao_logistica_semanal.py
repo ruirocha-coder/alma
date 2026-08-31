@@ -51,7 +51,7 @@
 # que agents.agendamento_entregas.criar_eventos_calendario_entregas_restrito
 # é chamada, com os dados finais tal como confirmados na conversa.
 import threading
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from agents.base import client
 from agents import estimativa_montagem
 from agents.logistica_entregas import (_extrair_dados_encomenda, _coluna_real_on_hold,
@@ -733,6 +733,27 @@ def _construir_tabela_agendamento(agendamento_por_regiao: dict) -> str:
     return ("\n\n---\n\n### Tabela preparatória de agendamento\n\n" + "\n\n".join(blocos) +
             "\n\nRevê esta tabela antes de pedir a criação dos eventos no calendário do projeto Entregas.")
 
+ASSUNTO_SUGESTAO_SEMANAL = "Sugestão de logística semanal"
+
+def _post_sugestao_de_hoje():
+    """Procura, no Mural do projeto Entregas, uma "Sugestão de logística
+    semanal" já publicada hoje — para uma corrida manual no mesmo dia
+    (ex: a corrigir um erro de extração já publicado, ver
+    correr_sugestao_semanal_logistica) atualizar esse post em vez de criar
+    um duplicado. Devolve o `url` desse post, ou None se não houver
+    nenhum de hoje."""
+    hoje = date.today()
+    for msg in basecamp.listar_mural(logistica.PROJETO_ENTREGAS, limite=20):
+        if msg["assunto"] != ASSUNTO_SUGESTAO_SEMANAL or not msg.get("criado_em"):
+            continue
+        try:
+            criado_em = datetime.fromisoformat(msg["criado_em"].replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        if criado_em == hoje:
+            return msg["url"]
+    return None
+
 def correr_sugestao_semanal_logistica() -> dict:
     """Uma corrida da sugestão semanal de logística de entregas: lê os
     cards prontos a entregar (ver _cards_prontos_a_entregar), publica a
@@ -744,7 +765,10 @@ def correr_sugestao_semanal_logistica() -> dict:
     por entrega, ver _construir_texto_proposta_agendamento), e publica
     tudo junto no Mural "Programação", dirigido à Conceição Costa.
     Pensado para correr às segundas de manhã (agendado), mas pode ser
-    disparado manualmente."""
+    disparado manualmente — se já houver uma sugestão publicada hoje (ver
+    _post_sugestao_de_hoje), atualiza esse post em vez de criar um
+    duplicado (ex: recorrer manualmente no mesmo dia para corrigir dados
+    que saíram errados por uma falha de extração entretanto corrigida)."""
     if not _a_correr.acquire(blocking=False):
         print("[sugestao_logistica_semanal] já há uma corrida em curso — ignorado")
         return {"erro": "já está a correr uma sugestão semanal"}
@@ -780,8 +804,13 @@ def correr_sugestao_semanal_logistica() -> dict:
         texto += _construir_texto_proposta_agendamento(agendamento_por_regiao)
         texto += _construir_tabela_agendamento(agendamento_por_regiao)
         texto += _texto_nao_confirmados(nao_confirmados)
-        basecamp.publicar_mural("Sugestão de logística semanal", texto, projeto=logistica.PROJETO_ENTREGAS,
-                                notificar_apenas=logistica.NOTIFICAR_APENAS_ENTREGAS)
+        post_de_hoje = _post_sugestao_de_hoje()
+        if post_de_hoje:
+            basecamp.editar_mensagem_mural(post_de_hoje, mensagem=texto, projeto=logistica.PROJETO_ENTREGAS)
+            print(f"[sugestao_logistica_semanal] já havia uma sugestão publicada hoje — atualizada em vez de duplicada")
+        else:
+            basecamp.publicar_mural(ASSUNTO_SUGESTAO_SEMANAL, texto, projeto=logistica.PROJETO_ENTREGAS,
+                                    notificar_apenas=logistica.NOTIFICAR_APENAS_ENTREGAS)
 
         contagens = {regiao: len(cards) for regiao, cards in cards_por_regiao.items()}
         total_prontos = sum(contagens.values())
