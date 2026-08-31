@@ -944,10 +944,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .projeto-id .ref{font-size:12px;color:#fff;opacity:.8;margin-left:8px}
   .faixa{width:100%;height:8px;background:#91A4A7}
 
-  .boas-vindas{padding:48px 0 8px}
+  .boas-vindas{padding:48px 0 26px}
   .boas-vindas h1{font-weight:400;font-size:34px;line-height:1.3}
   .boas-vindas h1 .destaque{color:#F8B681}
-  .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
+  .boas-vindas p{margin-top:24px;color:var(--stone);font-size:15px}
 
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:64px}
   .tile{position:relative;padding:18px 16px 16px;background:rgba(145,164,167,.15);
