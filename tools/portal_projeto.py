@@ -942,7 +942,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .faixa{width:100%;height:8px;background:#91A4A7}
 
   .boas-vindas{padding:48px 0 8px}
-  .boas-vindas h1{font-weight:400;font-size:32px;line-height:1.3}
+  .boas-vindas h1{font-weight:400;font-size:34px;line-height:1.3}
   .boas-vindas h1 .destaque{color:#F8B681}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
 
@@ -1049,13 +1049,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .validar{margin-top:34px;padding-top:26px;text-align:right}
   .validar .conv{font-size:13px;color:var(--stone);margin-top:14px}
-  .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#000;
+  .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#fff;
        text-decoration:none;font-size:13px;font-weight:400;padding:6.9px 32px;transition:.15s;
        font-family:inherit;cursor:pointer}
   .btn:hover{background:transparent;color:var(--ink)}
   .btn:focus-visible{outline:2px solid var(--clay);outline-offset:3px}
   .btn:disabled{opacity:.5;cursor:default}
-  .btn:disabled:hover{background:#91A4A7;color:#000}
+  .btn:disabled:hover{background:#91A4A7;color:#fff}
   .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
   .validar-caixa{margin-top:34px;padding:26px 24px;background:#91A4A7;display:flex;
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
@@ -1300,7 +1300,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
             <h3>Concretizar o ambiente completo</h3>
             <p>Ao adjudicar, recebe de imediato a confirmação e os dados de pagamento da primeira fase. O seu designer acompanha o resto.</p>
           </div>
-          <a class="btn-adjudicar" href="${projeto.acoes[f.id]}">${f.acao}</a>
+          <a class="btn-adjudicar" href="${projeto.acoes[f.id]}">Adjudicar — ${eur(p50)} (50%)</a>
         </div>` + notaCondicaoCredito;
     } else {
       bloco  = conteudo[f.id]() + `
