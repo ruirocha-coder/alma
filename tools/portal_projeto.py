@@ -33,8 +33,11 @@ _TAMANHO_MAX_IMAGEM_PX = 1600
 
 _EMAIL_ESTUDIO = "studio@interiorguider.com"
 
-_SUB_PADRAO = ("Acompanhamento do projeto. Cada fase abre aqui à medida "
-               "que avança e é validada.")
+_SUB_PADRAO = ("O método psicoestético, exclusivo do studio, combina princípios da "
+               "psicologia analítica com a estética, partindo do pressuposto de que "
+               "os ambientes não são apenas espaços físicos, mas desempenham funções "
+               "psicológicas, refletem ideais de beleza e influenciam diretamente o "
+               "bem-estar.")
 
 _CONTACTO_ROTULO = "Contactar o designer"
 
@@ -941,10 +944,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .projeto-id .ref{font-size:12px;color:#fff;opacity:.8;margin-left:8px}
   .faixa{width:100%;height:8px;background:#91A4A7}
 
-  .boas-vindas{padding:48px 0 8px}
-  .boas-vindas h1{font-weight:400;font-size:32px;line-height:1.3}
+  .boas-vindas{padding:48px 0 26px}
+  .boas-vindas h1{font-weight:400;font-size:34px;line-height:1.3}
   .boas-vindas h1 .destaque{color:#F8B681}
-  .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
+  .boas-vindas p{margin-top:24px;color:var(--stone);font-size:15px}
 
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:64px}
   .tile{position:relative;padding:18px 16px 16px;background:rgba(145,164,167,.15);
@@ -1049,13 +1052,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .validar{margin-top:34px;padding-top:26px;text-align:right}
   .validar .conv{font-size:13px;color:var(--stone);margin-top:14px}
-  .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#000;
+  .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#fff;
        text-decoration:none;font-size:13px;font-weight:400;padding:6.9px 32px;transition:.15s;
        font-family:inherit;cursor:pointer}
   .btn:hover{background:transparent;color:var(--ink)}
   .btn:focus-visible{outline:2px solid var(--clay);outline-offset:3px}
   .btn:disabled{opacity:.5;cursor:default}
-  .btn:disabled:hover{background:#91A4A7;color:#000}
+  .btn:disabled:hover{background:#91A4A7;color:#fff}
   .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
   .validar-caixa{margin-top:34px;padding:26px 24px;background:#91A4A7;display:flex;
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
@@ -1069,6 +1072,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn-adjudicar:disabled{opacity:.6;cursor:default}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
 
+  .fecho{margin-top:60px;padding-top:40px;border-top:1px solid var(--line);text-align:center;
+       font-size:18px;font-weight:300;color:var(--ink);line-height:1.6}
   footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 60px;
          font-size:12px;color:var(--stone);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
   footer a{text-decoration:none;border-bottom:1px solid var(--line)}
@@ -1101,6 +1106,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
 
   <main id="fases"></main>
+
+  <p class="fecho">Obrigado.<br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
@@ -1300,7 +1307,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
             <h3>Concretizar o ambiente completo</h3>
             <p>Ao adjudicar, recebe de imediato a confirmação e os dados de pagamento da primeira fase. O seu designer acompanha o resto.</p>
           </div>
-          <a class="btn-adjudicar" href="${projeto.acoes[f.id]}">${f.acao}</a>
+          <a class="btn-adjudicar" href="${projeto.acoes[f.id]}">Adjudicar — ${eur(p50)} (50%)</a>
         </div>` + notaCondicaoCredito;
     } else {
       bloco  = conteudo[f.id]() + `
