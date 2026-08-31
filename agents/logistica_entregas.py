@@ -160,11 +160,24 @@ def _chamar_extracao_llm(titulo: str, notas: str, texto_pdf: str = None) -> str:
         # logística corre) — nunca usado para "morada", só para
         # produtos/dados adicionais (ver _MISSAO_EXTRACAO).
         conteudo += f"\n\nPDF/orçamento da encomenda (nunca usar para \"morada\"):\n{texto_pdf[:15000]}"
+    # max_tokens generoso (não só os ~300 de antes de o PDF passar a ser
+    # obrigatório): bug real (2026-08-31, card "CDL - Casa das Lameiras")
+    # — cliente/morada/produtos/data saíram TODOS "não identificado" na
+    # sugestão semanal apesar de as notas terem tudo bem etiquetado; causa
+    # provável é o JSON de resposta a ser cortado a meio quando o PDF tem
+    # uma lista de produtos mais longa para resumir em "produtos_
+    # encomendados", o que faz json.loads falhar em _extrair_dados_encomenda
+    # e perder TODOS os campos de uma vez, não só esse — não isolado a um
+    # campo, por isso o sintoma nunca aponta diretamente para "faltam
+    # tokens". Regista também um aviso se a resposta foi mesmo cortada,
+    # para a próxima vez isto aparecer claro nos logs em vez de silencioso.
     resposta = client.messages.create(
-        model="claude-haiku-4-5-20251001", max_tokens=300,
+        model="claude-haiku-4-5-20251001", max_tokens=1024,
         system=_MISSAO_EXTRACAO,
         messages=[{"role": "user", "content": conteudo}]
     )
+    if resposta.stop_reason == "max_tokens":
+        print(f"[logistica_entregas] extração cortada por max_tokens (card: {titulo!r})")
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
 def _limpar_bloco_codigo(texto: str) -> str:
