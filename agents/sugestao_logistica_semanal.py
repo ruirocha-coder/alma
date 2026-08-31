@@ -162,14 +162,51 @@ Termina sempre a mensagem a mencionar "@Conceição Costa" (e só ela,
 nenhuma outra pessoa) — é a destinatária desta sugestão.
 
 Escreve só o texto final da mensagem do mural, sem comentário à parte."""
+    # max_tokens generoso: pedido a escrever, por card, uma análise de
+    # tempo de montagem em prosa (ver bloco_documentos acima) — com seis
+    # ou mais entregas, algumas com listas de produtos longas (ex: um
+    # projeto com 20+ artigos), o texto todo facilmente passa dos 1500
+    # tokens que este pedido tinha antes. Bug real (2026-08-31): o texto
+    # mencionou corretamente "quatro entregas esta semana" no resumo, mas
+    # o corpo do texto só descreveu três — a quarta (CDL - Casa das
+    # Lameiras) desapareceu sem aviso nenhum, quase de certeza por o
+    # modelo ter cortado a última entrega ao aproximar-se do limite.
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=1500,
+        model="claude-sonnet-4-6", max_tokens=4000,
         system=missao, messages=[{"role": "user", "content": "Gera a sugestão semanal."}]
     )
+    if resposta.stop_reason == "max_tokens":
+        print("[sugestao_logistica_semanal] geração do texto da sugestão semanal cortada por max_tokens")
     texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    texto = _garantir_todas_as_entregas(texto, cards_por_regiao)
     if RESPONSAVEL_MENCAO not in texto:
         texto += f"\n\n@{RESPONSAVEL_MENCAO}"
     return texto
+
+def _garantir_todas_as_entregas(texto: str, cards_por_regiao: dict) -> str:
+    """Rede de segurança determinística contra o bug real descrito acima
+    em _gerar_texto_sugestao: o modelo pode mencionar a contagem certa de
+    entregas no resumo e mesmo assim OMITIR uma delas do corpo do texto,
+    sem qualquer aviso — mesmo com mais tokens disponíveis, nunca há
+    garantia absoluta de que isto não se repita. Em vez de confiar cegamente
+    no texto gerado, confirma aqui que o título de cada card (a primeira
+    linha de cada bloco já formatado por _formatar_card_pronto, sempre
+    determinístico) aparece mesmo no texto final; qualquer entrega em
+    falta é acrescentada no fim, tal como já formatada, com um aviso bem
+    visível — para uma encomenda nunca desaparecer silenciosamente da
+    sugestão semanal."""
+    faltam = []
+    for regiao, cards in cards_por_regiao.items():
+        for bloco in cards:
+            titulo = bloco.split("\n", 1)[0].strip("- *")
+            if titulo and titulo not in texto:
+                faltam.append((regiao, bloco))
+    if not faltam:
+        return texto
+    aviso = ("\n\n---\n\n⚠️ **Entregas em falta no texto acima, acrescentadas automaticamente "
+            "(a IA que escreveu o resumo não as incluiu — por favor confirma):**\n\n" +
+            "\n\n".join(f"### {regiao}\n{bloco}" for regiao, bloco in faltam))
+    return texto + aviso
 
 def _cards_prontos_a_entregar() -> tuple:
     """Lê os cards ativos do projeto "Entregas" e devolve
