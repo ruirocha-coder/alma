@@ -1266,9 +1266,10 @@ const conteudo = {
           <p>Com a instalação concluída em sua casa.</p>
         </div>
       </div>
-    </div>
-    <p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram neste valor. A compra parcial fica a preço de tabela, sem crédito. ${projeto.validade}</p>`
+    </div>`
 };
+
+const notaCondicaoCredito = `<p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram neste valor. A compra parcial fica a preço de tabela, sem crédito. ${projeto.validade}</p>`;
 
 $('fases').innerHTML = projeto.fases.map((f,i)=>{
   let estado, bloco;
@@ -1279,7 +1280,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
       <div class="validar">
         <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
         <p class="conv">${f.obs}</p>
-      </div>`;
+      </div>` + (f.id === 'orcamento' && temProduto ? notaCondicaoCredito : '');
   } else if(f.estado === "aguarda"){
     estado = `<span class="estado">a aguardar a sua validação</span>`;
     if(f.id === 'orcamento' && temProduto){
@@ -1291,7 +1292,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
           </div>
           <button type="button" class="btn-adjudicar" onclick="validarFase('${f.id}', this)">Adjudicar — ${eur(p50)} (50%)</button>
         </div>
-        <p class="validar-msg" id="msg-${f.id}"></p>`;
+        <p class="validar-msg" id="msg-${f.id}"></p>` + notaCondicaoCredito;
     } else {
       bloco  = conteudo[f.id]() + `
         <div class="validar">
