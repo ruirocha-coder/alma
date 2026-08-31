@@ -1048,6 +1048,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn:disabled{opacity:.5;cursor:default}
   .btn:disabled:hover{background:#91A4A7;color:#000}
   .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
+  .validar-caixa{margin-top:34px;padding:26px 24px;background:#91A4A7;display:flex;
+       justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+  .validar-texto{flex:1;min-width:220px}
+  .validar-texto h3{color:#fff;font-weight:400;font-size:20px;line-height:1.3}
+  .validar-texto p{color:rgba(255,255,255,.85);font-size:13.5px;margin-top:8px;max-width:420px}
+  .btn-adjudicar{background:#fff;color:var(--ink);border:none;padding:16px 28px;font-size:14px;
+       font-weight:500;font-family:inherit;cursor:pointer;white-space:nowrap;transition:.15s}
+  .btn-adjudicar:hover{background:#F5F2EC}
+  .btn-adjudicar:disabled{opacity:.6;cursor:default}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
 
   footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 60px;
@@ -1227,7 +1236,7 @@ const conteudo = {
       <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span class="doc-txt">Orçamento detalhado <span class="ext">. PDF</span></span></a>
     </div>
-    <div class="painel-resumo">
+    <div class="linhas-caixa">
       <div class="linhas">
         <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
         <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
@@ -1273,12 +1282,24 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
       </div>`;
   } else if(f.estado === "aguarda"){
     estado = `<span class="estado">a aguardar a sua validação</span>`;
-    bloco  = conteudo[f.id]() + `
-      <div class="validar">
-        <button type="button" class="btn" onclick="validarFase('${f.id}', this)">${f.acao}</button>
-        <p class="conv">${f.obs}</p>
-        <p class="validar-msg" id="msg-${f.id}"></p>
-      </div>`;
+    if(f.id === 'orcamento' && temProduto){
+      bloco = conteudo[f.id]() + `
+        <div class="validar-caixa">
+          <div class="validar-texto">
+            <h3>Concretizar o ambiente completo</h3>
+            <p>Ao adjudicar, recebe de imediato a confirmação e os dados de pagamento da primeira fase. O seu designer acompanha o resto.</p>
+          </div>
+          <button type="button" class="btn-adjudicar" onclick="validarFase('${f.id}', this)">Adjudicar — ${eur(p50)} (50%)</button>
+        </div>
+        <p class="validar-msg" id="msg-${f.id}"></p>`;
+    } else {
+      bloco  = conteudo[f.id]() + `
+        <div class="validar">
+          <button type="button" class="btn" onclick="validarFase('${f.id}', this)">${f.acao}</button>
+          <p class="conv">${f.obs}</p>
+          <p class="validar-msg" id="msg-${f.id}"></p>
+        </div>`;
+    }
   } else {
     const anterior = projeto.fases[i-1];
     estado = `<span class="estado">por abrir</span>`;
