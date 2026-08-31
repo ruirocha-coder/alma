@@ -943,10 +943,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .boas-vindas{padding:48px 0 8px}
   .boas-vindas h1{font-weight:400;font-size:32px;line-height:1.3}
-  .boas-vindas h1 .destaque{color:var(--clay)}
+  .boas-vindas h1 .destaque{color:#F8B681}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:64px}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:64px}
   .tile{padding:18px 16px 16px;background:rgba(145,164,167,.15);border-left:1px solid var(--line);
        text-decoration:none;color:inherit;display:block;transition:background-color .15s}
   .tile:first-child{border-left:none}
