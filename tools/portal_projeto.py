@@ -33,8 +33,11 @@ _TAMANHO_MAX_IMAGEM_PX = 1600
 
 _EMAIL_ESTUDIO = "studio@interiorguider.com"
 
-_SUB_PADRAO = ("Acompanhamento do projeto. Cada fase abre aqui à medida "
-               "que avança e é validada.")
+_SUB_PADRAO = ("O método psicoestético, exclusivo do studio, combina princípios da "
+               "psicologia analítica com a estética, partindo do pressuposto de que "
+               "os ambientes não são apenas espaços físicos, mas desempenham funções "
+               "psicológicas, refletem ideais de beleza e influenciam diretamente o "
+               "bem-estar.")
 
 _CONTACTO_ROTULO = "Contactar o designer"
 
@@ -1069,6 +1072,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn-adjudicar:disabled{opacity:.6;cursor:default}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
 
+  .fecho{margin-top:60px;padding-top:40px;border-top:1px solid var(--line);text-align:center;
+       font-size:18px;font-weight:300;color:var(--ink);line-height:1.6}
   footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 60px;
          font-size:12px;color:var(--stone);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
   footer a{text-decoration:none;border-bottom:1px solid var(--line)}
@@ -1101,6 +1106,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
 
   <main id="fases"></main>
+
+  <p class="fecho">Obrigado.<br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
