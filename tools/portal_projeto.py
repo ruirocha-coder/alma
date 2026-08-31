@@ -994,6 +994,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .l.credito{color:var(--clay)}
   .l.destaque{border-bottom:none;padding-top:16px;border-top:1px solid var(--ink);margin-top:4px}
   .linhas-caixa{border:1px solid var(--line);padding:0 16px}
+  .docs+.linhas-caixa{margin-top:18px}
+  .docs+.hero-valor{margin-top:18px}
+  .hero-valor+.linhas-caixa{margin-top:18px}
+  .hero-valor{background:#91A4A7;padding:28px 24px;display:flex;justify-content:space-between;
+       align-items:center;gap:24px;flex-wrap:wrap}
+  .hero-valor-label{color:rgba(255,255,255,.75);font-size:11px;font-weight:500;
+       text-transform:uppercase;letter-spacing:.05em}
+  .hero-valor-numero{color:#fff;font-size:34px;font-weight:400;margin-top:6px}
+  .hero-valor-nota{color:rgba(255,255,255,.85);font-size:13px;max-width:280px}
   .linhas-caixa .l.destaque{margin:4px -16px 0;padding:16px 16px 14px;background:#F1ECDA}
   .linhas-caixa .l.destaque .v{font-size:19px;font-weight:500}
 
@@ -1053,8 +1062,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .validar-texto{flex:1;min-width:220px}
   .validar-texto h3{color:#fff;font-weight:400;font-size:20px;line-height:1.3}
   .validar-texto p{color:rgba(255,255,255,.85);font-size:13.5px;margin-top:8px;max-width:420px}
-  .btn-adjudicar{background:#fff;color:var(--ink);border:none;padding:16px 28px;font-size:14px;
-       font-weight:500;font-family:inherit;cursor:pointer;white-space:nowrap;transition:.15s}
+  .btn-adjudicar{display:inline-block;background:#fff;color:var(--ink);border:none;padding:16px 28px;
+       font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
+       white-space:nowrap;transition:.15s}
   .btn-adjudicar:hover{background:#F5F2EC}
   .btn-adjudicar:disabled{opacity:.6;cursor:default}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
@@ -1236,6 +1246,13 @@ const conteudo = {
       <a class="doc ${projeto.documentos.orcamento?'':'off'}" href="#" ${projeto.documentos.orcamento?`onclick="return abrirDocumento(projeto.documentos.orcamento, 'Orçamento detalhado - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
         <span class="doc-txt">Orçamento detalhado <span class="ext">. PDF</span></span></a>
     </div>
+    <div class="hero-valor">
+      <div class="hero-valor-texto">
+        <div class="hero-valor-label">O ambiente completo</div>
+        <div class="hero-valor-numero">${eur(totalProduto)}</div>
+      </div>
+      <p class="hero-valor-nota">Inclui entrega, montagem, styling final e garantia única sobre o conjunto.</p>
+    </div>
     <div class="linhas-caixa">
       <div class="linhas">
         <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
@@ -1276,11 +1293,22 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
 
   if(f.estado === "validada"){
     estado = `<span class="estado ok">validado a ${f.data}</span>`;
-    bloco  = conteudo[f.id]() + `
-      <div class="validar">
-        <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
-        <p class="conv">${f.obs}</p>
-      </div>` + (f.id === 'orcamento' && temProduto ? notaCondicaoCredito : '');
+    if(f.id === 'orcamento' && temProduto){
+      bloco = conteudo[f.id]() + `
+        <div class="validar-caixa">
+          <div class="validar-texto">
+            <h3>Concretizar o ambiente completo</h3>
+            <p>Ao adjudicar, recebe de imediato a confirmação e os dados de pagamento da primeira fase. O seu designer acompanha o resto.</p>
+          </div>
+          <a class="btn-adjudicar" href="${projeto.acoes[f.id]}">${f.acao}</a>
+        </div>` + notaCondicaoCredito;
+    } else {
+      bloco  = conteudo[f.id]() + `
+        <div class="validar">
+          <a class="btn" href="${projeto.acoes[f.id]}">${f.acao}</a>
+          <p class="conv">${f.obs}</p>
+        </div>`;
+    }
   } else if(f.estado === "aguarda"){
     estado = `<span class="estado">a aguardar a sua validação</span>`;
     if(f.id === 'orcamento' && temProduto){
