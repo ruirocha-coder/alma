@@ -935,10 +935,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   a{color:inherit}
 
   header{background:var(--clay);width:100%}
-  .topo{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:24px 28px}
-  .logo{height:26px;width:auto;display:block}
-  .projeto-id{color:#fff;font-size:13px;text-align:right;line-height:1.5;opacity:.92}
-  .projeto-id .ref{display:block;font-size:12px;color:#fff;opacity:.8}
+  .topo{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 28px}
+  .logo{height:26px;width:auto;display:block;flex-shrink:0}
+  .projeto-id{color:#fff;font-size:13px;text-align:right;white-space:nowrap;opacity:.92}
+  .projeto-id .ref{font-size:12px;color:#fff;opacity:.8;margin-left:8px}
   .faixa{width:100%;height:8px;background:#91A4A7}
 
   .boas-vindas{padding:48px 0 8px}
@@ -946,10 +946,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .boas-vindas h1 .destaque{color:var(--clay)}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:64px}
-  .tile{padding:18px 16px 16px;border-left:1px solid var(--line);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
-  .tile:first-child{border-left:none}
-  .tile:hover{background:#F5F2EC}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:64px}
+  .tile{padding:18px 16px 16px;background:rgba(145,164,167,.15);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
+  .tile:hover{background:rgba(145,164,167,.25)}
   .tile .t{font-size:14.5px;font-weight:400}
   .tile .e{font-size:11px;margin-top:10px;color:var(--stone);line-height:1.4}
   .tile.validada .e{color:var(--clay)}
@@ -991,6 +990,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .l.credito{color:var(--clay)}
   .l.destaque{border-bottom:none;padding-top:16px;border-top:1px solid var(--ink);margin-top:4px}
   .linhas-caixa{border:1px solid var(--line);padding:0 16px;margin-top:8px}
+  .linhas-topo{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+       padding:16px 0;border-bottom:1px solid var(--ink)}
+  .linhas-tit{font-size:15px;font-weight:500;color:var(--ink)}
+  .linhas-tit small{font-weight:400;color:var(--stone);font-size:11px;text-transform:uppercase;
+       letter-spacing:.04em;margin-right:8px}
+  .linhas-selo{font-size:11px;font-weight:500;color:var(--clay);text-transform:uppercase;
+       letter-spacing:.03em;white-space:nowrap}
+  .linhas-caixa .l.destaque{margin:4px -16px 0;padding:16px 16px 14px;background:#F1ECDA}
 
   .docs{margin-top:28px}
   .corpo>.docs:first-child{margin-top:0}
@@ -1051,8 +1058,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   @media(max-width:560px){
     .tiles{grid-template-columns:repeat(2,1fr)}
-    .tile:nth-child(3){border-left:none}
-    .tile:nth-child(3),.tile:nth-child(4){border-top:1px solid var(--line)}
     .fase-topo{flex-direction:column;gap:4px}
     .pag{grid-template-columns:1fr}
   }
@@ -1149,9 +1154,15 @@ $('tiles').innerHTML = projeto.fases.map((f,i)=>`
     <div class="e">${rotuloTile(f)}</div>
   </a>`).join('');
 
+const fHonorarios = projeto.fases.find(f=>f.id==='honorarios');
+
 const conteudo = {
   honorarios: () => `
     <div class="linhas-caixa">
+      <div class="linhas-topo">
+        <span class="linhas-tit"><small>Fase 1</small> Honorários</span>
+        ${fHonorarios.estado==='validada'?`<span class="linhas-selo">Aceite a ${fHonorarios.data}</span>`:''}
+      </div>
       <div class="linhas">
         ${projeto.honorarios.linhas.map(l=>`
           <div class="l"><span>${l.t}<span class="d">${l.d}</span></span><span class="v">${eur(l.v)}</span></div>`).join('')}
