@@ -1072,7 +1072,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn-adjudicar:disabled{opacity:.6;cursor:default}
   .espera{margin-top:24px;font-size:13.5px;color:var(--stone)}
 
-  .fecho{margin-top:60px;padding-top:40px;border-top:1px solid var(--line);text-align:center;
+  .fecho{margin-top:24px;padding-top:30px;border-top:1px solid var(--line);text-align:center;
        font-size:18px;font-weight:300;color:var(--ink);line-height:1.6}
   footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 60px;
          font-size:12px;color:var(--stone);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -1107,7 +1107,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <main id="fases"></main>
 
-  <p class="fecho">Obrigado.<br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
+  <p class="fecho">Obrigado. Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
