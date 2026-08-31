@@ -936,7 +936,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   header{background:var(--clay);width:100%}
   .topo{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 28px}
-  .logo{height:26px;width:auto;display:block;flex-shrink:0}
+  .logo{height:34px;width:auto;display:block;flex-shrink:0}
   .projeto-id{color:#fff;font-size:13px;text-align:right;white-space:nowrap;opacity:.92}
   .projeto-id .ref{font-size:12px;color:#fff;opacity:.8;margin-left:8px}
   .faixa{width:100%;height:8px;background:#91A4A7}
@@ -946,8 +946,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .boas-vindas h1 .destaque{color:var(--clay)}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:64px}
-  .tile{padding:18px 16px 16px;background:rgba(145,164,167,.15);text-decoration:none;color:inherit;display:block;transition:background-color .15s}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:64px}
+  .tile{padding:18px 16px 16px;background:rgba(145,164,167,.15);border-left:1px solid var(--line);
+       text-decoration:none;color:inherit;display:block;transition:background-color .15s}
+  .tile:first-child{border-left:none}
   .tile:hover{background:rgba(145,164,167,.25)}
   .tile .t{font-size:14.5px;font-weight:400}
   .tile .e{font-size:11px;margin-top:10px;color:var(--stone);line-height:1.4}
@@ -1058,6 +1060,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   @media(max-width:560px){
     .tiles{grid-template-columns:repeat(2,1fr)}
+    .tile:nth-child(3){border-left:none}
+    .tile:nth-child(3),.tile:nth-child(4){border-top:1px solid var(--line)}
     .fase-topo{flex-direction:column;gap:4px}
     .pag{grid-template-columns:1fr}
   }
@@ -1292,7 +1296,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
   }
 
   return `<section class="fase ${f.estado==='prevista'?'prevista':''}" id="${f.id}">
-    <div class="fase-topo"><h2>${f.titulo}</h2>${estado}</div>
+    ${f.id!=='honorarios'?`<div class="fase-topo"><h2>${f.titulo}</h2>${estado}</div>`:''}
     <div class="corpo">${bloco}</div>
   </section>`;
 }).join('');
