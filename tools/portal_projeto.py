@@ -946,10 +946,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .boas-vindas h1 .destaque{color:#F8B681}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
 
-  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:64px}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:64px}
   .tile{position:relative;padding:18px 16px 16px;background:rgba(145,164,167,.15);
        text-decoration:none;color:inherit;display:block;transition:background-color .15s}
-  .tile:not(:first-child)::before{content:"";position:absolute;left:-3.5px;top:0;bottom:0;
+  .tile:not(:first-child)::before{content:"";position:absolute;left:-4px;top:0;bottom:0;
        width:1px;background:var(--line)}
   .tile:hover{background:rgba(145,164,167,.25)}
   .tile .t{font-size:14.5px;font-weight:400}
@@ -995,6 +995,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .l.destaque{border-bottom:none;padding-top:16px;border-top:1px solid var(--ink);margin-top:4px}
   .linhas-caixa{border:1px solid var(--line);padding:0 16px}
   .linhas-caixa .l.destaque{margin:4px -16px 0;padding:16px 16px 14px;background:#F1ECDA}
+  .linhas-caixa .l.destaque .v{font-size:19px;font-weight:500}
 
   .docs{margin-top:28px}
   .corpo>.docs:first-child{margin-top:0}
@@ -1057,7 +1058,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     .tiles{grid-template-columns:repeat(2,1fr)}
     .tile:nth-child(3)::before{display:none}
     .tile:nth-child(3)::after,.tile:nth-child(4)::after{content:"";position:absolute;
-         top:-3.5px;left:0;right:0;height:1px;background:var(--line)}
+         top:-4px;left:0;right:0;height:1px;background:var(--line)}
     .fase-topo{flex-direction:column;gap:4px}
     .pag{grid-template-columns:1fr}
   }
