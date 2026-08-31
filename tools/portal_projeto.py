@@ -941,7 +941,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .projeto-id .ref{font-size:12px;color:#fff;opacity:.8;margin-left:8px}
   .faixa{width:100%;height:8px;background:#91A4A7}
 
-  .boas-vindas{padding:48px 0 8px}
+  .boas-vindas{padding:48px 10px 8px}
   .boas-vindas h1{font-weight:400;font-size:32px;line-height:1.3}
   .boas-vindas h1 .destaque{color:#F8B681}
   .boas-vindas p{margin-top:14px;color:var(--stone);font-size:15px}
@@ -972,16 +972,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .imagem{aspect-ratio:16/10;background:linear-gradient(135deg,#EDE8DF,#C9BEAC);margin-top:18px;margin-bottom:22px}
   .imagem img{width:100%;height:100%;object-fit:cover;display:block}
-  .leitura{font-size:15px;line-height:1.7;text-align:justify;color:var(--stone)}
+  .leitura{font-size:15px;line-height:1.7;text-align:justify;color:var(--stone);padding:0 10px}
   .leitura+.leitura{margin-top:14px}
-  .materiais{margin-top:16px;font-size:13px;color:var(--stone)}
+  .materiais{margin-top:16px;font-size:13px;color:var(--stone);padding:0 10px}
 
   .amb{margin-top:34px}
   .docs+.amb{margin-top:18px}
   .amb:first-of-type{margin-top:0}
   .amb .img{aspect-ratio:16/9;background:linear-gradient(135deg,#E9E2D5,#CBBBA3)}
   .amb .img img{width:100%;height:100%;object-fit:cover;display:block}
-  .amb-texto{text-align:right;margin-top:6px}
+  .amb-texto{text-align:right;margin-top:6px;padding:0 10px}
   .amb h3{font-weight:300;font-size:15px}
   .amb p{font-size:15px;color:var(--stone);margin-top:3px}
 
@@ -1019,7 +1019,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .credito-escuro h3 em{color:#F8B681}
   .credito-escuro p{color:rgba(255,255,255,.78)}
 
-  .nota{margin-top:40px;font-size:13px;color:var(--stone)}
+  .nota{margin-top:40px;font-size:13px;color:var(--stone);padding:0 10px}
   .nota b{font-weight:500;color:var(--ink)}
 
   .exemplo{margin-top:26px;padding:18px 20px;border:1px dashed var(--line);border-radius:8px;background:rgba(0,0,0,.015)}
