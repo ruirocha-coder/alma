@@ -13,6 +13,7 @@
 # Basecamp sempre que é aberta ou atualizada manualmente.
 import math
 import unicodedata
+from datetime import date, timedelta
 import db
 from tools import basecamp
 
@@ -113,13 +114,68 @@ def _duracao_por_volume(linha: str, volume_m3: float) -> int:
         return 1
     return max(1, math.ceil(volume_m3 / capacidade))
 
+def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
+    """Quanto de m³/dia já está ocupado, dia a dia, numa linha — soma o
+    "ritmo diário" (volume ÷ duração) de cada OF já agendada nessa linha
+    que cubra esse dia. Uma OF sem volume definido não tem ritmo diário
+    conhecido: ocupa a linha por completo nesses dias (`float("inf")`),
+    tal como acontecia antes de existir volume/capacidade — conservador,
+    para nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora
+    o próprio card (para permitir reagendar/mover uma OF já colocada)."""
+    ocupacao = {}
+    for a in db.agendamentos_producao_ecos_largos():
+        if a["linha"] != linha or not a["dia_inicio"]:
+            continue
+        if excluir_id is not None and a["basecamp_card_id"] == excluir_id:
+            continue
+        duracao = max(1, a["duracao_dias"] or 1)
+        ritmo = (a["volume_m3"] / duracao) if a["volume_m3"] else None
+        inicio = date.fromisoformat(a["dia_inicio"])
+        for i in range(duracao):
+            dia = (inicio + timedelta(days=i)).isoformat()
+            if ritmo is None:
+                ocupacao[dia] = float("inf")
+            else:
+                ocupacao[dia] = ocupacao.get(dia, 0) + ritmo
+    return ocupacao
+
+def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
+                        volume_m3: float, excluir_id: int = None) -> str:
+    """Confirma que colocar esta OF (com este volume/duração) nesta linha,
+    a partir deste dia, não ultrapassa a capacidade (m³/dia) da linha em
+    nenhum dos dias que ocupa — pedido explícito do Rui (2026-09): se já
+    ultrapassar a capacidade nesse dia, não deve ser possível; se ainda
+    houver folga, deve ser possível colocar outra encomenda no mesmo
+    espaço. Devolve uma mensagem de erro, ou None se estiver tudo bem."""
+    capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
+    ritmo_card = (volume_m3 / duracao_dias) if volume_m3 else None
+    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
+    inicio = date.fromisoformat(dia_inicio)
+    for i in range(duracao_dias):
+        dia = (inicio + timedelta(days=i)).isoformat()
+        usado = ocupacao.get(dia, 0)
+        if ritmo_card is None:
+            if usado > 0:
+                return (f"a linha {linha!r} já tem outra encomenda em {dia} — sem volume "
+                        "definido, esta encomenda precisaria da linha só para ela nesse dia")
+            continue
+        if usado == float("inf"):
+            return f"a linha {linha!r} está reservada por completo em {dia} por outra encomenda sem volume definido"
+        if capacidade > 0 and usado + ritmo_card > capacidade + 1e-9:
+            sobra = max(0, capacidade - usado)
+            return (f"capacidade excedida em {dia} na linha {linha!r}: já há {usado:.1f} "
+                    f"m³/dia ocupados de {capacidade:.1f} m³/dia (sobram só {sobra:.1f} m³/dia)")
+    return None
+
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
     escreve nada no Basecamp (ver nota no topo do módulo). A duração é
     sempre calculada aqui a partir do volume e da capacidade da linha (ver
     _duracao_por_volume), nunca escolhida à mão. Se `volume_m3` não for
     indicado, mantém o volume já guardado anteriormente para esta OF (não
-    o apaga só por não vir neste pedido)."""
+    o apaga só por não vir neste pedido). Recusa o agendamento (ver
+    _validar_capacidade) se ultrapassar a capacidade da linha nalgum dos
+    dias ocupados."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
@@ -135,6 +191,9 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
         existente = db.agendamento_producao(basecamp_card_id)
         volume_m3 = existente["volume_m3"] if existente else None
     duracao_dias = _duracao_por_volume(linha, volume_m3)
+    erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3, excluir_id=basecamp_card_id)
+    if erro:
+        return {"erro": erro}
     db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id,
             "duracao_dias": duracao_dias, "volume_m3": volume_m3}
@@ -199,6 +258,13 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, not
             return {"erro": "volume inválido"}
         if volume_m3 <= 0:
             return {"erro": "volume tem de ser maior que 0"}
+    if linha and dia_inicio:
+        # valida a capacidade ANTES de criar o card no Basecamp — para uma
+        # colocação recusada nunca deixar para trás um card órfão lá.
+        duracao_dias = _duracao_por_volume(linha, volume_m3)
+        erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3)
+        if erro:
+            return {"erro": erro}
     titulo_basecamp = f"{titulo} — {cliente}" if cliente else titulo
     partes_notas = []
     if cliente:
@@ -327,16 +393,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .cell.hoje{background:#FFFDF4}
 
   .blocks{position:absolute;inset:0;pointer-events:none}
-  .blk{position:absolute;height:calc(var(--lane) - 18px);margin-top:9px;
+  .blk{position:absolute;box-sizing:border-box;
     background:var(--paper);border:1px solid var(--line);border-left:5px solid var(--grey);
-    border-radius:9px;padding:6px 9px;overflow:hidden;pointer-events:auto;cursor:grab;
+    border-radius:9px;padding:5px 9px;overflow:hidden;pointer-events:auto;cursor:grab;
     touch-action:none;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,.09)}
   .blk.atrasado{border-left-color:var(--red)}
   .blk:hover{box-shadow:0 2px 7px rgba(0,0,0,.13)}
   .blk:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
   .blk .tt{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .blk .of{font-size:11.5px;color:var(--dim);margin-top:1px;white-space:nowrap}
-  .dense .blk{padding:4px 6px;height:calc(var(--lane) - 14px);margin-top:7px;border-radius:7px}
+  .dense .blk{padding:3px 6px;border-radius:7px}
   .dense .blk .of{display:none}
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
@@ -581,6 +647,27 @@ function renderDays(){
   }).join("");
   $("#days").style.width=(D.length*DAY)+"px";
 }
+/* várias OFs cabem na mesma linha/dia enquanto a soma dos seus ritmos
+   diários (volume ÷ duração) não ultrapassar a capacidade dessa linha —
+   pedido explícito do Rui (2026-09). Para nunca ficarem sobrepostas (o
+   que as fazia "desaparecer" umas atrás das outras), cada card recebe
+   aqui uma fatia vertical própria dentro da lane (uma acima, outra
+   abaixo), com altura proporcional ao seu ritmo diário — quanto mais m³
+   por dia ocupar, maior o card. Calculado sobre TODOS os cards da linha
+   (não só os visíveis), para a posição de cada um não saltar ao navegar
+   entre semanas.*/
+const ALTURA_MIN_FRACAO=0.38;
+function encaixarCardsLinha(cardsLinha, capacidade){
+  const ocupado={};
+  [...cardsLinha].sort((a,b)=>a.gs-b.gs).forEach(c=>{
+    const ritmo=c.volume?c.volume/c.dur:null;
+    const fracao=(ritmo&&capacidade>0)?clamp(ritmo/capacidade,ALTURA_MIN_FRACAO,1):1;
+    let topo=0;
+    for(let k=0;k<c.dur;k++) topo=Math.max(topo,ocupado[c.gs+k]||0);
+    c._topoFracao=topo; c._alturaFracao=fracao;
+    for(let k=0;k<c.dur;k++) ocupado[c.gs+k]=topo+fracao;
+  });
+}
 function renderLanes(){
   const D=days();
   let h="";
@@ -591,15 +678,22 @@ function renderLanes(){
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
+  LINHAS.forEach((nome,li)=>{
+    encaixarCardsLinha(cards.filter(c=>c.linha===li), CAPACIDADES[nome]||0);
+  });
+  const PAD=4;
   cards.filter(c=>c.linha!==null).forEach(c=>{
     const a=c.gs-view.start, b=a+c.dur;
     if(b<=0||a>=view.len) return;
     const l=Math.max(a,0), r=Math.min(b,view.len);
+    const usavel=LANE-PAD;
     const el=document.createElement("div");
     el.className="blk"+(atrasado(c)?" atrasado":"")+(a<0?" clipL":"")+(b>view.len?" clipR":"");
     el.tabIndex=0; el.dataset.id=c.id;
-    el.style.left=(l*DAY+3)+"px"; el.style.top=(c.linha*LANE)+"px";
+    el.style.left=(l*DAY+3)+"px";
+    el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
+    el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
     el.innerHTML=`<div class="tt">${c.titulo}</div>
       <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`;
     bl.appendChild(el);
@@ -635,7 +729,12 @@ function log(dir,t){ logs.unshift({dir,t}); renderLog(); }
    capacidade da linha (pedido explícito do Rui, 2026-09) — nunca escolhida
    à mão aqui; por isso todo o agendamento espera pela resposta do servidor
    antes de desenhar o bloco, para mostrar sempre a duração certa. */
-async function guardarAgendamento(c){
+/* a capacidade da linha pode recusar um agendamento (ver
+   tools/planeamento_serracao._validar_capacidade) — quando isso acontece,
+   a alteração já feita no ecrã (arrastar, largar da fila, ...) é revertida
+   para `anterior`, para o quadro nunca ficar a mostrar algo que o servidor
+   não aceitou. */
+async function guardarAgendamento(c, anterior){
   $("#syncDot").classList.add("busy"); $("#syncTxt").textContent="A gravar…";
   try{
     const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
@@ -643,14 +742,17 @@ async function guardarAgendamento(c){
       body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[c.linha],
         dia_inicio:MASTER[c.gs].iso,volume_m3:c.volume||null})});
     const d=await r.json();
-    if(d.erro){ log("local",`erro ao guardar: ${d.erro}`); }
-    else{
+    if(d.erro){
+      log("local",`recusado: ${d.erro}`);
+      if(anterior){ c.linha=anterior.linha; c.gs=anterior.gs; c.dur=anterior.dur; c.volume=anterior.volume; }
+      alert(d.erro);
+    }else{
       c.dur=d.duracao_dias; c.volume=d.volume_m3;
       log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${c.dur}d`);
     }
   }catch(e){ log("local",`erro ao guardar: ${e}`); }
   $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
-  renderLanes();
+  renderFila(); renderLanes();
 }
 async function desagendarServidor(c){
   try{
@@ -660,7 +762,7 @@ async function desagendarServidor(c){
     log("local",`devolvido à fila: ${c.titulo}`);
   }catch(e){ log("local",`erro ao devolver à fila: ${e}`); }
 }
-function sync(c){ if(c.linha!==null && c.gs!==null) guardarAgendamento(c); else desagendarServidor(c); }
+function sync(c, anterior){ if(c.linha!==null && c.gs!==null) guardarAgendamento(c, anterior); else desagendarServidor(c); }
 
 /* ---------- arrastar dentro da grelha ---------- */
 let drag=null;
@@ -681,12 +783,14 @@ $("#lanes").addEventListener("pointermove",e=>{
 $("#lanes").addEventListener("pointerup",()=>{
   if(!drag)return; const c=drag.c;
   const moved=drag.dx||drag.dy;
+  let anterior=null;
   if(moved){
-    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
+    anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
+    undoStack.push(anterior);
     c.gs+=drag.dx; c.linha+=drag.dy;
   }
   drag.el.classList.remove("drag"); drag=null;
-  renderLanes(); if(moved) sync(c);
+  renderLanes(); if(moved) sync(c, anterior);
 });
 
 /* fila → grelha */
@@ -706,10 +810,11 @@ $("#fila").addEventListener("pointerup",e=>{
   const x=e.clientX-r.left, y=e.clientY-r.top; qdrag=null;
   if(x<0||y<0||y>r.height||x>view.len*DAY) return;
   const c=card(id);
-  undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur});
+  const anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
+  undoStack.push(anterior);
   c.linha=clamp(Math.floor(y/LANE),0,LINHAS.length-1);
   c.gs=view.start+clamp(Math.floor(x/DAY),0,view.len-c.dur);
-  renderFila(); renderLanes(); sync(c);
+  renderFila(); renderLanes(); sync(c, anterior);
 });
 
 /* ---------- ficha ---------- */
