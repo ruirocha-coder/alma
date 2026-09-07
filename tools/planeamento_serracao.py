@@ -11,6 +11,7 @@
 # já existente nunca escreve nada de volta no Basecamp, e mudanças feitas
 # no Basecamp nunca "empurram" sozinhas para aqui — a página relê o
 # Basecamp sempre que é aberta ou atualizada manualmente.
+import math
 import unicodedata
 import db
 from tools import basecamp
@@ -54,9 +55,9 @@ def _cards_of_ativos() -> list[dict]:
 
 def estado_planeamento_serracao() -> dict:
     """Junta os cards de OF reais do Basecamp com o agendamento local
-    (linha/dia/duração) — devolve a bolsa (OFs sem linha/dia atribuídos,
-    mais recentes criadas primeiro) e as OFs já agendadas, prontas a
-    desenhar no quadro."""
+    (linha/dia/duração/volume) — devolve as capacidades atuais de cada
+    linha, a bolsa (OFs sem linha/dia atribuídos, mais recentes criadas
+    primeiro) e as OFs já agendadas, prontas a desenhar no quadro."""
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     bolsa, agendadas = [], []
     for c in _cards_of_ativos():
@@ -77,6 +78,7 @@ def estado_planeamento_serracao() -> dict:
             "prazo": c["prazo"],
             "criado_em": c.get("criado_em"),
             "url": c["url"],
+            "volume_m3": agendamento["volume_m3"] if agendamento else None,
         }
         if tem_agendamento:
             info["linha"] = agendamento["linha"]
@@ -89,26 +91,82 @@ def estado_planeamento_serracao() -> dict:
     # — não por prazo, para uma encomenda nova (normalmente ainda sem
     # prazo definido) não ficar escondida ao fundo da fila.
     bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
-    return {"linhas": LINHAS, "bolsa": bolsa, "agendadas": agendadas}
+    capacidades = db.capacidades_linhas_producao_ecos_largos()
+    return {
+        "linhas": LINHAS,
+        "capacidades": {linha: capacidades.get(linha) for linha in LINHAS},
+        "bolsa": bolsa,
+        "agendadas": agendadas,
+    }
 
-def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, duracao_dias: int) -> dict:
+def _duracao_por_volume(linha: str, volume_m3: float) -> int:
+    """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
+    (m³) e da capacidade diária dessa linha (editável, ver
+    atualizar_capacidade_linha) — pedido explícito do Rui (2026-09): se o
+    volume passar a capacidade de um dia, expande automaticamente para
+    quantos dias forem necessários. Sem volume, ou sem capacidade
+    configurada para a linha, assume 1 dia (a equipa ajusta manualmente)."""
+    if not volume_m3:
+        return 1
+    capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
+    if capacidade <= 0:
+        return 1
+    return max(1, math.ceil(volume_m3 / capacidade))
+
+def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
-    escreve nada no Basecamp (ver nota no topo do módulo)."""
+    escreve nada no Basecamp (ver nota no topo do módulo). A duração é
+    sempre calculada aqui a partir do volume e da capacidade da linha (ver
+    _duracao_por_volume), nunca escolhida à mão. Se `volume_m3` não for
+    indicado, mantém o volume já guardado anteriormente para esta OF (não
+    o apaga só por não vir neste pedido)."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
         return {"erro": "falta indicar o dia de início"}
+    if volume_m3 is not None:
+        try:
+            volume_m3 = float(volume_m3)
+        except (TypeError, ValueError):
+            return {"erro": "volume inválido"}
+        if volume_m3 <= 0:
+            return {"erro": "volume tem de ser maior que 0"}
+    else:
+        existente = db.agendamento_producao(basecamp_card_id)
+        volume_m3 = existente["volume_m3"] if existente else None
+    duracao_dias = _duracao_por_volume(linha, volume_m3)
+    db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id,
+            "duracao_dias": duracao_dias, "volume_m3": volume_m3}
+
+def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
+    """Atualiza a capacidade (m³/dia) de uma linha — editável pela equipa
+    diretamente no quadro (pedido explícito do Rui, 2026-09)."""
+    if linha not in LINHAS:
+        return {"erro": f"linha desconhecida: {linha!r}"}
     try:
-        duracao_dias = int(duracao_dias)
+        capacidade_m3_dia = float(capacidade_m3_dia)
     except (TypeError, ValueError):
-        return {"erro": "duração inválida"}
-    if duracao_dias < 1:
-        return {"erro": "duração tem de ser pelo menos 1 dia"}
-    return db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias)
+        return {"erro": "capacidade inválida"}
+    if capacidade_m3_dia <= 0:
+        return {"erro": "capacidade tem de ser maior que 0"}
+    return db.atualizar_capacidade_linha_producao(linha, capacidade_m3_dia)
 
 def desagendar(basecamp_card_id: int) -> dict:
     """Devolve uma OF à bolsa por agendar — só na base local."""
     return db.desagendar_producao(basecamp_card_id)
+
+def definir_volume(basecamp_card_id: int, volume_m3: float) -> dict:
+    """Define/atualiza o volume (m³) de uma OF ainda na fila (sem linha/dia
+    atribuídos) — para uma encomenda já agendada, usa antes agendar (que
+    também recalcula a duração)."""
+    try:
+        volume_m3 = float(volume_m3)
+    except (TypeError, ValueError):
+        return {"erro": "volume inválido"}
+    if volume_m3 <= 0:
+        return {"erro": "volume tem de ser maior que 0"}
+    return db.guardar_volume_producao(basecamp_card_id, volume_m3)
 
 def apagar_encomenda(basecamp_card_id: int) -> dict:
     """Apaga uma encomenda por completo: manda o card real para o lixo do
@@ -120,29 +178,52 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     db.remover_agendamento_producao(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
-def criar_encomenda(titulo: str, notas: str = "", linha: str = None,
-                    dia_inicio: str = None, duracao_dias: int = 1) -> dict:
+def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, notas: str = "",
+                    linha: str = None, dia_inicio: str = None) -> dict:
     """Cria uma encomenda nova: um card real na coluna Triagem do Basecamp
-    (ver basecamp.criar_card) e, se já vier com linha/dia, o agendamento
-    local logo a acompanhar. A partir de criado, este card passa a ser
+    (ver basecamp.criar_card, título "Peça — Cliente" e notas com o
+    cliente/volume) e, se já vier com linha/dia, o agendamento local logo
+    a acompanhar (duração calculada a partir do volume e da capacidade da
+    linha — ver agendar). A partir de criado, este card passa a ser
     totalmente independente — ver nota no topo do módulo."""
     titulo = (titulo or "").strip()
+    cliente = (cliente or "").strip()
     if not titulo:
-        return {"erro": "indica um título para a encomenda"}
+        return {"erro": "indica a peça (título) da encomenda"}
     if linha and linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
-    card = basecamp.criar_card("Triagem", titulo, notas or "", projeto=PROJETO)
+    if volume_m3 is not None:
+        try:
+            volume_m3 = float(volume_m3)
+        except (TypeError, ValueError):
+            return {"erro": "volume inválido"}
+        if volume_m3 <= 0:
+            return {"erro": "volume tem de ser maior que 0"}
+    titulo_basecamp = f"{titulo} — {cliente}" if cliente else titulo
+    partes_notas = []
+    if cliente:
+        partes_notas.append(f"Cliente: {cliente}")
+    if volume_m3:
+        partes_notas.append(f"Volume: {volume_m3} m³")
+    if notas:
+        partes_notas.append(notas)
+    card = basecamp.criar_card("Triagem", titulo_basecamp, "\n".join(partes_notas), projeto=PROJETO)
     resultado = {
         "basecamp_card_id": card["id"],
         "titulo": card["titulo"],
         "coluna_basecamp": card["estado"],
         "prazo": card["prazo"],
         "url": card["url"],
+        "volume_m3": volume_m3,
     }
     if linha and dia_inicio:
-        duracao_dias = max(1, int(duracao_dias or 1))
-        db.guardar_agendamento_producao(card["id"], linha, dia_inicio, duracao_dias)
-        resultado.update({"linha": linha, "dia_inicio": dia_inicio, "duracao_dias": duracao_dias})
+        agendamento = agendar(card["id"], linha, dia_inicio, volume_m3)
+        resultado.update({"linha": linha, "dia_inicio": dia_inicio,
+                          "duracao_dias": agendamento.get("duracao_dias", 1)})
+    elif volume_m3:
+        # ainda fica na fila (sem linha/dia), mas guarda já o volume para
+        # não se perder quando for agendada mais tarde.
+        db.guardar_volume_producao(card["id"], volume_m3)
     return resultado
 
 def pagina_planeamento() -> str:
@@ -218,9 +299,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .labels{flex:0 0 var(--label);border-right:1px solid var(--edge);background:var(--raise)}
   .labels .head{height:48px;border-bottom:1px solid var(--edge)}
   .lbl{height:var(--lane);border-bottom:1px solid var(--line);padding:10px 12px;
-    display:flex;flex-direction:column;justify-content:center}
+    display:flex;flex-direction:column;justify-content:center;cursor:pointer}
+  .lbl:hover{background:var(--canvas)}
   .lbl:last-child{border-bottom:none}
   .lbl .n{font-size:14px;font-weight:700}
+  .lbl .c{font-size:11.5px;color:var(--dim);margin-top:2px}
+  .lbl .c:hover{color:var(--blue);text-decoration:underline}
 
   .scroll{flex:1;overflow-x:auto;overflow-y:hidden}
   .track{position:relative}
@@ -260,9 +344,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   @keyframes flash{0%{background:var(--hoje)}100%{background:var(--paper)}}
   .blk.clipL{border-top-left-radius:0;border-bottom-left-radius:0;border-left-style:dashed}
   .blk.clipR{border-top-right-radius:0;border-bottom-right-radius:0;border-right:1px dashed var(--edge)}
-  .grip{position:absolute;right:0;top:0;bottom:0;width:14px;cursor:ew-resize;touch-action:none}
-  .grip::after{content:"";position:absolute;right:4px;top:50%;transform:translateY(-50%);
-    width:2px;height:16px;border-radius:2px;background:var(--edge)}
   .ghost{position:fixed;z-index:99;pointer-events:none;box-shadow:0 8px 22px rgba(0,0,0,.22);opacity:.95}
 
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
@@ -383,6 +464,7 @@ const HOJE=MASTER.findIndex(d=>d.iso===hojeISO);
 const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
 
 let LINHAS=[];
+let CAPACIDADES={};
 let cards=[];
 let view={mode:"semana",start:Math.max(HOJE,0),len:6};
 let undoStack=[], logs=[], DAY=92, LANE=78;
@@ -398,12 +480,12 @@ async function carregar(){
   try{
     const r=await fetch("/planeamento-ecos-largos/dados");
     const d=await r.json();
-    LINHAS=d.linhas;
+    LINHAS=d.linhas; CAPACIDADES=d.capacidades||{};
     cards=[
       ...d.bolsa.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,linha:null,gs:null,dur:1})),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,linha:null,gs:null,dur:1})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,linha:LINHAS.indexOf(c.linha),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,linha:LINHAS.indexOf(c.linha),
         gs:idxOf(c.dia_inicio),dur:c.duracao_dias})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
@@ -413,6 +495,25 @@ async function carregar(){
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Falhou a ligação ao Basecamp";
     log("local",`erro a ler o Basecamp: ${e}`);
   }
+}
+
+/* ---------- capacidade por linha (m³/dia), editável ---------- */
+async function editarCapacidade(linha){
+  const atual=CAPACIDADES[linha];
+  const valor=prompt(`Capacidade de "${linha}" (m³/dia):`, atual!=null?atual:40);
+  if(valor===null) return;
+  const num=+valor;
+  if(!num||num<=0){ alert("Indica um número maior que 0."); return; }
+  try{
+    const r=await fetch("/planeamento-ecos-largos/capacidade",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({linha,capacidade_m3_dia:num})});
+    const d=await r.json();
+    if(d.erro){ alert(d.erro); return; }
+    CAPACIDADES[linha]=num;
+    log("local",`capacidade de "${linha}" atualizada para ${num} m³/dia`);
+    renderLabels();
+  }catch(e){ alert("Falhou a guardar: "+e); }
 }
 
 /* ---------- período ---------- */
@@ -464,7 +565,11 @@ function metrics(){
 function days(){ return MASTER.slice(view.start,view.start+view.len); }
 function renderLabels(){
   $("#labels").innerHTML='<div class="head"></div>'+LINHAS.map(n=>
-    `<div class="lbl"><div class="n">${n}</div></div>`).join("");
+    `<div class="lbl" data-linha="${n}"><div class="n">${n}</div>
+     <div class="c">${CAPACIDADES[n]!=null?CAPACIDADES[n]+" m³/dia":"definir capacidade"} · editar</div></div>`).join("");
+  $("#labels").querySelectorAll(".lbl").forEach(el=>{
+    el.onclick=()=>editarCapacidade(el.dataset.linha);
+  });
 }
 function renderDays(){
   const D=days();
@@ -496,7 +601,7 @@ function renderLanes(){
     el.style.left=(l*DAY+3)+"px"; el.style.top=(c.linha*LANE)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
     el.innerHTML=`<div class="tt">${c.titulo}</div>
-      <div class="of">${c.prazo?("prazo "+c.prazo):"sem prazo"}</div><div class="grip"></div>`;
+      <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`;
     bl.appendChild(el);
   });
   stats();
@@ -506,7 +611,7 @@ function renderFila(){
   $("#fila").innerHTML = q.length ? q.map(c=>
     `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}">
      <div class="tt">${c.titulo}</div>
-     <div class="of">${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`).join("")
+     <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`).join("")
     : '<div class="empty">Fila vazia.</div>';
 }
 function stats(){
@@ -526,18 +631,26 @@ function renderLog(){
 function log(dir,t){ logs.unshift({dir,t}); renderLog(); }
 
 /* ---------- gravar agendamento local (nunca escreve no Basecamp) ---------- */
+/* a duração é sempre calculada no servidor a partir do volume (m³) e da
+   capacidade da linha (pedido explícito do Rui, 2026-09) — nunca escolhida
+   à mão aqui; por isso todo o agendamento espera pela resposta do servidor
+   antes de desenhar o bloco, para mostrar sempre a duração certa. */
 async function guardarAgendamento(c){
   $("#syncDot").classList.add("busy"); $("#syncTxt").textContent="A gravar…";
   try{
     const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[c.linha],
-        dia_inicio:MASTER[c.gs].iso,duracao_dias:c.dur})});
+        dia_inicio:MASTER[c.gs].iso,volume_m3:c.volume||null})});
     const d=await r.json();
     if(d.erro){ log("local",`erro ao guardar: ${d.erro}`); }
-    else log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${c.dur}d`);
+    else{
+      c.dur=d.duracao_dias; c.volume=d.volume_m3;
+      log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${c.dur}d`);
+    }
   }catch(e){ log("local",`erro ao guardar: ${e}`); }
   $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
+  renderLanes();
 }
 async function desagendarServidor(c){
   try{
@@ -554,34 +667,23 @@ let drag=null;
 $("#lanes").addEventListener("pointerdown",e=>{
   const b=e.target.closest(".blk"); if(!b)return;
   const c=card(+b.dataset.id);
-  drag={mode:e.target.classList.contains("grip")?"resize":"move",el:b,c,
-        x0:e.clientX,y0:e.clientY,gs0:c.gs,lin0:c.linha,dur0:c.dur,dx:0,dy:0,dur:c.dur};
+  drag={el:b,c,x0:e.clientX,y0:e.clientY,gs0:c.gs,lin0:c.linha,dur0:c.dur,dx:0,dy:0};
   b.setPointerCapture(e.pointerId); b.classList.add("drag"); e.preventDefault();
 });
 $("#lanes").addEventListener("pointermove",e=>{
   if(!drag)return;
-  if(drag.mode==="move"){
-    let dd=Math.round((e.clientX-drag.x0)/DAY), dl=Math.round((e.clientY-drag.y0)/LANE);
-    dd=clamp(dd, -drag.gs0, MASTER.length-drag.dur0-drag.gs0);
-    dl=clamp(dl, -drag.lin0, LINHAS.length-1-drag.lin0);
-    drag.dx=dd; drag.dy=dl;
-    drag.el.style.transform=`translate(${dd*DAY}px,${dl*LANE}px)`;
-  }else{
-    let dd=Math.round((e.clientX-drag.x0)/DAY);
-    dd=clamp(dd, 1-drag.dur0, MASTER.length-drag.gs0-drag.dur0);
-    drag.dur=drag.dur0+dd;
-    drag.el.style.width=(drag.dur*DAY-8)+"px";
-  }
+  let dd=Math.round((e.clientX-drag.x0)/DAY), dl=Math.round((e.clientY-drag.y0)/LANE);
+  dd=clamp(dd, -drag.gs0, MASTER.length-drag.dur0-drag.gs0);
+  dl=clamp(dl, -drag.lin0, LINHAS.length-1-drag.lin0);
+  drag.dx=dd; drag.dy=dl;
+  drag.el.style.transform=`translate(${dd*DAY}px,${dl*LANE}px)`;
 });
 $("#lanes").addEventListener("pointerup",()=>{
-  if(!drag)return; const c=drag.c; let moved=false;
-  if(drag.mode==="move"&&(drag.dx||drag.dy)){
-    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur});
-    c.gs+=drag.dx; c.linha+=drag.dy; moved=true;
-  }
-  if(drag.mode==="resize"&&drag.dur!==drag.dur0){
-    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur});
-    c.dur=drag.dur; moved=true;
+  if(!drag)return; const c=drag.c;
+  const moved=drag.dx||drag.dy;
+  if(moved){
+    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
+    c.gs+=drag.dx; c.linha+=drag.dy;
   }
   drag.el.classList.remove("drag"); drag=null;
   renderLanes(); if(moved) sync(c);
@@ -612,7 +714,7 @@ $("#fila").addEventListener("pointerup",e=>{
 
 /* ---------- ficha ---------- */
 $("#lanes").addEventListener("click",e=>{
-  const b=e.target.closest(".blk"); if(b&&!e.target.classList.contains("grip")) openSheet(+b.dataset.id);
+  const b=e.target.closest(".blk"); if(b) openSheet(+b.dataset.id);
 });
 $("#fila").addEventListener("click",e=>{
   const q=e.target.closest(".qcard"); if(q) openSheet(+q.dataset.id);
@@ -634,7 +736,9 @@ function openSheet(id){
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
-    <div class="owner">A linha, o início e a duração vivem só aqui — o Basecamp não tem onde os guardar. Mudar isto aqui não altera nada no Basecamp.</div>
+    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30"></div>
+    <div class="acts"><button class="btn" id="guardarVol">Guardar volume</button></div>
+    <div class="owner">A linha, o início, a duração e o volume vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. Mudar isto aqui não altera nada no Basecamp.</div>
     <div class="acts">
       ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
@@ -644,9 +748,34 @@ function openSheet(id){
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
   if(agendado) $("#toFila").onclick=()=>{
-    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur});
+    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
     c.linha=null; c.gs=null;
     renderFila(); renderLanes(); sync(c); closeSheet();
+  };
+  $("#guardarVol").onclick=async()=>{
+    const vol=+$("#fVol").value;
+    if(!vol||vol<=0){ alert("Indica um volume maior que 0."); return; }
+    $("#guardarVol").textContent="A guardar…"; $("#guardarVol").disabled=true;
+    try{
+      if(agendado){
+        const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[c.linha],
+            dia_inicio:MASTER[c.gs].iso,volume_m3:vol})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
+        c.dur=d.duracao_dias; c.volume=d.volume_m3;
+      }else{
+        const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,volume_m3:vol})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
+        c.volume=d.volume_m3;
+      }
+      log("local",`volume de "${c.titulo}" atualizado: ${c.volume} m³`);
+      render(); closeSheet();
+    }catch(e){ alert("Falhou a guardar: "+e); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; }
   };
   $("#apagar").onclick=async()=>{
     if(!confirm(`Apagar definitivamente "${c.titulo}"?\n\nIsto manda o card para o lixo no Basecamp (fica lá recuperável durante algum tempo, tal como apagar manualmente).`)) return;
@@ -670,7 +799,9 @@ function openForm(pref){
   pref=pref||{}; const D=days();
   $("#sheet").innerHTML=`
     <h3>Criar encomenda</h3>
-    <div class="frow"><label>Título</label><input id="fTt" placeholder="Ex: OF.530 EVERTIS"></div>
+    <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
+    <div class="frow"><label>Cliente</label><input id="fCli" placeholder="Ex: Casa Cerne"></div>
+    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" placeholder="Ex: 30"></div>
     <div class="frow"><label>Notas</label><textarea id="fNotas" rows="2" placeholder="opcional"></textarea></div>
     <div class="frow"><label>Colocar em</label><select id="fLin">
       <option value="">Fila, por agendar</option>
@@ -679,37 +810,35 @@ function openForm(pref){
     <div class="frow" id="rowDia"><label>Início</label><select id="fDia">
       ${D.map((d,i)=>`<option value="${view.start+i}"${pref.gs===view.start+i?" selected":""}>${DOW[d.dow]} ${d.dd} ${MESC[d.mo]}</option>`).join("")}
     </select></div>
-    <div class="frow" id="rowDur"><label>Duração (dias)</label><input id="fDur" type="number" min="1" max="30" value="1"></div>
     <div class="err" id="fErr"></div>
-    <div class="owner">O card nasce sempre na coluna Triagem do Basecamp (projeto Ecos Largos). A linha e o início ficam só aqui.</div>
+    <div class="owner">O card nasce sempre na coluna Triagem do Basecamp (projeto Ecos Largos), com o título "Peça — Cliente". A linha, o início, o volume e a duração (calculada a partir do volume e da capacidade da linha) ficam só aqui.</div>
     <div class="acts">
       <button class="btn primary" id="fSave">Criar encomenda</button>
       <button class="btn" id="close">Cancelar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
-  const rowDia=$("#rowDia"), rowDur=$("#rowDur"), selLin=$("#fLin");
-  const toggle=()=>{ const on=selLin.value!==""; rowDia.style.display=on?"":"none"; rowDur.style.display=on?"":"none"; };
+  const rowDia=$("#rowDia"), selLin=$("#fLin");
+  const toggle=()=>{ rowDia.style.display=selLin.value!==""?"":"none"; };
   selLin.onchange=toggle; toggle();
   $("#close").onclick=$("#veil").onclick=closeSheet;
   $("#fTt").focus();
   $("#fSave").onclick=async()=>{
-    const titulo=$("#fTt").value.trim(), notas=$("#fNotas").value.trim();
-    if(!titulo){ $("#fErr").textContent="Escreve um título — é o título do card no Basecamp."; $("#fTt").focus(); return; }
+    const titulo=$("#fTt").value.trim(), cliente=$("#fCli").value.trim(), notas=$("#fNotas").value.trim();
+    const volume=$("#fVol").value?+$("#fVol").value:null;
+    if(!titulo){ $("#fErr").textContent="Escreve a peça — é o título do card no Basecamp."; $("#fTt").focus(); return; }
     const linhaIdx=selLin.value===""?null:+selLin.value;
     const gs=linhaIdx===null?null:clamp(+$("#fDia").value,0,MASTER.length-1);
-    const dur=linhaIdx===null?1:clamp(+$("#fDur").value||1,1,30);
     $("#fSave").textContent="A criar…"; $("#fSave").disabled=true;
     try{
-      const body={titulo,notas,
+      const body={titulo,cliente,volume_m3:volume,notas,
         linha:linhaIdx===null?null:LINHAS[linhaIdx],
-        dia_inicio:gs===null?null:MASTER[gs].iso,
-        duracao_dias:dur};
+        dia_inicio:gs===null?null:MASTER[gs].iso};
       const r=await fetch("/planeamento-ecos-largos/nova-encomenda",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       const d=await r.json();
       if(d.erro){ $("#fErr").textContent=d.erro; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; return; }
       cards.unshift({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
-        linha:linhaIdx,gs,dur});
+        volume:d.volume_m3,linha:linhaIdx,gs,dur:d.duracao_dias||1});
       log("local",`criado no Basecamp (Triagem): ${d.titulo}`);
       render(); closeSheet();
       setTimeout(()=>{ const b=document.querySelector(`.blk[data-id="${d.basecamp_card_id}"]`)||

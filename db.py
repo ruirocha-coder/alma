@@ -214,8 +214,18 @@ CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
     linha TEXT,
     dia_inicio DATE,
     duracao_dias INTEGER NOT NULL DEFAULT 1,
+    volume_m3 NUMERIC,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- capacidade de produção (m³/dia) de cada linha da serração da Ecos Largos
+-- — editável pela equipa (ver tools/planeamento_serracao.py), usada para
+-- calcular quantos dias uma encomenda ocupa numa linha a partir do seu
+-- volume em m³ (ver agendar/criar_encomenda).
+CREATE TABLE IF NOT EXISTS linhas_producao_ecos_largos (
+    linha TEXT PRIMARY KEY,
+    capacidade_m3_dia NUMERIC NOT NULL DEFAULT 40
 );
 """
 
@@ -262,6 +272,21 @@ INSERT INTO parametros_estimativa (chave, valor) VALUES
 ON CONFLICT (chave) DO NOTHING;
 """
 
+# 40 m³/dia é só um valor de partida — a equipa edita isto para os valores
+# reais de cada linha diretamente no quadro de planeamento (ver
+# tools/planeamento_serracao.py) — ON CONFLICT DO NOTHING para nunca
+# sobrescrever uma capacidade já calibrada manualmente.
+SEED_LINHAS_PRODUCAO_ECOS_LARGOS = """
+INSERT INTO linhas_producao_ecos_largos (linha, capacidade_m3_dia) VALUES
+    ('Linha 1 - Quad', 40),
+    ('Linha 2 Reguas/Barrotes', 40),
+    ('Linha 3 Bartly', 40),
+    ('Linha 4 Mult.Troncos', 40),
+    ('Linha 5 Tabuinha', 40),
+    ('Linha 6 Alinhadeira', 40)
+ON CONFLICT (linha) DO NOTHING;
+"""
+
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
 # dados reais, e CREATE TABLE IF NOT EXISTS não acrescenta colunas novas a
 # uma tabela já existente — precisa de um ALTER TABLE explícito, idempotente.
@@ -287,6 +312,9 @@ ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DE
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS card_id BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS documentos_gerados_card_id_idx
     ON documentos_gerados (card_id) WHERE card_id IS NOT NULL;
+-- volume_m3 foi pedido depois de planeamento_producao_ecos_largos já ter
+-- sido criada em produção com o esquema anterior (ver tools/planeamento_serracao.py).
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS volume_m3 NUMERIC;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -326,6 +354,7 @@ def inicializar_schema():
             cur.execute(MIGRACAO_CLIENTE_RESUMO_NULAVEL)
             cur.execute(SEED_PARAMETROS_ESTIMATIVA)
             cur.execute(SEED_PAUSA_FERIAS_AGOSTO_2026)
+            cur.execute(SEED_LINHAS_PRODUCAO_ECOS_LARGOS)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
@@ -731,14 +760,14 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
             } for l in cur.fetchall()]
 
 def agendamentos_producao_ecos_largos() -> list[dict]:
-    """Todo o agendamento local (linha/dia/duração) do quadro de
+    """Todo o agendamento local (linha/dia/duração/volume) do quadro de
     planeamento da serração da Ecos Largos — ver
     tools/planeamento_serracao.py, que cruza isto com os cards reais do
     Basecamp pelo basecamp_card_id."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -746,28 +775,96 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "linha": l["linha"],
                 "dia_inicio": l["dia_inicio"].isoformat() if l["dia_inicio"] else None,
                 "duracao_dias": l["duracao_dias"],
+                "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
             } for l in cur.fetchall()]
 
-def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str, duracao_dias: int) -> dict:
+def agendamento_producao(basecamp_card_id: int) -> dict:
+    """O agendamento local de uma única OF (ou None se ainda não tiver
+    nenhum registo) — usado para saber o volume/linha já guardados antes
+    de recalcular a duração (ver tools/planeamento_serracao.agendar)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3
+                   FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s""",
+                (basecamp_card_id,)
+            )
+            l = cur.fetchone()
+            if not l:
+                return None
+            return {
+                "basecamp_card_id": l["basecamp_card_id"],
+                "linha": l["linha"],
+                "dia_inicio": l["dia_inicio"].isoformat() if l["dia_inicio"] else None,
+                "duracao_dias": l["duracao_dias"],
+                "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
+            }
+
+def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str,
+                                 duracao_dias: int, volume_m3: float = None) -> dict:
     """Cria ou atualiza (upsert) o agendamento local de uma OF, pelo id do
     seu card no Basecamp — usado ao arrastar uma OF para uma linha/dia no
     quadro de planeamento, e também ao criar uma encomenda nova (ver
-    tools/planeamento_serracao.criar_encomenda)."""
+    tools/planeamento_serracao.criar_encomenda). `duracao_dias` já vem
+    calculada a partir do volume e da capacidade da linha (ver
+    tools/planeamento_serracao.agendar) — esta função só grava."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO planeamento_producao_ecos_largos
-                   (basecamp_card_id, linha, dia_inicio, duracao_dias)
-                   VALUES (%s, %s, %s, %s)
+                   (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+                   VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        linha = EXCLUDED.linha,
                        dia_inicio = EXCLUDED.dia_inicio,
                        duracao_dias = EXCLUDED.duracao_dias,
+                       volume_m3 = EXCLUDED.volume_m3,
                        atualizado_em = now()""",
-                (basecamp_card_id, linha, dia_inicio, duracao_dias)
+                (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_volume_producao(basecamp_card_id: int, volume_m3: float) -> dict:
+    """Guarda só o volume (m³) de uma OF que ainda não tem linha/dia
+    atribuídos (ainda na fila) — sem tocar em nenhum outro campo, para uma
+    encomenda criada já com volume mas sem ser colocada logo numa linha não
+    perder essa informação até ser agendada."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO planeamento_producao_ecos_largos (basecamp_card_id, volume_m3)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       volume_m3 = EXCLUDED.volume_m3, atualizado_em = now()""",
+                (basecamp_card_id, volume_m3)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def capacidades_linhas_producao_ecos_largos() -> dict:
+    """Capacidade de produção (m³/dia) de cada linha da serração da Ecos
+    Largos — editável pela equipa (ver
+    tools/planeamento_serracao.atualizar_capacidade_linha)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT linha, capacidade_m3_dia FROM linhas_producao_ecos_largos")
+            return {l["linha"]: float(l["capacidade_m3_dia"]) for l in cur.fetchall()}
+
+def atualizar_capacidade_linha_producao(linha: str, capacidade_m3_dia: float) -> dict:
+    """Atualiza a capacidade (m³/dia) de uma linha de produção — usada para
+    calcular quantos dias uma encomenda ocupa nessa linha a partir do seu
+    volume (ver tools/planeamento_serracao.agendar)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO linhas_producao_ecos_largos (linha, capacidade_m3_dia)
+                   VALUES (%s, %s)
+                   ON CONFLICT (linha) DO UPDATE SET capacidade_m3_dia = EXCLUDED.capacidade_m3_dia""",
+                (linha, capacidade_m3_dia)
+            )
+        conn.commit()
+    return {"linha": linha, "capacidade_m3_dia": capacidade_m3_dia}
 
 def desagendar_producao(basecamp_card_id: int) -> dict:
     """Volta a pôr uma OF na bolsa por agendar (linha/dia a NULL), sem

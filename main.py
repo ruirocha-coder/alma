@@ -481,10 +481,35 @@ def planeamento_ecos_largos_dados():
 @app.post("/planeamento-ecos-largos/agendar")
 def planeamento_ecos_largos_agendar(corpo: dict = Body(...)):
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
-    escreve no Basecamp (ver tools/planeamento_serracao.agendar)."""
+    escreve no Basecamp. A duração é sempre calculada a partir do volume
+    (m³) e da capacidade da linha (ver tools/planeamento_serracao.agendar)."""
     resultado = planeamento_serracao.agendar(
         corpo.get("basecamp_card_id"), corpo.get("linha"),
-        corpo.get("dia_inicio"), corpo.get("duracao_dias"))
+        corpo.get("dia_inicio"), corpo.get("volume_m3"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/capacidade")
+def planeamento_ecos_largos_capacidade(corpo: dict = Body(...)):
+    """Atualiza a capacidade (m³/dia) de uma linha de produção — ver
+    tools/planeamento_serracao.atualizar_capacidade_linha."""
+    resultado = planeamento_serracao.atualizar_capacidade_linha(
+        corpo.get("linha"), corpo.get("capacidade_m3_dia"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/volume")
+def planeamento_ecos_largos_volume(corpo: dict = Body(...)):
+    """Define/atualiza o volume (m³) de uma OF ainda na fila (sem linha/dia)
+    — ver tools/planeamento_serracao.definir_volume. Para uma OF já
+    agendada, o volume atualiza-se através de /agendar (recalcula a
+    duração ao mesmo tempo)."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.definir_volume(basecamp_card_id, corpo.get("volume_m3"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
@@ -519,8 +544,8 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     logo a acompanhar — ver tools/planeamento_serracao.criar_encomenda."""
     try:
         resultado = planeamento_serracao.criar_encomenda(
-            corpo.get("titulo"), corpo.get("notas") or "", corpo.get("linha"),
-            corpo.get("dia_inicio"), corpo.get("duracao_dias") or 1)
+            corpo.get("titulo"), corpo.get("cliente") or "", corpo.get("volume_m3"),
+            corpo.get("notas") or "", corpo.get("linha"), corpo.get("dia_inicio"))
     except Exception as e:
         return JSONResponse({"erro": f"falhou a criar no Basecamp: {e}"}, status_code=502)
     if "erro" in resultado:
