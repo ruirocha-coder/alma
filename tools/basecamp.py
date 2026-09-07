@@ -286,6 +286,55 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
                 encontrados.append(formatado)
     return encontrados
 
+def _coluna_card_table(coluna: str, projeto: str) -> tuple:
+    """Descobre o bucket_id e o cards_url de uma coluna específica (por
+    título) do card table de um projeto — para criar um card novo
+    diretamente nessa coluna (ver criar_card). Assume que o projeto tem um
+    único card table ativo (confirmado ao vivo para o Ecos Largos,
+    2026-09); se houver mais do que um, procura em todos e usa o primeiro
+    onde a coluna exista."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    tabelas = [t for t in _card_tables_ativos()
+              if _normalizar((t.get("bucket") or {}).get("name") or "") == _normalizar(p["name"])]
+    if not tabelas:
+        raise ValueError(f"o projeto {p['name']!r} não tem nenhum card table (quadro Kanban) ativo")
+    alvo = _normalizar(coluna)
+    for tabela in tabelas:
+        r = httpx.get(tabela["url"], headers=_headers(), timeout=30)
+        r.raise_for_status()
+        for lista in r.json().get("lists", []):
+            if _normalizar(lista.get("title") or "") == alvo:
+                return p["id"], lista["cards_url"]
+    raise ValueError(f"não encontrei a coluna {coluna!r} no quadro Kanban do projeto {p['name']!r}")
+
+def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None) -> dict:
+    """Cria um card novo diretamente numa coluna de um quadro Kanban (ex:
+    a coluna "Triagem" do projeto Ecos Largos) — usado pelo quadro de
+    planeamento de produção (tools/planeamento_serracao.py) para criar no
+    Basecamp uma encomenda nova que ainda lá não existe.
+
+    NOTA: o endpoint de criação (POST ao mesmo cards_url usado para listar
+    cards da coluna, ver _coluna_card_table) segue o padrão REST comum a
+    outras ferramentas do Basecamp já confirmadas neste ficheiro (to-dos,
+    documentos, mensagens), mas NÃO foi ainda confirmado ao vivo contra a
+    API real — testar com um card de teste óbvio assim que houver
+    credenciais reais disponíveis, e apagar esse card de teste a seguir.
+
+    Depois de criado, o card fica totalmente independente do planeamento
+    local: nada mais é sincronizado automaticamente entre os dois lados
+    (pedido explícito do Rui, 2026-09) — nem esta função nem nenhuma outra
+    voltam a tocar neste card depois de criado."""
+    if not projeto:
+        raise ValueError("indica o projeto (ex: \"Ecos Largos\")")
+    _bucket_id, cards_url = _coluna_card_table(coluna, projeto)
+    r = httpx.post(cards_url, headers=_headers(),
+                   json={"title": titulo, "content": _markdown_para_basecamp(notas) if notas else ""},
+                   timeout=30)
+    r.raise_for_status()
+    return _formatar_item(r.json())
+
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
     """Procura tarefas, cards ou card tables (de todos os projetos, ou só
     de um em concreto) cujo título ou notas contenham `termo` — pedido
