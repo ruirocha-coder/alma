@@ -136,6 +136,7 @@ def _formatar_item(item: dict) -> dict:
         "responsaveis": [p["name"] for p in item.get("assignees", [])],
         "projeto": (item.get("bucket") or {}).get("name"),
         "prazo": item.get("due_on"),
+        "criado_em": item.get("created_at"),
         "url": item.get("app_url"),
         # url da própria API deste registo (distinto do "url" acima, que é
         # o link para abrir no browser) — pedido do Rui (2026-07-24): sem
@@ -334,6 +335,23 @@ def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None) -
                    timeout=30)
     r.raise_for_status()
     return _formatar_item(r.json())
+
+def apagar_card(card_id: int, projeto: str) -> None:
+    """Manda um card para o lixo do Basecamp (reversível lá durante algum
+    tempo, tal como apagar manualmente na interface) — usado pelo quadro
+    de planeamento de produção para apagar uma encomenda, quando for
+    mesmo preciso (pedido explícito do Rui, 2026-09).
+
+    NOTA: segue o padrão documentado da API do Basecamp para apagar
+    qualquer "recording" (PUT .../recordings/ID/status/trashed.json), mas
+    NÃO foi ainda confirmado ao vivo contra a API real — testar com um
+    card de teste antes de confiar nisto a sério."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    r = httpx.put(f"{_base_url()}/buckets/{p['id']}/recordings/{card_id}/status/trashed.json",
+                  headers=_headers(), timeout=30)
+    r.raise_for_status()
 
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
     """Procura tarefas, cards ou card tables (de todos os projetos, ou só

@@ -784,6 +784,18 @@ def desagendar_producao(basecamp_card_id: int) -> dict:
         conn.commit()
     return {"desagendado": True, "basecamp_card_id": basecamp_card_id}
 
+def remover_agendamento_producao(basecamp_card_id: int):
+    """Remove definitivamente a linha de agendamento local de uma OF — ao
+    contrário de desagendar_producao (que só volta a pôr na bolsa), usado
+    ao apagar uma encomenda por completo."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s",
+                (basecamp_card_id,)
+            )
+        conn.commit()
+
 def guardar_documento_gerado(utilizador: str, titulo: str, ficheiro: bytes, conteudo_fonte: str,
                              formato: str = "pdf") -> int:
     with get_conn() as conn:

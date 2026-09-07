@@ -55,8 +55,8 @@ def _cards_of_ativos() -> list[dict]:
 def estado_planeamento_serracao() -> dict:
     """Junta os cards de OF reais do Basecamp com o agendamento local
     (linha/dia/duração) — devolve a bolsa (OFs sem linha/dia atribuídos,
-    ordenada por prazo) e as OFs já agendadas, prontas a desenhar no
-    quadro."""
+    mais recentes criadas primeiro) e as OFs já agendadas, prontas a
+    desenhar no quadro."""
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     bolsa, agendadas = [], []
     for c in _cards_of_ativos():
@@ -75,6 +75,7 @@ def estado_planeamento_serracao() -> dict:
             "titulo": c["titulo"],
             "coluna_basecamp": c["estado"],
             "prazo": c["prazo"],
+            "criado_em": c.get("criado_em"),
             "url": c["url"],
         }
         if tem_agendamento:
@@ -84,7 +85,10 @@ def estado_planeamento_serracao() -> dict:
             agendadas.append(info)
         else:
             bolsa.append(info)
-    bolsa.sort(key=lambda c: c["prazo"] or "9999-99-99")
+    # encomendas mais recentes primeiro (pedido explícito do Rui, 2026-09)
+    # — não por prazo, para uma encomenda nova (normalmente ainda sem
+    # prazo definido) não ficar escondida ao fundo da fila.
+    bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
     return {"linhas": LINHAS, "bolsa": bolsa, "agendadas": agendadas}
 
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, duracao_dias: int) -> dict:
@@ -105,6 +109,16 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, duracao_dias: in
 def desagendar(basecamp_card_id: int) -> dict:
     """Devolve uma OF à bolsa por agendar — só na base local."""
     return db.desagendar_producao(basecamp_card_id)
+
+def apagar_encomenda(basecamp_card_id: int) -> dict:
+    """Apaga uma encomenda por completo: manda o card real para o lixo do
+    Basecamp (ver basecamp.apagar_card — reversível lá, durante algum
+    tempo, tal como apagar manualmente) e remove o agendamento local, se
+    existir. Ação a usar só quando for mesmo preciso (ex: encomenda criada
+    por engano) — pedido explícito do Rui, 2026-09."""
+    basecamp.apagar_card(basecamp_card_id, projeto=PROJETO)
+    db.remover_agendamento_producao(basecamp_card_id)
+    return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
 def criar_encomenda(titulo: str, notas: str = "", linha: str = None,
                     dia_inicio: str = None, duracao_dias: int = 1) -> dict:
@@ -600,28 +614,53 @@ $("#fila").addEventListener("pointerup",e=>{
 $("#lanes").addEventListener("click",e=>{
   const b=e.target.closest(".blk"); if(b&&!e.target.classList.contains("grip")) openSheet(+b.dataset.id);
 });
+$("#fila").addEventListener("click",e=>{
+  const q=e.target.closest(".qcard"); if(q) openSheet(+q.dataset.id);
+});
 function openSheet(id){
-  const c=card(id), s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
+  const c=card(id);
+  const agendado = c.linha!==null && c.gs!==null;
+  let corpo = `<div class="kv"><span>Estado</span><b>Por agendar</b></div>`;
+  if(agendado){
+    const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
+    corpo = `
+    <div class="kv"><span>Linha</span><b>${LINHAS[c.linha]}</b></div>
+    <div class="kv"><span>Início</span><b>${DOW[s.dow]} ${s.dd} ${MESC[s.mo]}</b></div>
+    <div class="kv"><span>Fim</span><b>${DOW[f.dow]} ${f.dd} ${MESC[f.mo]} · ${c.dur} dias</b></div>`;
+  }
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id}</div>
     <h3>${c.titulo}</h3>
-    <div class="kv"><span>Linha</span><b>${LINHAS[c.linha]}</b></div>
-    <div class="kv"><span>Início</span><b>${DOW[s.dow]} ${s.dd} ${MESC[s.mo]}</b></div>
-    <div class="kv"><span>Fim</span><b>${DOW[f.dow]} ${f.dd} ${MESC[f.mo]} · ${c.dur} dias</b></div>
+    ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
     <div class="owner">A linha, o início e a duração vivem só aqui — o Basecamp não tem onde os guardar. Mudar isto aqui não altera nada no Basecamp.</div>
     <div class="acts">
-      <button class="btn" id="toFila">Devolver à fila</button>
+      ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
+      <button class="btn warn" id="apagar">Apagar encomenda</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $("#toFila").onclick=()=>{
+  if(agendado) $("#toFila").onclick=()=>{
     undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur});
     c.linha=null; c.gs=null;
     renderFila(); renderLanes(); sync(c); closeSheet();
+  };
+  $("#apagar").onclick=async()=>{
+    if(!confirm(`Apagar definitivamente "${c.titulo}"?\n\nIsto manda o card para o lixo no Basecamp (fica lá recuperável durante algum tempo, tal como apagar manualmente).`)) return;
+    $("#apagar").textContent="A apagar…"; $("#apagar").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/apagar",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id})});
+      const d=await r.json();
+      if(d.erro){ alert(d.erro); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; return; }
+      cards=cards.filter(x=>x.id!==c.id);
+      log("local",`apagado: ${c.titulo}`);
+      render(); closeSheet();
+    }catch(e){ alert("Falhou a apagar: "+e); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; }
   };
 }
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
@@ -669,7 +708,7 @@ function openForm(pref){
         headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       const d=await r.json();
       if(d.erro){ $("#fErr").textContent=d.erro; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; return; }
-      cards.push({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
+      cards.unshift({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
         linha:linhaIdx,gs,dur});
       log("local",`criado no Basecamp (Triagem): ${d.titulo}`);
       render(); closeSheet();

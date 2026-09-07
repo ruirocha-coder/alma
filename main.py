@@ -497,6 +497,21 @@ def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
     return JSONResponse(planeamento_serracao.desagendar(basecamp_card_id))
 
+@app.post("/planeamento-ecos-largos/apagar")
+def planeamento_ecos_largos_apagar(corpo: dict = Body(...)):
+    """Apaga uma encomenda por completo: manda o card real para o lixo do
+    Basecamp e remove o agendamento local — ver
+    tools/planeamento_serracao.apagar_encomenda. Ação irreversível do
+    lado do quadro (o Basecamp guarda o card no lixo por algum tempo)."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    try:
+        resultado = planeamento_serracao.apagar_encomenda(basecamp_card_id)
+    except Exception as e:
+        return JSONResponse({"erro": f"falhou a apagar no Basecamp: {e}"}, status_code=502)
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/nova-encomenda")
 def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     """Cria uma encomenda nova: um card real no Basecamp (coluna Triagem,
