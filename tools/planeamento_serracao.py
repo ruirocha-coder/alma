@@ -855,14 +855,17 @@ $("#lanes").addEventListener("pointermove",e=>{
 $("#lanes").addEventListener("pointerup",()=>{
   if(!drag)return; const c=drag.c;
   const moved=drag.dx||drag.dy;
-  let anterior=null;
-  if(moved){
-    anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
-    undoStack.push(anterior);
-    c.gs+=drag.dx; c.linha+=drag.dy;
-  }
-  drag.el.classList.remove("drag"); drag=null;
-  renderLanes(); if(moved) sync(c, anterior);
+  drag.el.classList.remove("drag");
+  if(!moved){ drag.el.style.transform=""; drag=null; return; }
+  // só re-desenha quando algo realmente mudou de posição — voltar a
+  // desenhar sempre (mesmo num simples clique sem arrastar) destruía o
+  // próprio bloco clicado a meio do gesto, e o "click" que abre a ficha
+  // nunca chegava a disparar (o alvo original já não existia no DOM).
+  const anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
+  undoStack.push(anterior);
+  c.gs+=drag.dx; c.linha+=drag.dy;
+  drag=null;
+  renderLanes(); sync(c, anterior);
 });
 
 /* fila → grelha */
@@ -1096,6 +1099,11 @@ document.addEventListener("keydown",e=>{
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 
 carregar();
+/* relê o Basecamp sozinho de vez em quando (ex: para apanhar uma OF que
+   mudou de coluna lá, sem ser preciso recarregar a página à mão) — nunca
+   enquanto a ficha estiver aberta ou a arrastar algo, para não perder o
+   que a pessoa está a fazer. */
+setInterval(()=>{ if(!drag && !qdrag && !$("#veil").classList.contains("on")) carregar(); }, 120000);
 </script>
 </body>
 </html>
