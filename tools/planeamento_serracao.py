@@ -39,6 +39,13 @@ LINHAS = [
     "Linha 6 Alinhadeira",
 ]
 
+# lista fixa e pequena de cores manuais (pedido explícito do Rui, 2026-09)
+# — além destas, uma OF tem uma cor automática: amarelo quando chega à
+# coluna Produzido no Basecamp, vermelho quando está atrasada, cinza por
+# omissão (ver corCard no template). Uma cor manual sobrepõe-se sempre à
+# automática, até ser limpa (cor=None).
+CORES_VALIDAS = {"vermelho", "amarelo", "verde", "azul", "roxo", "laranja", "cinza"}
+
 def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
     return sem_acentos.lower().strip()
@@ -80,11 +87,13 @@ def estado_planeamento_serracao() -> dict:
             "criado_em": c.get("criado_em"),
             "url": c["url"],
             "volume_m3": agendamento["volume_m3"] if agendamento else None,
+            "cor": agendamento["cor"] if agendamento else None,
         }
         if tem_agendamento:
             info["linha"] = agendamento["linha"]
             info["dia_inicio"] = agendamento["dia_inicio"]
             info["duracao_dias"] = agendamento["duracao_dias"]
+            info["ordem"] = agendamento["ordem"]
             agendadas.append(info)
         else:
             bolsa.append(info)
@@ -227,6 +236,39 @@ def definir_volume(basecamp_card_id: int, volume_m3: float) -> dict:
         return {"erro": "volume tem de ser maior que 0"}
     return db.guardar_volume_producao(basecamp_card_id, volume_m3)
 
+def definir_cor(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor manual de uma OF (lista fixa, ver
+    CORES_VALIDAS) — funciona tanto na fila como já agendada. `cor` vazio
+    ou None limpa a cor manual e volta à cor automática (ver nota junto de
+    CORES_VALIDAS)."""
+    cor = (cor or "").strip().lower() or None
+    if cor and cor not in CORES_VALIDAS:
+        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
+    db.guardar_cor_producao(basecamp_card_id, cor)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
+
+def reordenar(basecamp_card_id: int, direcao: str) -> dict:
+    """Troca a posição de empilhamento de uma OF com a sua vizinha
+    imediata, entre as OFs agendadas no mesmo dia/linha — pedido explícito
+    do Rui (2026-09): poder escolher qual aparece primeiro quando há mais
+    do que uma OF no mesmo dia/linha. `direcao` é "cima" ou "baixo"."""
+    if direcao not in ("cima", "baixo"):
+        return {"erro": "direção inválida — usa \"cima\" ou \"baixo\""}
+    agendamentos = db.agendamentos_producao_ecos_largos()
+    alvo = next((a for a in agendamentos if a["basecamp_card_id"] == basecamp_card_id), None)
+    if not alvo or not alvo["linha"] or not alvo["dia_inicio"]:
+        return {"erro": "esta OF não está agendada"}
+    grupo = [a for a in agendamentos if a["linha"] == alvo["linha"] and a["dia_inicio"] == alvo["dia_inicio"]]
+    grupo.sort(key=lambda a: (a["ordem"] or 0, a["basecamp_card_id"]))
+    posicao = next(i for i, a in enumerate(grupo) if a["basecamp_card_id"] == basecamp_card_id)
+    troca_com = posicao - 1 if direcao == "cima" else posicao + 1
+    if troca_com < 0 or troca_com >= len(grupo):
+        return {"erro": "já está no topo" if direcao == "cima" else "já está no fundo"}
+    grupo[posicao], grupo[troca_com] = grupo[troca_com], grupo[posicao]
+    for i, a in enumerate(grupo):
+        db.atualizar_ordem_producao(a["basecamp_card_id"], i)
+    return {"trocado": True}
+
 def apagar_encomenda(basecamp_card_id: int) -> dict:
     """Apaga uma encomenda por completo: manda o card real para o lixo do
     Basecamp (ver basecamp.apagar_card — reversível lá, durante algum
@@ -237,20 +279,26 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     db.remover_agendamento_producao(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
-def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, notas: str = "",
-                    linha: str = None, dia_inicio: str = None) -> dict:
+TIPOS_MADEIRA = {"seca": "Seca", "verde": "Verde"}
+
+def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tipo_madeira: str = None,
+                    notas: str = "", linha: str = None, dia_inicio: str = None) -> dict:
     """Cria uma encomenda nova: um card real na coluna Triagem do Basecamp
     (ver basecamp.criar_card, título "Peça — Cliente" e notas com o
-    cliente/volume) e, se já vier com linha/dia, o agendamento local logo
-    a acompanhar (duração calculada a partir do volume e da capacidade da
-    linha — ver agendar). A partir de criado, este card passa a ser
-    totalmente independente — ver nota no topo do módulo."""
+    cliente/volume/tipo de madeira) e, se já vier com linha/dia, o
+    agendamento local logo a acompanhar (duração calculada a partir do
+    volume e da capacidade da linha — ver agendar). A partir de criado,
+    este card passa a ser totalmente independente — ver nota no topo do
+    módulo. `tipo_madeira` é "seca" ou "verde" (opcional)."""
     titulo = (titulo or "").strip()
     cliente = (cliente or "").strip()
+    tipo_madeira = (tipo_madeira or "").strip().lower() or None
     if not titulo:
         return {"erro": "indica a peça (título) da encomenda"}
     if linha and linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
+    if tipo_madeira and tipo_madeira not in TIPOS_MADEIRA:
+        return {"erro": f"tipo de madeira desconhecido: {tipo_madeira!r} — usa \"seca\" ou \"verde\""}
     if volume_m3 is not None:
         try:
             volume_m3 = float(volume_m3)
@@ -271,6 +319,8 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, not
         partes_notas.append(f"Cliente: {cliente}")
     if volume_m3:
         partes_notas.append(f"Volume: {volume_m3} m³")
+    if tipo_madeira:
+        partes_notas.append(f"Madeira: {TIPOS_MADEIRA[tipo_madeira]}")
     if notas:
         partes_notas.append(notas)
     card = basecamp.criar_card("Triagem", titulo_basecamp, "\n".join(partes_notas), projeto=PROJETO)
@@ -354,7 +404,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .qcard{flex:0 0 auto;min-width:190px;max-width:230px;background:var(--paper);border:1px solid var(--line);
     border-left:5px solid var(--grey);border-radius:9px;padding:9px 11px;touch-action:none;cursor:grab;
     box-shadow:0 1px 2px rgba(0,0,0,.07)}
-  .qcard.atrasado{border-left-color:var(--red)}
   .qcard:hover{box-shadow:0 2px 6px rgba(0,0,0,.10)}
   .qcard .tt{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .qcard .of{font-size:12px;color:var(--dim);margin-top:2px}
@@ -397,7 +446,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     background:var(--paper);border:1px solid var(--line);border-left:5px solid var(--grey);
     border-radius:9px;padding:5px 9px;overflow:hidden;pointer-events:auto;cursor:grab;
     touch-action:none;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,.09)}
-  .blk.atrasado{border-left-color:var(--red)}
   .blk:hover{box-shadow:0 2px 7px rgba(0,0,0,.13)}
   .blk:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
   .blk .tt{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -440,6 +488,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .owner{font-size:12.5px;color:var(--dim);margin-top:12px;background:var(--canvas);
     border-radius:8px;padding:9px 11px}
   .acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  .cores{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .swatch{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;padding:0}
+  .swatch.sel{border-color:var(--ink)}
+  .swatch:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
   select,input,textarea{background:var(--paper);color:var(--ink);border:1px solid var(--edge);
     border-radius:8px;padding:6px 9px;font:inherit;font-size:14px}
   input:focus,select:focus,textarea:focus{outline:2px solid var(--blue);outline-offset:0;border-color:var(--blue)}
@@ -540,6 +592,25 @@ const card=id=>cards.find(c=>c.id===id);
 const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const atrasado=c=>c.prazo && c.prazo<hojeISO;
 
+/* lista fixa de cores manuais — uma OF sem cor manual usa a cor
+   automática (amarelo em Produzido, vermelho se atrasada, cinza por
+   omissão). Uma cor manual sobrepõe-se sempre até ser limpa. */
+const CORES={
+  cinza:{hex:"#9AA0A6",label:"Automática"},
+  vermelho:{hex:"#C4452E",label:"Vermelho"},
+  amarelo:{hex:"#E0A02C",label:"Amarelo"},
+  verde:{hex:"#4E9A51",label:"Verde"},
+  azul:{hex:"#1B6AC9",label:"Azul"},
+  roxo:{hex:"#8A6FA0",label:"Roxo"},
+  laranja:{hex:"#D97B29",label:"Laranja"},
+};
+function corCard(c){
+  if(c.cor && CORES[c.cor]) return CORES[c.cor].hex;
+  if(c.coluna==="Produzido") return CORES.amarelo.hex;
+  if(atrasado(c)) return CORES.vermelho.hex;
+  return CORES.cinza.hex;
+}
+
 /* ---------- carregar dados reais do Basecamp + agendamento local ---------- */
 async function carregar(){
   $("#syncDot").classList.add("busy"); $("#syncTxt").textContent="A ler o Basecamp…";
@@ -549,10 +620,10 @@ async function carregar(){
     LINHAS=d.linhas; CAPACIDADES=d.capacidades||{};
     cards=[
       ...d.bolsa.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,linha:null,gs:null,dur:1})),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,linha:LINHAS.indexOf(c.linha),
-        gs:idxOf(c.dia_inicio),dur:c.duracao_dias})).filter(c=>c.linha>=0&&c.gs>=0)
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,linha:LINHAS.indexOf(c.linha),
+        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render();
@@ -659,7 +730,7 @@ function renderDays(){
 const ALTURA_MIN_FRACAO=0.38;
 function encaixarCardsLinha(cardsLinha, capacidade){
   const ocupado={};
-  [...cardsLinha].sort((a,b)=>a.gs-b.gs).forEach(c=>{
+  [...cardsLinha].sort((a,b)=>a.gs-b.gs||(a.ordem||0)-(b.ordem||0)||a.id-b.id).forEach(c=>{
     const ritmo=c.volume?c.volume/c.dur:null;
     const fracao=(ritmo&&capacidade>0)?clamp(ritmo/capacidade,ALTURA_MIN_FRACAO,1):1;
     let topo=0;
@@ -688,8 +759,9 @@ function renderLanes(){
     const l=Math.max(a,0), r=Math.min(b,view.len);
     const usavel=LANE-PAD;
     const el=document.createElement("div");
-    el.className="blk"+(atrasado(c)?" atrasado":"")+(a<0?" clipL":"")+(b>view.len?" clipR":"");
+    el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"");
     el.tabIndex=0; el.dataset.id=c.id;
+    el.style.borderLeftColor=corCard(c);
     el.style.left=(l*DAY+3)+"px";
     el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
@@ -703,7 +775,7 @@ function renderLanes(){
 function renderFila(){
   const q=cards.filter(c=>c.linha===null);
   $("#fila").innerHTML = q.length ? q.map(c=>
-    `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}">
+    `<div class="qcard" data-id="${c.id}" style="border-left-color:${corCard(c)}">
      <div class="tt">${c.titulo}</div>
      <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`).join("")
     : '<div class="empty">Fila vazia.</div>';
@@ -843,7 +915,14 @@ function openSheet(id){
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
     <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30"></div>
     <div class="acts"><button class="btn" id="guardarVol">Guardar volume</button></div>
-    <div class="owner">A linha, o início, a duração e o volume vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. Mudar isto aqui não altera nada no Basecamp.</div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
+    <div class="cores">${Object.entries(CORES).map(([chave,v])=>
+      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+    <div class="owner">A linha, o início, a duração, o volume e a cor vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. Mudar isto aqui não altera nada no Basecamp.</div>
+    <div class="acts">
+      ${agendado?'<button class="btn" id="cima">Mover para cima</button><button class="btn" id="baixo">Mover para baixo</button>':""}
+    </div>
     <div class="acts">
       ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
@@ -852,11 +931,43 @@ function openSheet(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  if(agendado) $("#toFila").onclick=()=>{
-    undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
-    c.linha=null; c.gs=null;
-    renderFila(); renderLanes(); sync(c); closeSheet();
-  };
+  $(".cores").querySelectorAll(".swatch").forEach(sw=>{
+    sw.onclick=async()=>{
+      const cor=sw.dataset.cor;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/cor",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,cor})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); return; }
+        c.cor=cor||null;
+        $(".cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        sw.classList.add("sel");
+        log("local",`cor de "${c.titulo}" atualizada`);
+        render();
+      }catch(e){ alert("Falhou a guardar: "+e); }
+    };
+  });
+  if(agendado){
+    $("#toFila").onclick=()=>{
+      undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
+      c.linha=null; c.gs=null;
+      renderFila(); renderLanes(); sync(c); closeSheet();
+    };
+    const moverOrdem=direcao=>async()=>{
+      try{
+        const r=await fetch("/planeamento-ecos-largos/reordenar",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,direcao})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); return; }
+        log("local",`"${c.titulo}" movido para ${direcao}`);
+        await carregar(); closeSheet();
+      }catch(e){ alert("Falhou a reordenar: "+e); }
+    };
+    $("#cima").onclick=moverOrdem("cima");
+    $("#baixo").onclick=moverOrdem("baixo");
+  }
   $("#guardarVol").onclick=async()=>{
     const vol=+$("#fVol").value;
     if(!vol||vol<=0){ alert("Indica um volume maior que 0."); return; }
@@ -907,6 +1018,11 @@ function openForm(pref){
     <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
     <div class="frow"><label>Cliente</label><input id="fCli" placeholder="Ex: Casa Cerne"></div>
     <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" placeholder="Ex: 30"></div>
+    <div class="frow"><label>Madeira</label><select id="fMadeira">
+      <option value="">Não especificado</option>
+      <option value="seca">Seca</option>
+      <option value="verde">Verde</option>
+    </select></div>
     <div class="frow"><label>Notas</label><textarea id="fNotas" rows="2" placeholder="opcional"></textarea></div>
     <div class="frow"><label>Colocar em</label><select id="fLin">
       <option value="">Fila, por agendar</option>
@@ -935,7 +1051,7 @@ function openForm(pref){
     const gs=linhaIdx===null?null:clamp(+$("#fDia").value,0,MASTER.length-1);
     $("#fSave").textContent="A criar…"; $("#fSave").disabled=true;
     try{
-      const body={titulo,cliente,volume_m3:volume,notas,
+      const body={titulo,cliente,volume_m3:volume,tipo_madeira:$("#fMadeira").value||null,notas,
         linha:linhaIdx===null?null:LINHAS[linhaIdx],
         dia_inicio:gs===null?null:MASTER[gs].iso};
       const r=await fetch("/planeamento-ecos-largos/nova-encomenda",{method:"POST",
@@ -943,7 +1059,7 @@ function openForm(pref){
       const d=await r.json();
       if(d.erro){ $("#fErr").textContent=d.erro; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; return; }
       cards.unshift({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
-        volume:d.volume_m3,linha:linhaIdx,gs,dur:d.duracao_dias||1});
+        volume:d.volume_m3,cor:null,ordem:0,linha:linhaIdx,gs,dur:d.duracao_dias||1});
       log("local",`criado no Basecamp (Triagem): ${d.titulo}`);
       render(); closeSheet();
       setTimeout(()=>{ const b=document.querySelector(`.blk[data-id="${d.basecamp_card_id}"]`)||

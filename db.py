@@ -215,6 +215,8 @@ CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
     dia_inicio DATE,
     duracao_dias INTEGER NOT NULL DEFAULT 1,
     volume_m3 NUMERIC,
+    ordem INTEGER NOT NULL DEFAULT 0,
+    cor TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
@@ -312,9 +314,11 @@ ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DE
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS card_id BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS documentos_gerados_card_id_idx
     ON documentos_gerados (card_id) WHERE card_id IS NOT NULL;
--- volume_m3 foi pedido depois de planeamento_producao_ecos_largos já ter
--- sido criada em produção com o esquema anterior (ver tools/planeamento_serracao.py).
+-- volume_m3/ordem/cor foram pedidos depois de planeamento_producao_ecos_largos
+-- já ter sido criada em produção com o esquema anterior (ver tools/planeamento_serracao.py).
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS volume_m3 NUMERIC;
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor TEXT;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -767,7 +771,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -776,6 +780,8 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "dia_inicio": l["dia_inicio"].isoformat() if l["dia_inicio"] else None,
                 "duracao_dias": l["duracao_dias"],
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
+                "ordem": l["ordem"],
+                "cor": l["cor"],
             } for l in cur.fetchall()]
 
 def agendamento_producao(basecamp_card_id: int) -> dict:
@@ -785,7 +791,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor
                    FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s""",
                 (basecamp_card_id,)
             )
@@ -798,6 +804,8 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
                 "dia_inicio": l["dia_inicio"].isoformat() if l["dia_inicio"] else None,
                 "duracao_dias": l["duracao_dias"],
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
+                "ordem": l["ordem"],
+                "cor": l["cor"],
             }
 
 def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str,
@@ -838,6 +846,37 @@ def guardar_volume_producao(basecamp_card_id: int, volume_m3: float) -> dict:
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        volume_m3 = EXCLUDED.volume_m3, atualizado_em = now()""",
                 (basecamp_card_id, volume_m3)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def atualizar_ordem_producao(basecamp_card_id: int, ordem: int):
+    """Muda a posição de empilhamento de uma OF entre outras no mesmo
+    dia/linha — ver tools/planeamento_serracao.reordenar. Só faz UPDATE
+    (nunca cria linha nova): reordenar só se aplica a uma OF já agendada,
+    que por definição já tem uma linha aqui."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE planeamento_producao_ecos_largos SET ordem = %s, atualizado_em = now() "
+                "WHERE basecamp_card_id = %s",
+                (ordem, basecamp_card_id)
+            )
+        conn.commit()
+
+def guardar_cor_producao(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa (cor=None) a cor manual de uma OF — sobrepõe-se à
+    cor automática (amarelo quando chega a Produzido, vermelho quando
+    está atrasada) enquanto estiver definida. Funciona tanto para uma OF
+    já agendada como ainda na fila."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO planeamento_producao_ecos_largos (basecamp_card_id, cor)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       cor = EXCLUDED.cor, atualizado_em = now()""",
+                (basecamp_card_id, cor)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

@@ -514,6 +514,30 @@ def planeamento_ecos_largos_volume(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/cor")
+def planeamento_ecos_largos_cor(corpo: dict = Body(...)):
+    """Define ou limpa a cor manual de uma OF — ver
+    tools/planeamento_serracao.definir_cor."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.definir_cor(basecamp_card_id, corpo.get("cor"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/reordenar")
+def planeamento_ecos_largos_reordenar(corpo: dict = Body(...)):
+    """Troca a posição de empilhamento de uma OF com a vizinha imediata no
+    mesmo dia/linha — ver tools/planeamento_serracao.reordenar."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.reordenar(basecamp_card_id, corpo.get("direcao"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/desagendar")
 def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
     """Devolve uma OF à bolsa por agendar — só na base local."""
@@ -545,7 +569,7 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     try:
         resultado = planeamento_serracao.criar_encomenda(
             corpo.get("titulo"), corpo.get("cliente") or "", corpo.get("volume_m3"),
-            corpo.get("notas") or "", corpo.get("linha"), corpo.get("dia_inicio"))
+            corpo.get("tipo_madeira"), corpo.get("notas") or "", corpo.get("linha"), corpo.get("dia_inicio"))
     except Exception as e:
         return JSONResponse({"erro": f"falhou a criar no Basecamp: {e}"}, status_code=502)
     if "erro" in resultado:
