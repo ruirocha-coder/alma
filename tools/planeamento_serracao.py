@@ -60,6 +60,16 @@ def estado_planeamento_serracao() -> dict:
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     bolsa, agendadas = [], []
     for c in _cards_of_ativos():
+        agendamento = agendamentos.get(c["id"])
+        tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
+        # a fila (bolsa por agendar) só mostra OFs ainda em Triagem — uma OF
+        # que já avançou no Basecamp (Programação/Em Produção/Produzido) sem
+        # nunca ter sido agendada aqui já não é "por agendar", é trabalho já
+        # em curso fora deste quadro, por isso fica de fora por completo
+        # (pedido explícito do Rui, 2026-09). Só continua a aparecer, na
+        # grelha, se já tiver um agendamento local guardado de antes.
+        if not tem_agendamento and _normalizar(c.get("estado")) != "triagem":
+            continue
         info = {
             "basecamp_card_id": c["id"],
             "titulo": c["titulo"],
@@ -67,8 +77,7 @@ def estado_planeamento_serracao() -> dict:
             "prazo": c["prazo"],
             "url": c["url"],
         }
-        agendamento = agendamentos.get(c["id"])
-        if agendamento and agendamento["linha"] and agendamento["dia_inicio"]:
+        if tem_agendamento:
             info["linha"] = agendamento["linha"]
             info["dia_inicio"] = agendamento["dia_inicio"]
             info["duracao_dias"] = agendamento["duracao_dias"]
