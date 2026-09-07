@@ -20,7 +20,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao
 from db import inicializar_schema
 inicializar_schema()
 
@@ -460,6 +460,54 @@ def portal_projeto_validar_fase(card_id: int, corpo: dict = Body(...)):
     if not fase:
         return JSONResponse({"erro": "falta indicar a fase"}, status_code=400)
     resultado = portal_projeto.validar_fase_portal(card_id, fase)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.get("/planeamento-ecos-largos", response_class=HTMLResponse)
+def planeamento_ecos_largos_pagina():
+    """Página interna (sem login) do quadro de planeamento de produção da
+    Ecos Largos — ver tools/planeamento_serracao.pagina_planeamento. O Rui
+    coloca o link manualmente dentro do Basecamp."""
+    return HTMLResponse(planeamento_serracao.pagina_planeamento())
+
+@app.get("/planeamento-ecos-largos/dados")
+def planeamento_ecos_largos_dados():
+    """Estado atual do quadro: OFs reais do Basecamp (projeto Ecos Largos)
+    cruzadas com o agendamento local — ver
+    tools/planeamento_serracao.estado_planeamento_serracao."""
+    return planeamento_serracao.estado_planeamento_serracao()
+
+@app.post("/planeamento-ecos-largos/agendar")
+def planeamento_ecos_largos_agendar(corpo: dict = Body(...)):
+    """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
+    escreve no Basecamp (ver tools/planeamento_serracao.agendar)."""
+    resultado = planeamento_serracao.agendar(
+        corpo.get("basecamp_card_id"), corpo.get("linha"),
+        corpo.get("dia_inicio"), corpo.get("duracao_dias"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/desagendar")
+def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
+    """Devolve uma OF à bolsa por agendar — só na base local."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    return JSONResponse(planeamento_serracao.desagendar(basecamp_card_id))
+
+@app.post("/planeamento-ecos-largos/nova-encomenda")
+def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
+    """Cria uma encomenda nova: um card real no Basecamp (coluna Triagem,
+    projeto Ecos Largos) e, se já vier com linha/dia, o agendamento local
+    logo a acompanhar — ver tools/planeamento_serracao.criar_encomenda."""
+    try:
+        resultado = planeamento_serracao.criar_encomenda(
+            corpo.get("titulo"), corpo.get("notas") or "", corpo.get("linha"),
+            corpo.get("dia_inicio"), corpo.get("duracao_dias") or 1)
+    except Exception as e:
+        return JSONResponse({"erro": f"falhou a criar no Basecamp: {e}"}, status_code=502)
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)

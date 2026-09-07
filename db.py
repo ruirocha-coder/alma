@@ -202,6 +202,21 @@ CREATE TABLE IF NOT EXISTS pausas_automaticas (
     ativa BOOLEAN NOT NULL DEFAULT true,
     criado_em TIMESTAMPTZ DEFAULT now()
 );
+
+-- agendamento (linha de produção, dia de início, duração) das OFs do quadro
+-- de planeamento da serração da Ecos Largos (ver tools/planeamento_serracao.py)
+-- — o Basecamp não tem nenhum campo nativo para isto, por isso vive só aqui,
+-- indexado pelo id do card real no Basecamp. linha/dia_inicio a NULL = OF
+-- ainda na bolsa por agendar.
+CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
+    id SERIAL PRIMARY KEY,
+    basecamp_card_id BIGINT NOT NULL UNIQUE,
+    linha TEXT,
+    dia_inicio DATE,
+    duracao_dias INTEGER NOT NULL DEFAULT 1,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    atualizado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 # período de férias já anunciado pelo Rui no Mural da Gestão (post "Boas
@@ -714,6 +729,60 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
                 "avaliacao": l["avaliacao"],
                 "registado_em": l["criado_em"].date().isoformat(),
             } for l in cur.fetchall()]
+
+def agendamentos_producao_ecos_largos() -> list[dict]:
+    """Todo o agendamento local (linha/dia/duração) do quadro de
+    planeamento da serração da Ecos Largos — ver
+    tools/planeamento_serracao.py, que cruza isto com os cards reais do
+    Basecamp pelo basecamp_card_id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias
+                   FROM planeamento_producao_ecos_largos"""
+            )
+            return [{
+                "basecamp_card_id": l["basecamp_card_id"],
+                "linha": l["linha"],
+                "dia_inicio": l["dia_inicio"].isoformat() if l["dia_inicio"] else None,
+                "duracao_dias": l["duracao_dias"],
+            } for l in cur.fetchall()]
+
+def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str, duracao_dias: int) -> dict:
+    """Cria ou atualiza (upsert) o agendamento local de uma OF, pelo id do
+    seu card no Basecamp — usado ao arrastar uma OF para uma linha/dia no
+    quadro de planeamento, e também ao criar uma encomenda nova (ver
+    tools/planeamento_serracao.criar_encomenda)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO planeamento_producao_ecos_largos
+                   (basecamp_card_id, linha, dia_inicio, duracao_dias)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       linha = EXCLUDED.linha,
+                       dia_inicio = EXCLUDED.dia_inicio,
+                       duracao_dias = EXCLUDED.duracao_dias,
+                       atualizado_em = now()""",
+                (basecamp_card_id, linha, dia_inicio, duracao_dias)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def desagendar_producao(basecamp_card_id: int) -> dict:
+    """Volta a pôr uma OF na bolsa por agendar (linha/dia a NULL), sem
+    apagar a linha nem a duração configurada anteriormente — usado ao
+    arrastar uma OF de volta para a bolsa no quadro de planeamento."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE planeamento_producao_ecos_largos
+                   SET linha = NULL, dia_inicio = NULL, atualizado_em = now()
+                   WHERE basecamp_card_id = %s""",
+                (basecamp_card_id,)
+            )
+        conn.commit()
+    return {"desagendado": True, "basecamp_card_id": basecamp_card_id}
 
 def guardar_documento_gerado(utilizador: str, titulo: str, ficheiro: bytes, conteudo_fonte: str,
                              formato: str = "pdf") -> int:
