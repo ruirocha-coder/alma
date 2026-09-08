@@ -23,8 +23,11 @@ PROJETO = "Ecos Largos"
 # fabrico (confirmado ao vivo, 2026-09, contra a API real). As colunas
 # "Linha 1" a "Linha 6" / Charriots / Empilhadores do mesmo quadro guardam
 # cards de ALOCAÇÃO DE PESSOAL, não OFs — ficam de fora deste quadro, por
-# pedido explícito do Rui.
-COLUNAS_OF = {"triagem", "programacao", "em producao", "produzido"}
+# pedido explícito do Rui. "Vendido" inclui-se para uma OF já agendada não
+# desaparecer do quadro quando a venda fecha no Basecamp — fica visível
+# (cor automática roxa, ver template) em vez de desaparecer; nunca entra
+# na fila (só cards em Triagem entram lá, ver estado_planeamento_serracao).
+COLUNAS_OF = {"triagem", "programacao", "em producao", "produzido", "vendido"}
 
 # linhas de produção reais da serração (mesmos nomes vistos nas colunas de
 # pessoal do Basecamp, confirmado ao vivo) — usadas aqui só como categorias
@@ -565,6 +568,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ghost{position:fixed;z-index:99;pointer-events:none;box-shadow:0 8px 22px rgba(0,0,0,.22);opacity:.95}
 
   .blk.selecionado,.qcard.selecionado{outline:2px solid var(--blue);outline-offset:1px;z-index:8}
+  .blk.atrasado,.qcard.atrasado{box-shadow:0 0 0 2px var(--red) inset}
   .editBtn{position:absolute;top:2px;right:2px;width:19px;height:19px;line-height:19px;
     text-align:center;border-radius:5px;background:rgba(255,255,255,.85);color:var(--dim);
     font-size:11px;cursor:pointer;pointer-events:auto}
@@ -721,10 +725,26 @@ const atrasado=c=>c.prazo && c.prazo<hojeISO;
    par na outra tabela (mesma OF, mesmo basecamp_card_id) — em vez de abrir
    logo a ficha de edição (pedido explícito do Rui, 2026-09: um clique
    simples só alinha visualmente os dois; a edição passa a ter um botão
-   próprio, "✎", em cada card). */
-function selecionar(id){
+   próprio, "✎", em cada card). Quando a OF tem os dois lados (produção e
+   logística), a tabela que NÃO foi a origem do clique desloca-se na
+   horizontal até a coluna do seu dia ficar exatamente por baixo/cima da
+   coluna do card clicado — os dias mostrados continuam a ser os dias
+   certos de cada um (o cabeçalho não muda), só a posição de scroll é que
+   se ajusta para os alinhar visualmente. */
+function selecionar(id, origem){
   selecionadoId = (selecionadoId===id) ? null : id;
   aplicarSelecao();
+  if(selecionadoId===null) return;
+  const cP=card(id), cL=cardLog(id);
+  const prodColocado = cP && cP.linha!==null && cP.gs!==null;
+  if(!prodColocado || !cL) return;
+  if(origem==="logistica"){
+    const alvo=$("#scrollLog").scrollLeft + (cP.gs-cL.gs)*DAY;
+    $("#scroll").scrollTo({left:Math.max(0,alvo),behavior:"smooth"});
+  }else{
+    const alvo=$("#scroll").scrollLeft + (cL.gs-cP.gs)*DAY;
+    $("#scrollLog").scrollTo({left:Math.max(0,alvo),behavior:"smooth"});
+  }
 }
 function aplicarSelecao(){
   document.querySelectorAll(".blk,.qcard").forEach(el=>{
@@ -732,22 +752,41 @@ function aplicarSelecao(){
   });
 }
 
-/* lista fixa de cores manuais — uma OF sem cor manual usa a cor
-   automática (amarelo em Produzido, vermelho se atrasada, cinza por
-   omissão). Uma cor manual sobrepõe-se sempre até ser limpa. */
+/* lista fixa de cores — pedido explícito do Rui (2026-09):
+   - Produção/fila: a barra lateral é manual (tipo de produto, ex:
+     quadradilho) — ver corProduto; o FUNDO do card é automático, de
+     acordo com a coluna do Basecamp — ver corEstadoFundo (amarelo em
+     Produzido, laranja em Em Produção, roxo em Vendido, sem cor nas
+     restantes colunas).
+   - Logística: continua uma única cor por card (como antes) — manual
+     (a equipa marca a verde assim que carrega) sobrepõe-se à automática
+     (mesmas 3 cores de estado) — ver corLogistica.
+   - Atrasada (prazo do Basecamp ultrapassado): já não usa cor nenhuma
+     das duas — passa a um contorno vermelho próprio (ver .atrasado no
+     CSS), para nunca competir com a cor de produto nem a de estado. */
 const CORES={
   cinza:{hex:"#9AA0A6",label:"Automática"},
   vermelho:{hex:"#C4452E",label:"Vermelho"},
-  amarelo:{hex:"#E0A02C",label:"Amarelo"},
+  amarelo:{hex:"#E0A02C",label:"Amarelo",fundo:"#FBEBD3"},
   verde:{hex:"#4E9A51",label:"Verde"},
   azul:{hex:"#1B6AC9",label:"Azul"},
-  roxo:{hex:"#8A6FA0",label:"Roxo"},
-  laranja:{hex:"#D97B29",label:"Laranja"},
+  roxo:{hex:"#8A6FA0",label:"Roxo",fundo:"#EAE4F1"},
+  laranja:{hex:"#D97B29",label:"Laranja",fundo:"#F9E3CD"},
 };
-function corCard(c){
+function corEstadoFundo(c){
+  if(c.coluna==="Vendido") return CORES.roxo.fundo;
+  if(c.coluna==="Produzido") return CORES.amarelo.fundo;
+  if(c.coluna==="Em Produção") return CORES.laranja.fundo;
+  return null;
+}
+function corProduto(c){
+  return (c.cor && CORES[c.cor]) ? CORES[c.cor].hex : CORES.cinza.hex;
+}
+function corLogistica(c){
   if(c.cor && CORES[c.cor]) return CORES[c.cor].hex;
+  if(c.coluna==="Vendido") return CORES.roxo.hex;
   if(c.coluna==="Produzido") return CORES.amarelo.hex;
-  if(atrasado(c)) return CORES.vermelho.hex;
+  if(c.coluna==="Em Produção") return CORES.laranja.hex;
   return CORES.cinza.hex;
 }
 
@@ -916,9 +955,10 @@ function renderLanes(){
     const l=Math.max(a,0), r=Math.min(b,view.len);
     const usavel=LANE-PAD;
     const el=document.createElement("div");
-    el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"");
+    el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"")+(atrasado(c)?" atrasado":"");
     el.tabIndex=0; el.dataset.id=c.id;
-    el.style.borderLeftColor=corCard(c);
+    el.style.borderLeftColor=corProduto(c);
+    const fundo=corEstadoFundo(c); if(fundo) el.style.background=fundo;
     el.style.left=(l*DAY+3)+"px";
     el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
@@ -931,11 +971,14 @@ function renderLanes(){
 }
 function renderFila(){
   const q=cards.filter(c=>c.linha===null);
-  $("#fila").innerHTML = q.length ? q.map(c=>
-    `<div class="qcard" data-id="${c.id}" style="border-left-color:${corCard(c)}">
+  $("#fila").innerHTML = q.length ? q.map(c=>{
+    const fundo=corEstadoFundo(c);
+    return `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}"
+       style="border-left-color:${corProduto(c)}${fundo?(";background:"+fundo):""}">
      <div class="editBtn" data-edit="${c.id}" title="Editar">✎</div>
      <div class="tt">${c.titulo}</div>
-     <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`).join("")
+     <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`;
+  }).join("")
     : '<div class="empty">Fila vazia.</div>';
   aplicarSelecao();
 }
@@ -959,7 +1002,7 @@ function renderLogistica(){
     const el=document.createElement("div");
     el.className="blk";
     el.tabIndex=0; el.dataset.id=c.id;
-    el.style.borderLeftColor=corCard(c);
+    el.style.borderLeftColor=corLogistica(c);
     el.style.left=(a*DAY+3)+"px";
     el.style.top=(PAD+c._topoFracao*usavel)+"px";
     el.style.width=(DAY-8)+"px";
@@ -1129,15 +1172,15 @@ async function moverLogisticaServidor(c){
    card (pedido explícito do Rui, 2026-09). */
 $("#lanes").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
-  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id);
+  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"producao");
 });
 $("#fila").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
-  const q=e.target.closest(".qcard"); if(q) selecionar(+q.dataset.id);
+  const q=e.target.closest(".qcard"); if(q) selecionar(+q.dataset.id,"fila");
 });
 $("#lanesLog").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
-  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id);
+  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"logistica");
 });
 function openSheet(id){
   const c=card(id);
@@ -1164,11 +1207,11 @@ function openSheet(id){
       <option value="verde"${c.madeira==="verde"?" selected":""}>Verde</option>
     </select></div>
     <div class="acts"><button class="btn" id="guardarMad">Guardar madeira</button></div>
-    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral (tipo de produto)</label>
     <div class="cores">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
-    <div class="owner">A linha, o início, a duração, o volume e a cor vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. Mudar isto aqui não altera nada no Basecamp.</div>
+    <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. O fundo do card é automático (amarelo em Produzido, laranja em Em Produção, roxo em Vendido); a barra lateral é a cor do tipo de produto, escolhida acima. Mudar isto aqui não altera nada no Basecamp.</div>
     <div class="acts">
       ${agendado?'<button class="btn" id="cima">Mover para cima</button><button class="btn" id="baixo">Mover para baixo</button>':""}
     </div>
@@ -1329,8 +1372,7 @@ function openSheetLogistica(id){
 }
 
 /* ---------- nova encomenda ---------- */
-function openForm(pref){
-  pref=pref||{}; const D=days();
+function openForm(){
   $("#sheet").innerHTML=`
     <h3>Criar encomenda</h3>
     <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
@@ -1342,57 +1384,36 @@ function openForm(pref){
       <option value="verde">Verde</option>
     </select></div>
     <div class="frow"><label>Notas</label><textarea id="fNotas" rows="2" placeholder="opcional"></textarea></div>
-    <div class="frow"><label>Colocar em</label><select id="fLin">
-      <option value="">Fila, por agendar</option>
-      ${LINHAS.map((n,i)=>`<option value="${i}"${pref.linha===i?" selected":""}>${n}</option>`).join("")}
-    </select></div>
-    <div class="frow" id="rowDia"><label>Início</label><select id="fDia">
-      ${D.map((d,i)=>`<option value="${view.start+i}"${pref.gs===view.start+i?" selected":""}>${DOW[d.dow]} ${d.dd} ${MESC[d.mo]}</option>`).join("")}
-    </select></div>
     <div class="err" id="fErr"></div>
-    <div class="owner">O card nasce sempre na coluna Triagem do Basecamp (projeto Ecos Largos), com o título "Peça — Cliente". A linha, o início, o volume e a duração (calculada a partir do volume e da capacidade da linha) ficam só aqui.</div>
+    <div class="owner">O card nasce sempre na coluna Triagem do Basecamp (projeto Ecos Largos), com o título "Peça — Cliente", e fica sempre na fila por agendar — arrasta-o depois para uma linha/dia.</div>
     <div class="acts">
       <button class="btn primary" id="fSave">Criar encomenda</button>
       <button class="btn" id="close">Cancelar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
-  const rowDia=$("#rowDia"), selLin=$("#fLin");
-  const toggle=()=>{ rowDia.style.display=selLin.value!==""?"":"none"; };
-  selLin.onchange=toggle; toggle();
   $("#close").onclick=$("#veil").onclick=closeSheet;
   $("#fTt").focus();
   $("#fSave").onclick=async()=>{
     const titulo=$("#fTt").value.trim(), cliente=$("#fCli").value.trim(), notas=$("#fNotas").value.trim();
     const volume=$("#fVol").value?+$("#fVol").value:null;
     if(!titulo){ $("#fErr").textContent="Escreve a peça — é o título do card no Basecamp."; $("#fTt").focus(); return; }
-    const linhaIdx=selLin.value===""?null:+selLin.value;
-    const gs=linhaIdx===null?null:clamp(+$("#fDia").value,0,MASTER.length-1);
     $("#fSave").textContent="A criar…"; $("#fSave").disabled=true;
     try{
       const body={titulo,cliente,volume_m3:volume,tipo_madeira:$("#fMadeira").value||null,notas,
-        linha:linhaIdx===null?null:LINHAS[linhaIdx],
-        dia_inicio:gs===null?null:MASTER[gs].iso};
+        linha:null,dia_inicio:null};
       const r=await fetch("/planeamento-ecos-largos/nova-encomenda",{method:"POST",
         headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       const d=await r.json();
       if(d.erro){ $("#fErr").textContent=d.erro; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; return; }
       cards.unshift({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
-        volume:d.volume_m3,madeira:d.tipo_madeira||null,cor:null,ordem:0,linha:linhaIdx,gs,dur:d.duracao_dias||1});
+        volume:d.volume_m3,madeira:d.tipo_madeira||null,cor:null,ordem:0,linha:null,gs:null,dur:1});
       log("local",`criado no Basecamp (Triagem): ${d.titulo}`);
-      if(linhaIdx!==null) atualizarLogistica();
       render(); closeSheet();
-      setTimeout(()=>{ const b=document.querySelector(`.blk[data-id="${d.basecamp_card_id}"]`)||
-        document.querySelector(`.qcard[data-id="${d.basecamp_card_id}"]`); if(b)b.classList.add("flash"); },30);
+      setTimeout(()=>{ const b=document.querySelector(`.qcard[data-id="${d.basecamp_card_id}"]`); if(b)b.classList.add("flash"); },30);
     }catch(e){ $("#fErr").textContent="Falhou a criar no Basecamp: "+e; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; }
   };
 }
 $("#novo").onclick=()=>openForm();
-$("#lanes").addEventListener("dblclick",e=>{
-  if(e.target.closest(".blk"))return;
-  const r=$("#lanes").getBoundingClientRect();
-  openForm({linha:clamp(Math.floor((e.clientY-r.top)/LANE),0,LINHAS.length-1),
-            gs:view.start+clamp(Math.floor((e.clientX-r.left)/DAY),0,view.len-1)});
-});
 
 /* ---------- controlos ---------- */
 $("#seg").onclick=e=>{ const b=e.target.closest("button"); if(b) setMode(b.dataset.m); };
