@@ -713,8 +713,9 @@ def planeamento_ecos_largos_diagnostico_ocupacao(linha: str, excluir_id: int = N
     """Diagnóstico temporário: mostra a ocupação diária bruta calculada
     por _ocupacao_diaria para uma linha — usado para perceber uma
     duração que parece errada. A remover depois de usado."""
+    ocupacao = planeamento_serracao._ocupacao_diaria(linha, excluir_id=excluir_id)
     return {
-        "ocupacao": planeamento_serracao._ocupacao_diaria(linha, excluir_id=excluir_id),
+        "ocupacao": {k: ("inf" if v == float("inf") else v) for k, v in ocupacao.items()},
         "agendamentos_da_linha": [
             a for a in planeamento_serracao.db.agendamentos_producao_ecos_largos() if a["linha"] == linha
         ],
