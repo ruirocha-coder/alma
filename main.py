@@ -708,29 +708,6 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
-@app.get("/planeamento-ecos-largos/diagnostico-ocupacao")
-def planeamento_ecos_largos_diagnostico_ocupacao(linha: str, excluir_id: int = None):
-    """Diagnóstico temporário: mostra a ocupação diária bruta calculada
-    por _ocupacao_diaria para uma linha — usado para perceber uma
-    duração que parece errada. A remover depois de usado."""
-    ocupacao = planeamento_serracao._ocupacao_diaria(linha, excluir_id=excluir_id)
-    return {
-        "ocupacao": {k: ("inf" if v == float("inf") else v) for k, v in ocupacao.items()},
-        "agendamentos_da_linha": [
-            a for a in planeamento_serracao.db.agendamentos_producao_ecos_largos() if a["linha"] == linha
-        ],
-    }
-
-@app.post("/planeamento-ecos-largos/corrigir-duracoes")
-def planeamento_ecos_largos_corrigir_duracoes():
-    """Correção pontual (pedido explícito do Rui, 2026-09): recalcula a
-    duração de todas as OFs já agendadas, agora que os agendamentos
-    órfãos deixaram de contar para a ocupação — ver
-    tools/planeamento_serracao.corrigir_duracoes_existentes. Endpoint
-    temporário, para remover depois de usado uma vez."""
-    resultado = planeamento_serracao.corrigir_duracoes_existentes()
-    _notificar_planeamento_ecos_largos()
-    return JSONResponse(resultado)
 
 @app.get("/health")
 def health():

@@ -456,27 +456,6 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     db.remover_logistica_carregamento(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
-def corrigir_duracoes_existentes() -> dict:
-    """Correção pontual (pedido explícito do Rui, 2026-09): recalcula a
-    duração de todas as OFs já agendadas, agora que _ocupacao_diaria
-    ignora agendamentos órfãos (de cards que já saíram do fluxo ativo no
-    Basecamp) — ver nota em _ocupacao_diaria. Processa por linha, do dia
-    de início mais cedo para o mais tarde, para cada recálculo já ver a
-    ocupação mais atual das OFs anteriores na mesma linha."""
-    resultados = []
-    agendamentos = [a for a in db.agendamentos_producao_ecos_largos() if a["linha"] and a["dia_inicio"]]
-    agendamentos.sort(key=lambda a: (a["linha"], a["dia_inicio"], a["basecamp_card_id"]))
-    for a in agendamentos:
-        antes = a["duracao_dias"]
-        resultado = agendar(a["basecamp_card_id"], a["linha"], a["dia_inicio"], a["volume_m3"])
-        if "erro" in resultado:
-            resultados.append({"basecamp_card_id": a["basecamp_card_id"], "linha": a["linha"],
-                               "erro": resultado["erro"], "duracao_antes": antes})
-        else:
-            resultados.append({"basecamp_card_id": a["basecamp_card_id"], "linha": a["linha"],
-                               "duracao_antes": antes, "duracao_depois": resultado["duracao_dias"]})
-    return {"resultados": resultados}
-
 
 def mover_logistica(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Muda manualmente o dia de carregamento de uma OF já duplicada —
