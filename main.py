@@ -642,20 +642,6 @@ def planeamento_ecos_largos_logistica_mover(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
-@app.post("/planeamento-ecos-largos/logistica/cor")
-def planeamento_ecos_largos_logistica_cor(corpo: dict = Body(...)):
-    """Define ou limpa a cor manual de um card de logística — ver
-    tools/planeamento_serracao.definir_cor_logistica."""
-    basecamp_card_id = corpo.get("basecamp_card_id")
-    if not basecamp_card_id:
-        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    resultado = planeamento_serracao.definir_cor_logistica(basecamp_card_id, corpo.get("cor"))
-    if "erro" in resultado:
-        return JSONResponse(resultado, status_code=400)
-    _notificar_planeamento_ecos_largos()
-    return JSONResponse(resultado)
-
-
 @app.post("/planeamento-ecos-largos/logistica/quem-carrega")
 def planeamento_ecos_largos_logistica_quem_carrega(corpo: dict = Body(...)):
     """Define/limpa quem carrega uma OF — ver

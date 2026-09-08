@@ -149,10 +149,11 @@ def estado_planeamento_serracao() -> dict:
             "coluna_basecamp": c["estado"],
             "url": c["url"],
             "dia_carregamento": lg["dia_carregamento"],
-            "cor": lg["cor"],
-            # cor de fundo é da OF, uma só, partilhada com a produção (não
-            # um campo à parte na logística) — pedido explícito do Rui,
-            # 2026-09: mudar o fundo tem de se ver nas duas tabelas.
+            # cor e cor_fundo são da OF, uma só, partilhadas com a
+            # produção (não campos à parte na logística) — pedido
+            # explícito do Rui, 2026-09: mudar qualquer uma tem de se ver
+            # nas duas tabelas.
+            "cor": agendamento["cor"],
             "cor_fundo": agendamento["cor_fundo"],
             "quem_carrega": lg["quem_carrega"],
         })
@@ -427,17 +428,6 @@ def mover_logistica(basecamp_card_id: int, dia_carregamento: str) -> dict:
         return {"erro": "esta OF ainda não tem duplicado de logística"}
     return db.mover_logistica_carregamento(basecamp_card_id, dia_carregamento)
 
-def definir_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
-    """Define ou limpa a cor manual de um card de logística (mesma lista
-    fixa, ver CORES_VALIDAS)."""
-    cor = (cor or "").strip().lower() or None
-    if cor and cor not in CORES_VALIDAS:
-        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
-    if not db.logistica_carregamento(basecamp_card_id):
-        return {"erro": "esta OF ainda não tem duplicado de logística"}
-    db.guardar_cor_logistica(basecamp_card_id, cor)
-    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
-
 def definir_quem_carrega(basecamp_card_id: int, quem_carrega: str) -> dict:
     """Define/limpa quem carrega uma OF — preenchido à mão pela equipa da
     logística (pedido explícito do Rui, 2026-09), para depois se saber
@@ -680,9 +670,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .lt{word-break:break-word}
   .lt em{font-style:normal;color:var(--dim)}
 
-  .veil{position:fixed;inset:0;background:rgba(26,28,30,.35);display:none}
+  .veil{position:fixed;inset:0;background:rgba(26,28,30,.35);display:none;z-index:100}
   .veil.on{display:block}
-  .sheet{position:fixed;top:50%;left:50%;background:var(--paper);
+  .sheet{position:fixed;top:50%;left:50%;background:var(--paper);z-index:101;
     border-radius:16px;padding:20px 20px 28px;width:min(560px,calc(100vw - 32px));
     box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.25);
     max-height:calc(100vh - 64px);overflow-y:auto;overscroll-behavior:contain;
@@ -855,7 +845,9 @@ function aplicarSelecao(){
 /* lista fixa de cores — pedido explícito do Rui (2026-09), em todos os
    cards (produção, fila e logística):
    - Barra lateral: sempre manual (tipo de produto, ex: quadradilho) —
-     ver corProduto (mesma função para produção, fila e logística).
+     ver corProduto (mesma função para produção, fila e logística). É da
+     OF, uma só (não um campo à parte na logística) — mudar numa tabela
+     tem de se ver na outra.
    - Fundo: manual, se a pessoa escolher uma cor de fundo no card (ver
      fundoManual) — senão automático, de acordo com a coluna do Basecamp
      (ver corEstadoFundo, uma cor por estado, editável no painel "Cores
@@ -1425,6 +1417,7 @@ function openSheet(id){
         const d=await r.json();
         if(d.erro){ alert(d.erro); return; }
         c.cor=cor||null;
+        const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.cor=c.cor;
         $("#coresBarra").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor de "${c.titulo}" atualizada`);
@@ -1566,7 +1559,7 @@ function openSheetLogistica(id){
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
-    <div class="owner">Isto é o duplicado de logística desta OF — mover, apagar ou mudar a cor da barra lateral aqui não altera a produção nem o Basecamp. A cor de fundo é exceção: é da OF, uma só, por isso muda também no card de produção.</div>
+    <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp. As duas cores são exceção: são da OF, uma só, por isso mudam também no card de produção.</div>
     <div class="acts">
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagarLog">Apagar duplicado</button>
@@ -1608,16 +1601,17 @@ function openSheetLogistica(id){
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
-        const r=await fetch("/planeamento-ecos-largos/logistica/cor",{method:"POST",
+        const r=await fetch("/planeamento-ecos-largos/cor",{method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({basecamp_card_id:c.id,cor})});
         const dd=await r.json();
         if(dd.erro){ alert(dd.erro); return; }
         c.cor=cor||null;
+        const gemeo=cards.find(x=>x.id===c.id); if(gemeo) gemeo.cor=c.cor;
         $("#coresBarra").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
-        log("local",`cor do carregamento de "${c.titulo}" atualizada`);
-        renderLogistica();
+        log("local",`cor de "${c.titulo}" atualizada (é a mesma OF da produção)`);
+        render();
       }catch(e){ alert("Falhou a guardar: "+e); }
     };
   });
