@@ -734,22 +734,28 @@ const MASTER=[];
   }
 }
 const FDS=d=>d.dow===6||d.dow===0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const hojeISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`})();
 const HOJE=MASTER.findIndex(d=>d.iso===hojeISO);
 const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
+/* índice da segunda-feira da semana (calendário, não a de hoje) que
+   contém o índice dado — pedido explícito do Rui (2026-09): a vista
+   "semana" tem de mostrar a semana inteira (seg-dom, como o Google
+   Calendar), com o dia de hoje só destacado por cor, nunca forçado a ser
+   a primeira coluna. */
+const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; return idx-((dow+6)%7); };
 
 let LINHAS=[];
 let CAPACIDADES={};
 let cards=[];
 let cardsLog=[];
 let selecionadoId=null;
-let view={mode:"semana",start:Math.max(HOJE,0),len:7};
+let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let undoStack=[], logs=[], DAY=92, LANE=78;
 
 const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
 const cardLog=id=>cardsLog.find(c=>c.id===id);
-const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const atrasado=c=>c.prazo && c.prazo<hojeISO;
 
 /* clicar num card (fila, produção ou logística) destaca-o a ele e ao seu
@@ -912,7 +918,7 @@ function setMode(m){
   const anchor=view.start;
   if(m==="semana"||m==="duas"){
     view.len = m==="semana"?7:14;
-    view.start = clamp(Math.floor(anchor/7)*7, 0, Math.max(MASTER.length-view.len,0));
+    view.start = clamp(segundaDe(anchor), 0, Math.max(MASTER.length-view.len,0));
   }else{
     const d=MASTER[clamp(anchor,0,MASTER.length-1)];
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
