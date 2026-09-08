@@ -236,7 +236,6 @@ CREATE TABLE IF NOT EXISTS logistica_carregamento_ecos_largos (
     basecamp_card_id BIGINT NOT NULL UNIQUE,
     dia_carregamento DATE NOT NULL,
     cor TEXT,
-    cor_fundo TEXT,
     quem_carrega TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
@@ -363,7 +362,13 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor TEXT;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS tipo_madeira TEXT;
 ALTER TABLE logistica_carregamento_ecos_largos ADD COLUMN IF NOT EXISTS quem_carrega TEXT;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor_fundo TEXT;
-ALTER TABLE logistica_carregamento_ecos_largos ADD COLUMN IF NOT EXISTS cor_fundo TEXT;
+-- cor_fundo em logistica_carregamento_ecos_largos foi uma tentativa a mais
+-- (campo independente por tabela) — corrigido no dia seguinte: a cor de
+-- fundo é da OF, uma só, partilhada entre produção e logística (ver
+-- tools/planeamento_serracao.estado_planeamento_serracao, que agora lê
+-- sempre cor_fundo do agendamento de produção). A coluna aqui nunca
+-- chegou a ter dados reais guardados (só testes, já limpos).
+ALTER TABLE logistica_carregamento_ecos_largos DROP COLUMN IF EXISTS cor_fundo;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -974,13 +979,12 @@ def logistica_carregamentos_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor, cor_fundo, quem_carrega FROM logistica_carregamento_ecos_largos"
+                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos"
             )
             return [{
                 "basecamp_card_id": l["basecamp_card_id"],
                 "dia_carregamento": l["dia_carregamento"].isoformat(),
                 "cor": l["cor"],
-                "cor_fundo": l["cor_fundo"],
                 "quem_carrega": l["quem_carrega"],
             } for l in cur.fetchall()]
 
@@ -991,7 +995,7 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor, cor_fundo, quem_carrega FROM logistica_carregamento_ecos_largos "
+                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos "
                 "WHERE basecamp_card_id = %s",
                 (basecamp_card_id,)
             )
@@ -1000,7 +1004,7 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
                 return None
             return {"basecamp_card_id": l["basecamp_card_id"],
                     "dia_carregamento": l["dia_carregamento"].isoformat(), "cor": l["cor"],
-                    "cor_fundo": l["cor_fundo"], "quem_carrega": l["quem_carrega"]}
+                    "quem_carrega": l["quem_carrega"]}
 
 def criar_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Cria o duplicado de logística de uma OF — só uma vez (ON CONFLICT DO
@@ -1035,19 +1039,6 @@ def guardar_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE logistica_carregamento_ecos_largos SET cor = %s, atualizado_em = now() "
-                "WHERE basecamp_card_id = %s",
-                (cor, basecamp_card_id)
-            )
-        conn.commit()
-    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
-
-def guardar_cor_fundo_logistica(basecamp_card_id: int, cor: str) -> dict:
-    """Define ou limpa a cor de fundo manual de um card de logística —
-    campo independente da cor da barra lateral (guardar_cor_logistica)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE logistica_carregamento_ecos_largos SET cor_fundo = %s, atualizado_em = now() "
                 "WHERE basecamp_card_id = %s",
                 (cor, basecamp_card_id)
             )

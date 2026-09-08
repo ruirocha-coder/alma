@@ -150,7 +150,10 @@ def estado_planeamento_serracao() -> dict:
             "url": c["url"],
             "dia_carregamento": lg["dia_carregamento"],
             "cor": lg["cor"],
-            "cor_fundo": lg["cor_fundo"],
+            # cor de fundo é da OF, uma só, partilhada com a produção (não
+            # um campo à parte na logística) — pedido explícito do Rui,
+            # 2026-09: mudar o fundo tem de se ver nas duas tabelas.
+            "cor_fundo": agendamento["cor_fundo"],
             "quem_carrega": lg["quem_carrega"],
         })
 
@@ -348,7 +351,10 @@ def definir_cor_fundo(basecamp_card_id: int, cor: str) -> dict:
     """Define ou limpa a cor de fundo manual de uma OF (mesma lista fixa,
     ver CORES_VALIDAS) — campo independente da cor da barra lateral
     (definir_cor). `cor` vazio ou None limpa a cor de fundo manual e volta
-    à cor automática por estado."""
+    à cor automática por estado. É um campo único por OF (guardado só no
+    agendamento de produção) — usado tanto no card de produção como no
+    de logística, para uma mudança aqui se ver nas duas tabelas (pedido
+    explícito do Rui, 2026-09)."""
     cor = (cor or "").strip().lower() or None
     if cor and cor not in CORES_VALIDAS:
         return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
@@ -408,17 +414,6 @@ def definir_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
         return {"erro": "esta OF ainda não tem duplicado de logística"}
     db.guardar_cor_logistica(basecamp_card_id, cor)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
-
-def definir_cor_fundo_logistica(basecamp_card_id: int, cor: str) -> dict:
-    """Define ou limpa a cor de fundo manual de um card de logística —
-    campo independente da cor da barra lateral (definir_cor_logistica)."""
-    cor = (cor or "").strip().lower() or None
-    if cor and cor not in CORES_VALIDAS:
-        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
-    if not db.logistica_carregamento(basecamp_card_id):
-        return {"erro": "esta OF ainda não tem duplicado de logística"}
-    db.guardar_cor_fundo_logistica(basecamp_card_id, cor)
-    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor_fundo": cor}
 
 def definir_quem_carrega(basecamp_card_id: int, quem_carrega: str) -> dict:
     """Define/limpa quem carrega uma OF — preenchido à mão pela equipa da
@@ -1421,6 +1416,7 @@ function openSheet(id){
         const d=await r.json();
         if(d.erro){ alert(d.erro); return; }
         c.corFundo=cor||null;
+        const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.corFundo=c.corFundo;
         $("#coresFundo").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor de fundo de "${c.titulo}" atualizada`);
@@ -1526,7 +1522,7 @@ function openSheetLogistica(id){
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
-    <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp.</div>
+    <div class="owner">Isto é o duplicado de logística desta OF — mover, apagar ou mudar a cor da barra lateral aqui não altera a produção nem o Basecamp. A cor de fundo é exceção: é da OF, uma só, por isso muda também no card de produção.</div>
     <div class="acts">
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagarLog">Apagar duplicado</button>
@@ -1570,16 +1566,17 @@ function openSheetLogistica(id){
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
-        const r=await fetch("/planeamento-ecos-largos/logistica/cor-fundo",{method:"POST",
+        const r=await fetch("/planeamento-ecos-largos/cor-fundo",{method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({basecamp_card_id:c.id,cor})});
         const dd=await r.json();
         if(dd.erro){ alert(dd.erro); return; }
         c.corFundo=cor||null;
+        const gemeo=cards.find(x=>x.id===c.id); if(gemeo) gemeo.corFundo=c.corFundo;
         $("#coresFundo").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
-        log("local",`cor de fundo do carregamento de "${c.titulo}" atualizada`);
-        renderLogistica();
+        log("local",`cor de fundo de "${c.titulo}" atualizada (é a mesma OF da produção)`);
+        render();
       }catch(e){ alert("Falhou a guardar: "+e); }
     };
   });
