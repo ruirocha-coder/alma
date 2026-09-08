@@ -403,7 +403,7 @@ TIPOS_MADEIRA = {"seca": "Seca", "verde": "Verde"}
 def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tipo_madeira: str = None,
                     notas: str = "", linha: str = None, dia_inicio: str = None) -> dict:
     """Cria uma encomenda nova: um card real na coluna Triagem do Basecamp
-    (ver basecamp.criar_card, título "Peça — Cliente" e notas com o
+    (ver basecamp.criar_card, título "Cliente — Peça" e notas com o
     cliente/volume/tipo de madeira) e, se já vier com linha/dia, o
     agendamento local logo a acompanhar (duração calculada a partir do
     volume e da capacidade da linha — ver agendar). A partir de criado,
@@ -432,7 +432,7 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
         erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3)
         if erro:
             return {"erro": erro}
-    titulo_basecamp = f"{titulo} — {cliente}" if cliente else titulo
+    titulo_basecamp = f"{cliente} — {titulo}" if cliente else titulo
     partes_notas = []
     if cliente:
         partes_notas.append(f"Cliente: {cliente}")
