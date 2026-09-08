@@ -497,7 +497,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --ink:#1A1C1E; --dim:#75797D;
     --line:#E8E8E3; --edge:#D9D9D2;
     --blue:#1B6AC9; --gold:#E0A02C; --red:#C4452E; --grey:#9AA0A6; --hoje:#FFF6D6;
-    --day:92px; --lane:78px; --label:180px;
+    --day:92px; --lane:78px; --laneLog:78px; --label:180px;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--canvas);color:var(--ink);
@@ -579,6 +579,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .lanes{position:relative}
   .row{display:flex;height:var(--lane);border-bottom:1px solid var(--line)}
+  #labelsLog .lbl,#lanesLog .row{height:var(--laneLog)}
   .row:last-child{border-bottom:none}
   .cell{flex:0 0 var(--day);border-right:1px solid var(--line);position:relative;background:var(--paper)}
   .cell.wk{border-right:1px solid var(--edge)}
@@ -1073,35 +1074,46 @@ function renderFila(){
     : '<div class="empty">Fila vazia.</div>';
   aplicarSelecao();
 }
-/* logística: uma única "linha" (sem divisão por linhas de produção),
-   cards empilhados pela mesma lógica de encaixe (capacidade 0 = sempre
-   altura inteira, um por cima do outro). */
+/* logística: uma única "linha" (sem divisão por linhas de produção); os
+   cards de um mesmo dia empilham-se numa lista vertical (como no
+   calendário do Google), todos com a mesma altura compacta — a altura da
+   linha cresce sozinha até caber o dia mais cheio da vista atual, para
+   nunca esconder um card por falta de espaço (pedido explícito do Rui,
+   2026-09). */
+const ITEM_LOG_H=44, ITEM_LOG_GAP=4, ITEM_LOG_PAD=6;
 function renderLogistica(){
   const D=daysLog();
   const inicio=view.start+desvioLog;
   const hoje=(d)=>MASTER.indexOf(d)===HOJE;
+  const porDia={};
+  cardsLog.forEach(c=>{
+    const a=c.gs-inicio;
+    if(a<0||a>=view.len) return;
+    (porDia[a]=porDia[a]||[]).push(c);
+  });
+  Object.values(porDia).forEach(lista=>lista.sort((x,y)=>x.id-y.id));
+  const maxN=Math.max(1, ...Object.values(porDia).map(l=>l.length));
+  const laneLog=Math.max(LANE, maxN*ITEM_LOG_H+(maxN-1)*ITEM_LOG_GAP+ITEM_LOG_PAD*2);
+  document.documentElement.style.setProperty("--laneLog", laneLog+"px");
   let h='<div class="row">'+D.map(d=>
     `<div class="cell${FDS(d)?" wk":""}${hoje(d)?" hoje":""}"></div>`).join("")+'</div>';
   h+='<div class="blocks" id="blocksLog"></div>';
   const lanes=$("#lanesLog"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocksLog");
-  encaixarCardsLinha(cardsLog, 0);
-  const PAD=4;
-  cardsLog.forEach(c=>{
-    const a=c.gs-inicio;
-    if(a<0||a>=view.len) return;
-    const usavel=LANE-PAD;
-    const el=document.createElement("div");
-    el.className="blk";
-    el.tabIndex=0; el.dataset.id=c.id;
-    el.style.borderLeftColor=corLogistica(c);
-    el.style.left=(a*DAY+3)+"px";
-    el.style.top=(PAD+c._topoFracao*usavel)+"px";
-    el.style.width=(DAY-8)+"px";
-    el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
-    el.innerHTML=`<div class="editBtn" data-editlog="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-      <div class="of">${c.quemCarrega?("carrega: "+c.quemCarrega):(c.coluna||"")}</div>`;
-    bl.appendChild(el);
+  Object.entries(porDia).forEach(([a,lista])=>{
+    lista.forEach((c,i)=>{
+      const el=document.createElement("div");
+      el.className="blk";
+      el.tabIndex=0; el.dataset.id=c.id;
+      el.style.borderLeftColor=corLogistica(c);
+      el.style.left=(a*DAY+3)+"px";
+      el.style.top=(ITEM_LOG_PAD+i*(ITEM_LOG_H+ITEM_LOG_GAP))+"px";
+      el.style.width=(DAY-8)+"px";
+      el.style.height=ITEM_LOG_H+"px";
+      el.innerHTML=`<div class="editBtn" data-editlog="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
+        <div class="of">${c.quemCarrega?("carrega: "+c.quemCarrega):(c.coluna||"")}</div>`;
+      bl.appendChild(el);
+    });
   });
   aplicarSelecao();
 }
