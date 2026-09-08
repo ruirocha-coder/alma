@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
     volume_m3 NUMERIC,
     ordem INTEGER NOT NULL DEFAULT 0,
     cor TEXT,
+    cor_fundo TEXT,
     tipo_madeira TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
@@ -235,6 +236,7 @@ CREATE TABLE IF NOT EXISTS logistica_carregamento_ecos_largos (
     basecamp_card_id BIGINT NOT NULL UNIQUE,
     dia_carregamento DATE NOT NULL,
     cor TEXT,
+    cor_fundo TEXT,
     quem_carrega TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
@@ -360,6 +362,8 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS ordem INTE
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor TEXT;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS tipo_madeira TEXT;
 ALTER TABLE logistica_carregamento_ecos_largos ADD COLUMN IF NOT EXISTS quem_carrega TEXT;
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor_fundo TEXT;
+ALTER TABLE logistica_carregamento_ecos_largos ADD COLUMN IF NOT EXISTS cor_fundo TEXT;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -813,7 +817,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, tipo_madeira
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -824,6 +828,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
                 "ordem": l["ordem"],
                 "cor": l["cor"],
+                "cor_fundo": l["cor_fundo"],
                 "tipo_madeira": l["tipo_madeira"],
             } for l in cur.fetchall()]
 
@@ -834,7 +839,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, tipo_madeira
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira
                    FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s""",
                 (basecamp_card_id,)
             )
@@ -849,6 +854,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
                 "ordem": l["ordem"],
                 "cor": l["cor"],
+                "cor_fundo": l["cor_fundo"],
                 "tipo_madeira": l["tipo_madeira"],
             }
 
@@ -925,6 +931,24 @@ def guardar_cor_producao(basecamp_card_id: int, cor: str) -> dict:
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
+def guardar_cor_fundo_producao(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa (cor=None) a cor de fundo manual de uma OF —
+    sobrepõe-se à cor automática de fundo por estado enquanto estiver
+    definida. Campo independente da cor da barra lateral (guardar_cor_producao)
+    — pedido explícito do Rui (2026-09): poder mudar o fundo de qualquer
+    card, além da barra lateral."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO planeamento_producao_ecos_largos (basecamp_card_id, cor_fundo)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       cor_fundo = EXCLUDED.cor_fundo, atualizado_em = now()""",
+                (basecamp_card_id, cor)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
 def guardar_tipo_madeira_producao(basecamp_card_id: int, tipo_madeira: str) -> dict:
     """Define/atualiza o tipo de madeira (seca/verde) de uma OF — usado
     para calcular o dia de carregamento do duplicado de logística (ver
@@ -950,12 +974,13 @@ def logistica_carregamentos_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos"
+                "SELECT basecamp_card_id, dia_carregamento, cor, cor_fundo, quem_carrega FROM logistica_carregamento_ecos_largos"
             )
             return [{
                 "basecamp_card_id": l["basecamp_card_id"],
                 "dia_carregamento": l["dia_carregamento"].isoformat(),
                 "cor": l["cor"],
+                "cor_fundo": l["cor_fundo"],
                 "quem_carrega": l["quem_carrega"],
             } for l in cur.fetchall()]
 
@@ -966,7 +991,7 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos "
+                "SELECT basecamp_card_id, dia_carregamento, cor, cor_fundo, quem_carrega FROM logistica_carregamento_ecos_largos "
                 "WHERE basecamp_card_id = %s",
                 (basecamp_card_id,)
             )
@@ -975,7 +1000,7 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
                 return None
             return {"basecamp_card_id": l["basecamp_card_id"],
                     "dia_carregamento": l["dia_carregamento"].isoformat(), "cor": l["cor"],
-                    "quem_carrega": l["quem_carrega"]}
+                    "cor_fundo": l["cor_fundo"], "quem_carrega": l["quem_carrega"]}
 
 def criar_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Cria o duplicado de logística de uma OF — só uma vez (ON CONFLICT DO
@@ -1010,6 +1035,19 @@ def guardar_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE logistica_carregamento_ecos_largos SET cor = %s, atualizado_em = now() "
+                "WHERE basecamp_card_id = %s",
+                (cor, basecamp_card_id)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_cor_fundo_logistica(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor de fundo manual de um card de logística —
+    campo independente da cor da barra lateral (guardar_cor_logistica)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE logistica_carregamento_ecos_largos SET cor_fundo = %s, atualizado_em = now() "
                 "WHERE basecamp_card_id = %s",
                 (cor, basecamp_card_id)
             )

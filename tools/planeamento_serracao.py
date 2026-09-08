@@ -113,6 +113,7 @@ def estado_planeamento_serracao() -> dict:
             "url": c["url"],
             "volume_m3": agendamento["volume_m3"] if agendamento else None,
             "cor": agendamento["cor"] if agendamento else None,
+            "cor_fundo": agendamento["cor_fundo"] if agendamento else None,
             "tipo_madeira": agendamento["tipo_madeira"] if agendamento else None,
         }
         if tem_agendamento:
@@ -149,6 +150,7 @@ def estado_planeamento_serracao() -> dict:
             "url": c["url"],
             "dia_carregamento": lg["dia_carregamento"],
             "cor": lg["cor"],
+            "cor_fundo": lg["cor_fundo"],
             "quem_carrega": lg["quem_carrega"],
         })
 
@@ -342,6 +344,17 @@ def definir_cor(basecamp_card_id: int, cor: str) -> dict:
     db.guardar_cor_producao(basecamp_card_id, cor)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
 
+def definir_cor_fundo(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor de fundo manual de uma OF (mesma lista fixa,
+    ver CORES_VALIDAS) — campo independente da cor da barra lateral
+    (definir_cor). `cor` vazio ou None limpa a cor de fundo manual e volta
+    à cor automática por estado."""
+    cor = (cor or "").strip().lower() or None
+    if cor and cor not in CORES_VALIDAS:
+        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
+    db.guardar_cor_fundo_producao(basecamp_card_id, cor)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor_fundo": cor}
+
 def reordenar(basecamp_card_id: int, direcao: str) -> dict:
     """Troca a posição de empilhamento de uma OF com a sua vizinha
     imediata, entre as OFs agendadas no mesmo dia/linha — pedido explícito
@@ -395,6 +408,17 @@ def definir_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
         return {"erro": "esta OF ainda não tem duplicado de logística"}
     db.guardar_cor_logistica(basecamp_card_id, cor)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
+
+def definir_cor_fundo_logistica(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor de fundo manual de um card de logística —
+    campo independente da cor da barra lateral (definir_cor_logistica)."""
+    cor = (cor or "").strip().lower() or None
+    if cor and cor not in CORES_VALIDAS:
+        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
+    if not db.logistica_carregamento(basecamp_card_id):
+        return {"erro": "esta OF ainda não tem duplicado de logística"}
+    db.guardar_cor_fundo_logistica(basecamp_card_id, cor)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor_fundo": cor}
 
 def definir_quem_carrega(basecamp_card_id: int, quem_carrega: str) -> dict:
     """Define/limpa quem carrega uma OF — preenchido à mão pela equipa da
@@ -809,18 +833,18 @@ function aplicarSelecao(){
   });
 }
 
-/* lista fixa de cores — pedido explícito do Rui (2026-09):
-   - Produção/fila: a barra lateral é manual (tipo de produto, ex:
-     quadradilho) — ver corProduto; o FUNDO do card é automático, de
-     acordo com a coluna do Basecamp — ver corEstadoFundo (uma cor por
-     estado, editável pela equipa — ver CORES_ESTADO/painel "Cores por
-     estado").
-   - Logística: continua uma única cor por card (como antes) — manual
-     (a equipa marca a verde assim que carrega) sobrepõe-se à automática
-     (mesmas cores de estado) — ver corLogistica.
-   - Atrasada (prazo do Basecamp ultrapassado): já não usa cor nenhuma
-     das duas — passa a um contorno vermelho próprio (ver .atrasado no
-     CSS), para nunca competir com a cor de produto nem a de estado. */
+/* lista fixa de cores — pedido explícito do Rui (2026-09), em todos os
+   cards (produção, fila e logística):
+   - Barra lateral: sempre manual (tipo de produto, ex: quadradilho) —
+     ver corProduto (mesma função para produção, fila e logística).
+   - Fundo: manual, se a pessoa escolher uma cor de fundo no card (ver
+     fundoManual) — senão automático, de acordo com a coluna do Basecamp
+     (ver corEstadoFundo, uma cor por estado, editável no painel "Cores
+     por estado"). Ver fundoCard, que junta as duas com esta prioridade,
+     usado por produção, fila e logística por igual.
+   - Atrasada (prazo do Basecamp ultrapassado): não usa cor nenhuma das
+     duas — passa a um contorno vermelho próprio (ver .atrasado no CSS),
+     para nunca competir com a cor de produto nem a de estado. */
 // grelha de 4 tons x 6 matizes (pedido explícito do Rui, 2026-09: "as
 // mesmas cores que o Google Calendar/Gmail têm") — ordem de inserção
 // propositada (uma linha por tom, da mais escura à mais clara) para a
@@ -869,11 +893,11 @@ function corEstadoFundo(c){
 function corProduto(c){
   return (c.cor && CORES[c.cor]) ? CORES[c.cor].hex : CORES.cinza.hex;
 }
-function corLogistica(c){
-  if(c.cor && CORES[c.cor]) return CORES[c.cor].hex;
-  const chave=ESTADOS_COR[c.coluna];
-  const cor=chave&&CORES_ESTADO[chave];
-  return (cor&&CORES[cor]) ? CORES[cor].hex : CORES.cinza.hex;
+function fundoManual(c){
+  return (c.corFundo && CORES[c.corFundo]) ? tintRgba(CORES[c.corFundo].hex,.22) : null;
+}
+function fundoCard(c){
+  return fundoManual(c) || corEstadoFundo(c);
 }
 
 /* ---------- carregar dados reais do Basecamp + agendamento local ---------- */
@@ -885,13 +909,13 @@ async function carregar(){
     LINHAS=d.linhas; CAPACIDADES=d.capacidades||{}; CORES_ESTADO=d.cores_estado||{};
     cards=[
       ...d.bolsa.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
         gs:idxOf(c.dia_inicio),dur:c.duracao_dias,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-      url:c.url,cor:c.cor,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
+      url:c.url,cor:c.cor,corFundo:c.cor_fundo,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render(); renderCoresEstado();
     log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas, ${cardsLog.length} na logística`);
@@ -909,7 +933,7 @@ async function atualizarLogistica(){
     const r=await fetch("/planeamento-ecos-largos/dados");
     const d=await r.json();
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-      url:c.url,cor:c.cor,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
+      url:c.url,cor:c.cor,corFundo:c.cor_fundo,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     renderLogistica();
   }catch(e){ /* falha silenciosa — não é uma ação que a pessoa pediu diretamente */ }
 }
@@ -1088,7 +1112,7 @@ function renderLanes(){
     el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"")+(atrasado(c)?" atrasado":"");
     el.tabIndex=0; el.dataset.id=c.id;
     el.style.borderLeftColor=corProduto(c);
-    const fundo=corEstadoFundo(c); if(fundo) el.style.background=fundo;
+    const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
     el.style.left=(l*DAY+3)+"px";
     el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
@@ -1102,7 +1126,7 @@ function renderLanes(){
 function renderFila(){
   const q=cards.filter(c=>c.linha===null);
   $("#fila").innerHTML = q.length ? q.map(c=>{
-    const fundo=corEstadoFundo(c);
+    const fundo=fundoCard(c);
     return `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}"
        style="border-left-color:${corProduto(c)}${fundo?(";background:"+fundo):""}">
      <div class="editBtn" data-edit="${c.id}" title="Editar">✎</div>
@@ -1143,7 +1167,8 @@ function renderLogistica(){
       const el=document.createElement("div");
       el.className="blk";
       el.tabIndex=0; el.dataset.id=c.id;
-      el.style.borderLeftColor=corLogistica(c);
+      el.style.borderLeftColor=corProduto(c);
+      const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
       el.style.left=(a*DAY+3)+"px";
       el.style.top=(ITEM_LOG_PAD+i*(ITEM_LOG_H+ITEM_LOG_GAP))+"px";
       el.style.width=(DAY-8)+"px";
@@ -1350,10 +1375,14 @@ function openSheet(id){
     </select></div>
     <div class="acts"><button class="btn" id="guardarMad">Guardar madeira</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral (tipo de produto)</label>
-    <div class="cores">${Object.entries(CORES).map(([chave,v])=>
+    <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
-    <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. O fundo do card é automático (amarelo em Produzido, laranja em Em Produção, roxo em Vendido); a barra lateral é a cor do tipo de produto, escolhida acima. Mudar isto aqui não altera nada no Basecamp.</div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
+    <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
+      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+    <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. A barra lateral é a cor do tipo de produto; o fundo é automático por estado (amarelo em Produzido, laranja em Em Produção, roxo em Vendido) a não ser que escolhas uma cor de fundo aqui — nesse caso essa cor sobrepõe-se à automática. Mudar isto aqui não altera nada no Basecamp.</div>
     <div class="acts">
       ${agendado?'<button class="btn" id="cima">Mover para cima</button><button class="btn" id="baixo">Mover para baixo</button>':""}
     </div>
@@ -1365,7 +1394,7 @@ function openSheet(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $("#sheet .cores").querySelectorAll(".swatch").forEach(sw=>{
+  $("#coresBarra").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
@@ -1375,9 +1404,26 @@ function openSheet(id){
         const d=await r.json();
         if(d.erro){ alert(d.erro); return; }
         c.cor=cor||null;
-        $("#sheet .cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        $("#coresBarra").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor de "${c.titulo}" atualizada`);
+        render();
+      }catch(e){ alert("Falhou a guardar: "+e); }
+    };
+  });
+  $("#coresFundo").querySelectorAll(".swatch").forEach(sw=>{
+    sw.onclick=async()=>{
+      const cor=sw.dataset.cor;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/cor-fundo",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,cor})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); return; }
+        c.corFundo=cor||null;
+        $("#coresFundo").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        sw.classList.add("sel");
+        log("local",`cor de fundo de "${c.titulo}" atualizada`);
         render();
       }catch(e){ alert("Falhou a guardar: "+e); }
     };
@@ -1472,9 +1518,13 @@ function openSheetLogistica(id){
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Quem carrega</label>
     <div class="frow"><input id="logQuem" placeholder="Ex: João" value="${c.quemCarrega?String(c.quemCarrega).replace(/"/g,"&quot;"):""}"><button class="btn" id="guardarQuem">Guardar</button></div>
-    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
-    <div class="cores">${Object.entries(CORES).map(([chave,v])=>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral</label>
+    <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
+    <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
+      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp.</div>
     <div class="acts">
@@ -1499,7 +1549,7 @@ function openSheetLogistica(id){
     }catch(e){ alert("Falhou a guardar: "+e); }
     finally{ $("#guardarQuem").textContent="Guardar"; $("#guardarQuem").disabled=false; }
   };
-  $("#sheet .cores").querySelectorAll(".swatch").forEach(sw=>{
+  $("#coresBarra").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
@@ -1509,9 +1559,26 @@ function openSheetLogistica(id){
         const dd=await r.json();
         if(dd.erro){ alert(dd.erro); return; }
         c.cor=cor||null;
-        $("#sheet .cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        $("#coresBarra").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor do carregamento de "${c.titulo}" atualizada`);
+        renderLogistica();
+      }catch(e){ alert("Falhou a guardar: "+e); }
+    };
+  });
+  $("#coresFundo").querySelectorAll(".swatch").forEach(sw=>{
+    sw.onclick=async()=>{
+      const cor=sw.dataset.cor;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/logistica/cor-fundo",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,cor})});
+        const dd=await r.json();
+        if(dd.erro){ alert(dd.erro); return; }
+        c.corFundo=cor||null;
+        $("#coresFundo").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        sw.classList.add("sel");
+        log("local",`cor de fundo do carregamento de "${c.titulo}" atualizada`);
         renderLogistica();
       }catch(e){ alert("Falhou a guardar: "+e); }
     };
