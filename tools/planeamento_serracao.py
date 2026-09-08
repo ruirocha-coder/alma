@@ -120,6 +120,14 @@ def estado_planeamento_serracao() -> dict:
         c = cards_por_id.get(lg["basecamp_card_id"])
         if not c:
             continue  # OF já saiu do fluxo ativo no Basecamp — deixa de aparecer
+        agendamento = agendamentos.get(lg["basecamp_card_id"])
+        if not (agendamento and agendamento["linha"] and agendamento["dia_inicio"]):
+            # só aparece na logística enquanto a OF continuar agendada na
+            # grelha de produção (a tabela "de cima") — se for devolvida à
+            # fila, o duplicado fica guardado mas escondido; volta a
+            # aparecer sozinho se for agendada outra vez (pedido explícito
+            # do Rui, 2026-09).
+            continue
         logistica.append({
             "basecamp_card_id": lg["basecamp_card_id"],
             "titulo": c["titulo"],
