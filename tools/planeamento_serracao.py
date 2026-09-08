@@ -592,6 +592,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--paper);
     border-radius:16px 16px 0 0;padding:20px 20px 28px;max-width:560px;margin:0 auto;
     box-shadow:0 -8px 30px rgba(0,0,0,.20);
+    max-height:calc(100vh - 32px);overflow-y:auto;overscroll-behavior:contain;
     transform:translateY(101%);transition:transform .18s ease}
   .sheet.on{transform:none}
   @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
