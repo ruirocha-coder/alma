@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS logistica_carregamento_ecos_largos (
     basecamp_card_id BIGINT NOT NULL UNIQUE,
     dia_carregamento DATE NOT NULL,
     cor TEXT,
+    quem_carrega TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
@@ -358,6 +359,7 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS volume_m3 
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor TEXT;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS tipo_madeira TEXT;
+ALTER TABLE logistica_carregamento_ecos_largos ADD COLUMN IF NOT EXISTS quem_carrega TEXT;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -948,12 +950,13 @@ def logistica_carregamentos_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor FROM logistica_carregamento_ecos_largos"
+                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos"
             )
             return [{
                 "basecamp_card_id": l["basecamp_card_id"],
                 "dia_carregamento": l["dia_carregamento"].isoformat(),
                 "cor": l["cor"],
+                "quem_carrega": l["quem_carrega"],
             } for l in cur.fetchall()]
 
 def logistica_carregamento(basecamp_card_id: int) -> dict:
@@ -963,7 +966,7 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT basecamp_card_id, dia_carregamento, cor FROM logistica_carregamento_ecos_largos "
+                "SELECT basecamp_card_id, dia_carregamento, cor, quem_carrega FROM logistica_carregamento_ecos_largos "
                 "WHERE basecamp_card_id = %s",
                 (basecamp_card_id,)
             )
@@ -971,7 +974,8 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
             if not l:
                 return None
             return {"basecamp_card_id": l["basecamp_card_id"],
-                    "dia_carregamento": l["dia_carregamento"].isoformat(), "cor": l["cor"]}
+                    "dia_carregamento": l["dia_carregamento"].isoformat(), "cor": l["cor"],
+                    "quem_carrega": l["quem_carrega"]}
 
 def criar_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Cria o duplicado de logística de uma OF — só uma vez (ON CONFLICT DO
@@ -1008,6 +1012,19 @@ def guardar_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
                 "UPDATE logistica_carregamento_ecos_largos SET cor = %s, atualizado_em = now() "
                 "WHERE basecamp_card_id = %s",
                 (cor, basecamp_card_id)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_quem_carrega_logistica(basecamp_card_id: int, quem_carrega: str) -> dict:
+    """Define/limpa quem carrega uma OF — preenchido à mão pela equipa da
+    logística, para ficar registado quem fez o carregamento."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE logistica_carregamento_ecos_largos SET quem_carrega = %s, atualizado_em = now() "
+                "WHERE basecamp_card_id = %s",
+                (quem_carrega, basecamp_card_id)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

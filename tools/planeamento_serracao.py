@@ -135,6 +135,7 @@ def estado_planeamento_serracao() -> dict:
             "url": c["url"],
             "dia_carregamento": lg["dia_carregamento"],
             "cor": lg["cor"],
+            "quem_carrega": lg["quem_carrega"],
         })
 
     return {
@@ -380,6 +381,16 @@ def definir_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
         return {"erro": "esta OF ainda não tem duplicado de logística"}
     db.guardar_cor_logistica(basecamp_card_id, cor)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
+
+def definir_quem_carrega(basecamp_card_id: int, quem_carrega: str) -> dict:
+    """Define/limpa quem carrega uma OF — preenchido à mão pela equipa da
+    logística (pedido explícito do Rui, 2026-09), para depois se saber
+    quem fez o carregamento."""
+    if not db.logistica_carregamento(basecamp_card_id):
+        return {"erro": "esta OF ainda não tem duplicado de logística"}
+    quem_carrega = (quem_carrega or "").strip() or None
+    db.guardar_quem_carrega_logistica(basecamp_card_id, quem_carrega)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "quem_carrega": quem_carrega}
 
 def apagar_logistica(basecamp_card_id: int) -> dict:
     """Remove só o duplicado de logística de uma OF — não toca no
@@ -841,7 +852,7 @@ async function carregar(){
         gs:idxOf(c.dia_inicio),dur:c.duracao_dias,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-      url:c.url,cor:c.cor,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
+      url:c.url,cor:c.cor,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render(); renderCoresEstado();
     log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas, ${cardsLog.length} na logística`);
@@ -859,7 +870,7 @@ async function atualizarLogistica(){
     const r=await fetch("/planeamento-ecos-largos/dados");
     const d=await r.json();
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-      url:c.url,cor:c.cor,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
+      url:c.url,cor:c.cor,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     renderLogistica();
   }catch(e){ /* falha silenciosa — não é uma ação que a pessoa pediu diretamente */ }
 }
@@ -1089,7 +1100,7 @@ function renderLogistica(){
     el.style.width=(DAY-8)+"px";
     el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
     el.innerHTML=`<div class="editBtn" data-editlog="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-      <div class="of">${c.coluna||""}</div>`;
+      <div class="of">${c.quemCarrega?("carrega: "+c.quemCarrega):(c.coluna||"")}</div>`;
     bl.appendChild(el);
   });
   aplicarSelecao();
@@ -1304,7 +1315,7 @@ function openSheet(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $(".cores").querySelectorAll(".swatch").forEach(sw=>{
+  $("#sheet .cores").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
@@ -1314,7 +1325,7 @@ function openSheet(id){
         const d=await r.json();
         if(d.erro){ alert(d.erro); return; }
         c.cor=cor||null;
-        $(".cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        $("#sheet .cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor de "${c.titulo}" atualizada`);
         render();
@@ -1409,6 +1420,8 @@ function openSheetLogistica(id){
     <h3>${c.titulo}</h3>
     <div class="kv"><span>Dia de carregamento</span><b>${DOW[d.dow]} ${d.dd} ${MESC[d.mo]}</b></div>
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Quem carrega</label>
+    <div class="frow"><input id="logQuem" placeholder="Ex: João" value="${c.quemCarrega?String(c.quemCarrega).replace(/"/g,"&quot;"):""}"><button class="btn" id="guardarQuem">Guardar</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
     <div class="cores">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
@@ -1421,7 +1434,22 @@ function openSheetLogistica(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $(".cores").querySelectorAll(".swatch").forEach(sw=>{
+  $("#guardarQuem").onclick=async()=>{
+    const quem_carrega=$("#logQuem").value.trim();
+    $("#guardarQuem").textContent="A guardar…"; $("#guardarQuem").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/logistica/quem-carrega",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,quem_carrega})});
+      const dd=await r.json();
+      if(dd.erro){ alert(dd.erro); return; }
+      c.quemCarrega=dd.quem_carrega||null;
+      log("local",`quem carrega "${c.titulo}" atualizado`);
+      renderLogistica();
+    }catch(e){ alert("Falhou a guardar: "+e); }
+    finally{ $("#guardarQuem").textContent="Guardar"; $("#guardarQuem").disabled=false; }
+  };
+  $("#sheet .cores").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
       try{
@@ -1431,7 +1459,7 @@ function openSheetLogistica(id){
         const dd=await r.json();
         if(dd.erro){ alert(dd.erro); return; }
         c.cor=cor||null;
-        $(".cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        $("#sheet .cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
         sw.classList.add("sel");
         log("local",`cor do carregamento de "${c.titulo}" atualizada`);
         renderLogistica();
