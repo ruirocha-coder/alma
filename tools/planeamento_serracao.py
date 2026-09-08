@@ -645,7 +645,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <div class="wrap">
   <header>
     <h1>Planeamento da serração</h1>
-    <div class="sub">Ecos Largos · dias úteis, domingos fechados</div>
+    <div class="sub">Ecos Largos · fins de semana assinalados</div>
   </header>
 
   <div class="nav">
@@ -712,7 +712,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <div class="sheet" id="sheet"></div>
 
 <script>
-/* ---------- calendário: dias úteis, domingos excluídos ---------- */
+/* ---------- calendário: todos os dias, fins de semana assinalados ---------- */
 const DOW=["dom","seg","ter","qua","qui","sex","sáb"];
 const MES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 const MESC=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
@@ -721,11 +721,11 @@ const MASTER=[];
   const inicio=new Date(); inicio.setDate(inicio.getDate()-21);
   const fim=new Date(); fim.setDate(fim.getDate()+150);
   for(let d=new Date(inicio); d<=fim; d.setDate(d.getDate()+1)){
-    if(d.getDay()===0) continue;
     MASTER.push({y:d.getFullYear(),mo:d.getMonth(),dd:d.getDate(),dow:d.getDay(),
       iso:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`});
   }
 }
+const FDS=d=>d.dow===6||d.dow===0;
 const hojeISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`})();
 const HOJE=MASTER.findIndex(d=>d.iso===hojeISO);
 const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
@@ -735,7 +735,7 @@ let CAPACIDADES={};
 let cards=[];
 let cardsLog=[];
 let selecionadoId=null;
-let view={mode:"semana",start:Math.max(HOJE,0),len:6};
+let view={mode:"semana",start:Math.max(HOJE,0),len:7};
 let undoStack=[], logs=[], DAY=92, LANE=78;
 
 const $=s=>document.querySelector(s);
@@ -903,8 +903,8 @@ function setMode(m){
   view.mode=m;
   const anchor=view.start;
   if(m==="semana"||m==="duas"){
-    view.len = m==="semana"?6:12;
-    view.start = clamp(Math.floor(anchor/6)*6, 0, Math.max(MASTER.length-view.len,0));
+    view.len = m==="semana"?7:14;
+    view.start = clamp(Math.floor(anchor/7)*7, 0, Math.max(MASTER.length-view.len,0));
   }else{
     const d=MASTER[clamp(anchor,0,MASTER.length-1)];
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
@@ -942,8 +942,8 @@ function rangeLabel(){
 function metrics(){
   const avail=$("#scroll").clientWidth||600;
   if(view.mode==="mes"){ DAY=44; LANE=64; }
-  else if(view.mode==="duas"){ DAY=Math.max(84,Math.floor(avail/12)); LANE=78; }
-  else { DAY=Math.max(96,Math.floor(avail/6)); LANE=78; }
+  else if(view.mode==="duas"){ DAY=Math.max(72,Math.floor(avail/14)); LANE=78; }
+  else { DAY=Math.max(84,Math.floor(avail/7)); LANE=78; }
   document.documentElement.style.setProperty("--day",DAY+"px");
   document.documentElement.style.setProperty("--lane",LANE+"px");
   $("#board").classList.toggle("dense",DAY<70);
@@ -967,7 +967,7 @@ function renderLabels(){
   });
 }
 function diaHtml(d,hoje){
-  const wk=d.dow===6;
+  const wk=FDS(d);
   return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}">
     <div class="dn">${view.mode==="mes"?d.dd:DOW[d.dow]+" "+d.dd}</div>
     <div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div></div>`;
@@ -1006,7 +1006,7 @@ function renderLanes(){
   let h="";
   LINHAS.forEach(()=>{ h+='<div class="row">'+D.map(d=>{
     const hoje=MASTER.indexOf(d)===HOJE;
-    return `<div class="cell${d.dow===6?" wk":""}${hoje?" hoje":""}"></div>`;
+    return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
@@ -1056,7 +1056,7 @@ function renderLogistica(){
   const inicio=view.start+desvioLog;
   const hoje=(d)=>MASTER.indexOf(d)===HOJE;
   let h='<div class="row">'+D.map(d=>
-    `<div class="cell${d.dow===6?" wk":""}${hoje(d)?" hoje":""}"></div>`).join("")+'</div>';
+    `<div class="cell${FDS(d)?" wk":""}${hoje(d)?" hoje":""}"></div>`).join("")+'</div>';
   h+='<div class="blocks" id="blocksLog"></div>';
   const lanes=$("#lanesLog"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocksLog");
