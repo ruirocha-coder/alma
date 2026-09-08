@@ -166,19 +166,42 @@ def estado_planeamento_serracao() -> dict:
         "logistica": logistica,
     }
 
-def _duracao_por_volume(linha: str, volume_m3: float) -> int:
+LIMITE_DIAS_REPARTIR = 60  # nunca tentar expandir a duração indefinidamente à procura de espaço
+
+def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
+                        excluir_id: int = None) -> int:
     """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
     (m³) e da capacidade diária dessa linha (editável, ver
-    atualizar_capacidade_linha) — pedido explícito do Rui (2026-09): se o
-    volume passar a capacidade de um dia, expande automaticamente para
-    quantos dias forem necessários. Sem volume, ou sem capacidade
-    configurada para a linha, assume 1 dia (a equipa ajusta manualmente)."""
+    atualizar_capacidade_linha).
+
+    Aproveita sempre ao máximo a capacidade de cada dia (pedido explícito
+    do Rui, 2026-09): se `dia_inicio` já tiver outra(s) encomenda(s) a
+    ocupar parte da capacidade da linha nesse dia, esta encomenda não é
+    simplesmente recusada — a duração vai crescendo (1, 2, 3... dias) até
+    encontrar a mais curta cujo ritmo diário (volume ÷ duração) caiba,
+    todos os dias, no espaço ainda livre (ver _ocupacao_diaria); ou seja,
+    reparte-se sozinha por esse dia e pelos seguintes em vez de ocupar só
+    o primeiro. Sem `dia_inicio` (ainda na fila, sem dia definido) ou sem
+    capacidade configurada para a linha, usa só volume ÷ capacidade
+    plena, sem olhar a ocupação (não há ainda dia nenhum para verificar)."""
     if not volume_m3:
         return 1
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
     if capacidade <= 0:
         return 1
-    return max(1, math.ceil(volume_m3 / capacidade))
+    duracao_minima = max(1, math.ceil(volume_m3 / capacidade))
+    if not dia_inicio:
+        return duracao_minima
+    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
+    inicio = date.fromisoformat(dia_inicio)
+    for duracao in range(duracao_minima, LIMITE_DIAS_REPARTIR + 1):
+        ritmo = volume_m3 / duracao
+        if all(
+            ocupacao.get((inicio + timedelta(days=i)).isoformat(), 0) + ritmo <= capacidade + 1e-9
+            for i in range(duracao)
+        ):
+            return duracao
+    return duracao_minima  # não coube em espaço nenhum razoável — deixa _validar_capacidade recusar com a mensagem certa
 
 def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
     """Quanto de m³/dia já está ocupado, dia a dia, numa linha — soma o
@@ -285,7 +308,7 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
             return {"erro": "volume tem de ser maior que 0"}
     else:
         volume_m3 = existente["volume_m3"] if existente else None
-    duracao_dias = _duracao_por_volume(linha, volume_m3)
+    duracao_dias = _duracao_por_volume(linha, volume_m3, dia_inicio, excluir_id=basecamp_card_id)
     erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3, excluir_id=basecamp_card_id)
     if erro:
         return {"erro": erro}
@@ -461,7 +484,7 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
     if linha and dia_inicio:
         # valida a capacidade ANTES de criar o card no Basecamp — para uma
         # colocação recusada nunca deixar para trás um card órfão lá.
-        duracao_dias = _duracao_por_volume(linha, volume_m3)
+        duracao_dias = _duracao_por_volume(linha, volume_m3, dia_inicio)
         erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3)
         if erro:
             return {"erro": erro}
@@ -659,12 +682,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .veil{position:fixed;inset:0;background:rgba(26,28,30,.35);display:none}
   .veil.on{display:block}
-  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--paper);
-    border-radius:16px 16px 0 0;padding:20px 20px 28px;max-width:560px;margin:0 auto;
-    box-shadow:0 -8px 30px rgba(0,0,0,.20);
-    max-height:calc(100vh - 32px);overflow-y:auto;overscroll-behavior:contain;
-    transform:translateY(101%);transition:transform .18s ease}
-  .sheet.on{transform:none}
+  .sheet{position:fixed;top:50%;left:50%;background:var(--paper);
+    border-radius:16px;padding:20px 20px 28px;width:min(560px,calc(100vw - 32px));
+    box-sizing:border-box;box-shadow:0 12px 40px rgba(0,0,0,.25);
+    max-height:calc(100vh - 64px);overflow-y:auto;overscroll-behavior:contain;
+    transform:translate(-50%,-50%) scale(.96);opacity:0;pointer-events:none;
+    transition:transform .18s ease,opacity .18s ease}
+  .sheet.on{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}
   @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
   .sheet h3{margin:0 0 2px;font-size:20px;font-weight:700;letter-spacing:-.01em}
   .sheet .of{font-size:12.5px;color:var(--dim);margin-bottom:10px}
