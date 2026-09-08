@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import asyncio, json, os
+import asyncio, json, os, queue
 import threading
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Body
@@ -478,6 +478,53 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
+# tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
+# algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
+# precisar de refresh. Um único processo uvicorn (sem --workers, ver
+# railway.json) torna seguro este pub-sub em memória — não precisa de
+# Redis nem de nada externo: cada separador com a página aberta mantém
+# uma ligação SSE e a sua própria fila; qualquer endpoint que mude dados
+# publica um aviso para todas as filas.
+_assinantes_planeamento_ecos_largos: set = set()
+_lock_planeamento_ecos_largos = threading.Lock()
+
+def _notificar_planeamento_ecos_largos():
+    """Avisa todas as páginas do quadro abertas neste momento para
+    recarregarem os dados (ver /planeamento-ecos-largos/eventos) — chamar
+    depois de qualquer escrita bem-sucedida."""
+    with _lock_planeamento_ecos_largos:
+        assinantes = list(_assinantes_planeamento_ecos_largos)
+    for fila in assinantes:
+        try:
+            fila.put_nowait("mudou")
+        except queue.Full:
+            pass
+
+@app.get("/planeamento-ecos-largos/eventos")
+def planeamento_ecos_largos_eventos():
+    """Stream (Server-Sent Events) que avisa a página em tempo real sempre
+    que alguém muda algo no quadro — ver _notificar_planeamento_ecos_largos.
+    Não leva dados nenhuns, só "algo mudou" — quem recebe isto vai sempre
+    buscar o estado atual a /dados. Envia um comentário periódico (linha
+    a começar por ":") só para manter a ligação viva através de proxies
+    que cortem ligações inativas."""
+    fila = queue.Queue(maxsize=20)
+    with _lock_planeamento_ecos_largos:
+        _assinantes_planeamento_ecos_largos.add(fila)
+    def gerador():
+        try:
+            yield ": ligado\n\n"
+            while True:
+                try:
+                    fila.get(timeout=25)
+                    yield "data: mudou\n\n"
+                except queue.Empty:
+                    yield ": ping\n\n"
+        finally:
+            with _lock_planeamento_ecos_largos:
+                _assinantes_planeamento_ecos_largos.discard(fila)
+    return StreamingResponse(gerador(), media_type="text/event-stream")
+
 @app.post("/planeamento-ecos-largos/agendar")
 def planeamento_ecos_largos_agendar(corpo: dict = Body(...)):
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
@@ -488,6 +535,7 @@ def planeamento_ecos_largos_agendar(corpo: dict = Body(...)):
         corpo.get("dia_inicio"), corpo.get("volume_m3"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/capacidade")
@@ -498,6 +546,7 @@ def planeamento_ecos_largos_capacidade(corpo: dict = Body(...)):
         corpo.get("linha"), corpo.get("capacidade_m3_dia"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/cor-estado")
@@ -508,6 +557,7 @@ def planeamento_ecos_largos_cor_estado(corpo: dict = Body(...)):
     resultado = planeamento_serracao.atualizar_cor_estado(corpo.get("estado"), corpo.get("cor"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/volume")
@@ -522,6 +572,7 @@ def planeamento_ecos_largos_volume(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_volume(basecamp_card_id, corpo.get("volume_m3"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/cor")
@@ -534,6 +585,7 @@ def planeamento_ecos_largos_cor(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_cor(basecamp_card_id, corpo.get("cor"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/cor-fundo")
@@ -547,6 +599,7 @@ def planeamento_ecos_largos_cor_fundo(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_cor_fundo(basecamp_card_id, corpo.get("cor"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/reordenar")
@@ -559,6 +612,7 @@ def planeamento_ecos_largos_reordenar(corpo: dict = Body(...)):
     resultado = planeamento_serracao.reordenar(basecamp_card_id, corpo.get("direcao"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/madeira")
@@ -572,6 +626,7 @@ def planeamento_ecos_largos_madeira(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_tipo_madeira(basecamp_card_id, corpo.get("tipo_madeira"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/logistica/mover")
@@ -584,6 +639,7 @@ def planeamento_ecos_largos_logistica_mover(corpo: dict = Body(...)):
     resultado = planeamento_serracao.mover_logistica(basecamp_card_id, corpo.get("dia_carregamento"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/logistica/cor")
@@ -596,6 +652,7 @@ def planeamento_ecos_largos_logistica_cor(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_cor_logistica(basecamp_card_id, corpo.get("cor"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 
@@ -609,6 +666,7 @@ def planeamento_ecos_largos_logistica_quem_carrega(corpo: dict = Body(...)):
     resultado = planeamento_serracao.definir_quem_carrega(basecamp_card_id, corpo.get("quem_carrega"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/logistica/apagar")
@@ -618,7 +676,9 @@ def planeamento_ecos_largos_logistica_apagar(corpo: dict = Body(...)):
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    return JSONResponse(planeamento_serracao.apagar_logistica(basecamp_card_id))
+    resultado = planeamento_serracao.apagar_logistica(basecamp_card_id)
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/desagendar")
 def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
@@ -626,7 +686,9 @@ def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    return JSONResponse(planeamento_serracao.desagendar(basecamp_card_id))
+    resultado = planeamento_serracao.desagendar(basecamp_card_id)
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/apagar")
 def planeamento_ecos_largos_apagar(corpo: dict = Body(...)):
@@ -641,6 +703,7 @@ def planeamento_ecos_largos_apagar(corpo: dict = Body(...)):
         resultado = planeamento_serracao.apagar_encomenda(basecamp_card_id)
     except Exception as e:
         return JSONResponse({"erro": f"falhou a apagar no Basecamp: {e}"}, status_code=502)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.post("/planeamento-ecos-largos/nova-encomenda")
@@ -656,6 +719,7 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
         return JSONResponse({"erro": f"falhou a criar no Basecamp: {e}"}, status_code=502)
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
 @app.get("/health")

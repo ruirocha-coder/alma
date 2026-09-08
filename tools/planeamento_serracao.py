@@ -1664,6 +1664,20 @@ carregar();
    enquanto a ficha estiver aberta ou a arrastar algo, para não perder o
    que a pessoa está a fazer. */
 setInterval(()=>{ if(!drag && !dragLog && !qdrag && !$("#veil").classList.contains("on")) carregar(); }, 120000);
+/* tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
+   algo no quadro — nesta sessão ou noutra pessoa noutro separador — todas
+   as páginas abertas atualizam sozinhas, sem precisar de refresh nem de
+   esperar pelo polling acima. Ver main.py: /planeamento-ecos-largos/eventos
+   (Server-Sent Events) + _notificar_planeamento_ecos_largos, chamado por
+   todos os endpoints que escrevem. O browser religa sozinho o EventSource
+   se a ligação cair — não é preciso lógica de reconexão aqui; o polling
+   de 2 minutos acima fica só como rede de segurança. */
+if(typeof EventSource!=="undefined"){
+  const eventos=new EventSource("/planeamento-ecos-largos/eventos");
+  eventos.onmessage=()=>{
+    if(!drag && !dragLog && !qdrag && !$("#veil").classList.contains("on")) carregar();
+  };
+}
 </script>
 </body>
 </html>
