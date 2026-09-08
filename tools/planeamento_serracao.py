@@ -810,11 +810,11 @@ function aplicarSelecao(){
 const CORES={
   cinza:{hex:"#9AA0A6",label:"Automática"},
   vermelho:{hex:"#C4452E",label:"Vermelho"},
-  amarelo:{hex:"#E0A02C",label:"Amarelo"},
+  amarelo:{hex:"#EAB308",label:"Amarelo"},
   verde:{hex:"#4E9A51",label:"Verde"},
   azul:{hex:"#1B6AC9",label:"Azul"},
   roxo:{hex:"#8A6FA0",label:"Roxo"},
-  laranja:{hex:"#D97B29",label:"Laranja"},
+  laranja:{hex:"#EA580C",label:"Laranja"},
 };
 // estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
 const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido"};
