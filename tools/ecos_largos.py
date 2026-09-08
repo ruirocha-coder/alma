@@ -49,7 +49,14 @@ explicitamente pelo Rui, depois de o takt ter sido lido ao contrário):
   input_m3 de junho deviam somar 6009,36 m³ e a soma feita à mão veio
   4.521,79 m³) — é aritmética fácil de errar com muitas parcelas
   decimais, exatamente como as datas, e por isso passou a ser calculada
-  aqui e não pelo modelo."""
+  aqui e não pelo modelo.
+- Setores (ex: "Setor S03"): sempre que mencionares um setor, num alerta ou
+  em controlStates, diz também a linha de produção correspondente — cada
+  entrada de "alerts" e "controlStates" já traz um campo "linha" quando
+  conhecida (ver production_details.setores_linhas para a lista completa
+  do dia). Só sabe a linha de setores que produziram nesse dia; se um
+  alerta não tiver "linha" preenchida, não inventes — apresenta só o
+  código do setor, tal como vem."""
 
 def _horas_para_min_seg(horas) -> str:
     """Converte um valor em horas por m³ para minutos:segundos por m³ (ex:
@@ -144,6 +151,60 @@ def _com_charriots_resumido(conteudo):
     }
     return conteudo
 
+_PADRAO_SETOR_EM_TEXTO = re.compile(r"[Ss]etor:?\s*(S\d+)")
+
+def _com_setor_linha(conteudo):
+    """Junta a cada alerta e a cada entrada de controlStates a linha de
+    produção a que o setor corresponde (campo "linha") — pedido explícito
+    do Rui (2026-09): a mensagem diária mencionava "Setor S03" sem dizer a
+    que linha isso corresponde, obrigando quem lê a saber essa
+    correspondência de cor.
+
+    A correspondência setor->linha vem do próprio dashboard, em
+    production_details.outputByLine (campo "descricaoSetor" de cada
+    setor) — nunca inventada aqui. Só cobre setores que produziram no
+    dia; um setor sem produção fica sem "linha" (mais vale omitir do que
+    arriscar errar). Em "alerts" o setor vem embutido em texto livre
+    ("device"/"obs", ex: "Paragem no sector:S28") — extraído com uma
+    expressão regular simples antes de procurar a linha."""
+    if not isinstance(conteudo, dict):
+        return conteudo
+    detalhes = conteudo.get("production_details")
+    if not isinstance(detalhes, dict):
+        return conteudo
+    output_by_line = detalhes.get("outputByLine")
+    if not isinstance(output_by_line, dict):
+        return conteudo
+    setor_para_linha = {
+        setor: info.get("descricaoSetor")
+        for setor, info in output_by_line.items()
+        if isinstance(info, dict) and info.get("descricaoSetor")
+    }
+    if not setor_para_linha:
+        return conteudo
+    conteudo = dict(conteudo)
+    detalhes = dict(detalhes)
+    if isinstance(detalhes.get("controlStates"), list):
+        detalhes["controlStates"] = [
+            {**item, "linha": setor_para_linha.get(item.get("setor"))}
+            if isinstance(item, dict) else item
+            for item in detalhes["controlStates"]
+        ]
+    if isinstance(detalhes.get("alerts"), list):
+        novos_alertas = []
+        for item in detalhes["alerts"]:
+            if not isinstance(item, dict):
+                novos_alertas.append(item)
+                continue
+            texto = f"{item.get('device') or ''} {item.get('obs') or ''}"
+            encontrado = _PADRAO_SETOR_EM_TEXTO.search(texto)
+            linha = setor_para_linha.get(encontrado.group(1)) if encontrado else None
+            novos_alertas.append({**item, "linha": linha} if linha else item)
+        detalhes["alerts"] = novos_alertas
+    detalhes["setores_linhas"] = setor_para_linha
+    conteudo["production_details"] = detalhes
+    return conteudo
+
 def _resolver_data(data: str) -> str:
     """Aceita "hoje"/"ontem" além de YYYY-MM-DD — o modelo não sabe a data
     de hoje com fiabilidade, por isso essas palavras são resolvidas aqui
@@ -186,7 +247,7 @@ def ler_dashboard_producao(data: str = None) -> dict:
         # assim devolve o texto em bruto, para não perder informação
         return {"conteudo": r.text.strip()} if r.text.strip() else {
             "erro": "a API de dados de produção respondeu, mas sem conteúdo legível"}
-    return {"conteudo": _com_charriots_resumido(_com_takt_formatado(dados))}
+    return {"conteudo": _com_setor_linha(_com_charriots_resumido(_com_takt_formatado(dados)))}
 
 def _semana_de(referencia: date) -> tuple:
     """Segunda a sexta da semana que contém `referencia`."""
