@@ -726,25 +726,19 @@ const atrasado=c=>c.prazo && c.prazo<hojeISO;
    logo a ficha de edição (pedido explícito do Rui, 2026-09: um clique
    simples só alinha visualmente os dois; a edição passa a ter um botão
    próprio, "✎", em cada card). Quando a OF tem os dois lados (produção e
-   logística), a tabela que NÃO foi a origem do clique desloca-se na
-   horizontal até a coluna do seu dia ficar exatamente por baixo/cima da
-   coluna do card clicado — os dias mostrados continuam a ser os dias
-   certos de cada um (o cabeçalho não muda), só a posição de scroll é que
-   se ajusta para os alinhar visualmente. */
-function selecionar(id, origem){
+   logística), a tabela de logística passa a mostrar os dias desviados
+   (ver desvioLog) até a coluna do seu dia ficar exatamente alinhada com a
+   da produção — cada tabela continua a mostrar as datas certas no
+   cabeçalho (só desviadas, não erradas); não se usa scroll para isto
+   porque a largura real do conteúdo é insuficiente para desvios grandes
+   (o scroll fica sempre limitado pelo próprio tamanho da tabela). */
+function selecionar(id){
   selecionadoId = (selecionadoId===id) ? null : id;
-  aplicarSelecao();
-  if(selecionadoId===null){ resetScroll(); return; }
+  if(selecionadoId===null){ desvioLog=0; renderDays(); renderLogistica(); return; }
   const cP=card(id), cL=cardLog(id);
   const prodColocado = cP && cP.linha!==null && cP.gs!==null;
-  if(!prodColocado || !cL) return;
-  if(origem==="logistica"){
-    const alvo=$("#scrollLog").scrollLeft + (cP.gs-cL.gs)*DAY;
-    $("#scroll").scrollTo({left:Math.max(0,alvo),behavior:"smooth"});
-  }else{
-    const alvo=$("#scroll").scrollLeft + (cL.gs-cP.gs)*DAY;
-    $("#scrollLog").scrollTo({left:Math.max(0,alvo),behavior:"smooth"});
-  }
+  desvioLog = (prodColocado && cL) ? (cL.gs-cP.gs) : 0;
+  renderDays(); renderLogistica(); aplicarSelecao();
 }
 function aplicarSelecao(){
   document.querySelectorAll(".blk,.qcard").forEach(el=>{
@@ -859,7 +853,7 @@ function setMode(m){
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
     view.len=MASTER.filter(x=>x.mo===d.mo && x.y===d.y).length;
   }
-  render(); resetScroll();
+  limparAlinhamento(); render();
 }
 function step(dir){
   if(view.mode==="mes"){
@@ -873,13 +867,12 @@ function step(dir){
   }else{
     view.start=clamp(view.start+dir*view.len,0,Math.max(MASTER.length-view.len,0));
   }
-  render(); resetScroll();
+  limparAlinhamento(); render();
 }
-/* as duas tabelas mostram sempre as mesmas datas — ao mudar de período
-   (semana/mês, ‹ ›, Hoje) repõe as duas alinhadas em scroll 0; só o
-   destaque de um par (ver selecionar) desalinha uma delas de propósito,
-   para comparar duas datas diferentes lado a lado. */
-function resetScroll(){ $("#scroll").scrollLeft=0; $("#scrollLog").scrollLeft=0; }
+/* as duas tabelas mostram sempre as mesmas datas por omissão — ao mudar
+   de período (semana/mês, ‹ ›, Hoje) limpa a seleção e o desvio da
+   logística (ver selecionar/desvioLog), para nunca navegar já desalinhado. */
+function limparAlinhamento(){ selecionadoId=null; desvioLog=0; }
 function rangeLabel(){
   const a=MASTER[view.start], b=MASTER[Math.min(view.start+view.len-1,MASTER.length-1)];
   if(!a||!b) return "";
@@ -900,6 +893,14 @@ function metrics(){
   $("#boardLog").classList.toggle("dense",DAY<70);
 }
 function days(){ return MASTER.slice(view.start,view.start+view.len); }
+/* desvio (em dias) só da tabela de logística, aplicado enquanto um par de
+   cards está destacado (ver selecionar) — em vez de scroll (limitado pela
+   largura real do conteúdo, insuficiente para desvios grandes), muda-se
+   literalmente que dias a tabela de logística mostra, para a coluna do
+   par ficar exatamente alinhada com a da produção. Repõe-se a 0 sempre
+   que a seleção é limpa ou o período muda. */
+let desvioLog=0;
+function daysLog(){ return MASTER.slice(view.start+desvioLog,view.start+desvioLog+view.len); }
 function renderLabels(){
   $("#labels").innerHTML='<div class="head"></div>'+LINHAS.map(n=>
     `<div class="lbl" data-linha="${n}"><div class="n">${n}</div>
@@ -908,16 +909,19 @@ function renderLabels(){
     el.onclick=()=>editarCapacidade(el.dataset.linha);
   });
 }
+function diaHtml(d,hoje){
+  const wk=d.dow===6;
+  return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}">
+    <div class="dn">${view.mode==="mes"?d.dd:DOW[d.dow]+" "+d.dd}</div>
+    <div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div></div>`;
+}
 function renderDays(){
   const D=days();
-  const html=D.map((d,i)=>{
-    const wk=d.dow===6, hoje=view.start+i===HOJE;
-    return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}">
-      <div class="dn">${view.mode==="mes"?d.dd:DOW[d.dow]+" "+d.dd}</div>
-      <div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div></div>`;
-  }).join("");
-  $("#days").innerHTML=html; $("#days").style.width=(D.length*DAY)+"px";
-  $("#daysLog").innerHTML=html; $("#daysLog").style.width=(D.length*DAY)+"px";
+  $("#days").innerHTML=D.map((d,i)=>diaHtml(d,view.start+i===HOJE)).join("");
+  $("#days").style.width=(D.length*DAY)+"px";
+  const DL=daysLog();
+  $("#daysLog").innerHTML=DL.map((d,i)=>diaHtml(d,view.start+desvioLog+i===HOJE)).join("");
+  $("#daysLog").style.width=(DL.length*DAY)+"px";
 }
 /* várias OFs cabem na mesma linha/dia enquanto a soma dos seus ritmos
    diários (volume ÷ duração) não ultrapassar a capacidade dessa linha —
@@ -991,7 +995,8 @@ function renderFila(){
    cards empilhados pela mesma lógica de encaixe (capacidade 0 = sempre
    altura inteira, um por cima do outro). */
 function renderLogistica(){
-  const D=days();
+  const D=daysLog();
+  const inicio=view.start+desvioLog;
   const hoje=(d)=>MASTER.indexOf(d)===HOJE;
   let h='<div class="row">'+D.map(d=>
     `<div class="cell${d.dow===6?" wk":""}${hoje(d)?" hoje":""}"></div>`).join("")+'</div>';
@@ -1001,7 +1006,7 @@ function renderLogistica(){
   encaixarCardsLinha(cardsLog, 0);
   const PAD=4;
   cardsLog.forEach(c=>{
-    const a=c.gs-view.start;
+    const a=c.gs-inicio;
     if(a<0||a>=view.len) return;
     const usavel=LANE-PAD;
     const el=document.createElement("div");
