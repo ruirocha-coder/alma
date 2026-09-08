@@ -708,6 +708,18 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
+@app.get("/planeamento-ecos-largos/diagnostico-ocupacao")
+def planeamento_ecos_largos_diagnostico_ocupacao(linha: str, excluir_id: int = None):
+    """Diagnóstico temporário: mostra a ocupação diária bruta calculada
+    por _ocupacao_diaria para uma linha — usado para perceber uma
+    duração que parece errada. A remover depois de usado."""
+    return {
+        "ocupacao": planeamento_serracao._ocupacao_diaria(linha, excluir_id=excluir_id),
+        "agendamentos_da_linha": [
+            a for a in planeamento_serracao.db.agendamentos_producao_ecos_largos() if a["linha"] == linha
+        ],
+    }
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
