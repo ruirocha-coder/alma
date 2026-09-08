@@ -151,7 +151,7 @@ def _com_charriots_resumido(conteudo):
     }
     return conteudo
 
-_PADRAO_SETOR_EM_TEXTO = re.compile(r"[Ss]etor:?\s*(S\d+)")
+_PADRAO_SETOR_EM_TEXTO = re.compile(r"[Ss]ec?tor:?\s*(S\d+)")
 
 def _com_setor_linha(conteudo):
     """Junta a cada alerta e a cada entrada de controlStates a linha de
