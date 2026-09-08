@@ -1351,8 +1351,10 @@ function openSheet(id){
   if(agendado){
     const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
     corpo = `
-    <div class="kv"><span>Linha</span><b>${LINHAS[c.linha]}</b></div>
-    <div class="kv"><span>Início</span><b>${DOW[s.dow]} ${s.dd} ${MESC[s.mo]}</b></div>
+    <div class="frow"><label>Linha</label><select id="fLinha">${LINHAS.map((n,i)=>
+      `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}</select></div>
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}"></div>
+    <div class="acts"><button class="btn" id="guardarLinha">Guardar linha/início</button></div>
     <div class="kv"><span>Fim</span><b>${DOW[f.dow]} ${f.dd} ${MESC[f.mo]} · ${c.dur} dias</b></div>`;
   }
   $("#sheet").innerHTML=`
@@ -1425,6 +1427,23 @@ function openSheet(id){
     };
   });
   if(agendado){
+    $("#guardarLinha").onclick=async()=>{
+      const linhaIdx=+$("#fLinha").value;
+      const iso=$("#fInicio").value;
+      if(!iso){ alert("Escolhe uma data de início."); return; }
+      $("#guardarLinha").textContent="A guardar…"; $("#guardarLinha").disabled=true;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],dia_inicio:iso,volume_m3:c.volume||null})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; return; }
+        c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3;
+        log("local",`"${c.titulo}" movido para ${LINHAS[linhaIdx]}, ${iso}`);
+        await atualizarLogistica();
+        render(); closeSheet();
+      }catch(e){ alert("Falhou a guardar: "+e); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; }
+    };
     $("#toFila").onclick=()=>{
       undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
       c.linha=null; c.gs=null;
@@ -1510,8 +1529,9 @@ function openSheetLogistica(id){
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id} · logística</div>
     <h3>${c.titulo}</h3>
-    <div class="kv"><span>Dia de carregamento</span><b>${DOW[d.dow]} ${d.dd} ${MESC[d.mo]}</b></div>
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Dia de carregamento</label>
+    <div class="frow"><input id="logDia" type="date" value="${d.iso}"><button class="btn" id="guardarDia">Guardar</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Quem carrega</label>
     <div class="frow"><input id="logQuem" placeholder="Ex: João" value="${c.quemCarrega?String(c.quemCarrega).replace(/"/g,"&quot;"):""}"><button class="btn" id="guardarQuem">Guardar</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral</label>
@@ -1530,6 +1550,21 @@ function openSheetLogistica(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  $("#guardarDia").onclick=async()=>{
+    const iso=$("#logDia").value;
+    if(!iso){ alert("Escolhe uma data."); return; }
+    $("#guardarDia").textContent="A guardar…"; $("#guardarDia").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/logistica/mover",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,dia_carregamento:iso})});
+      const dd=await r.json();
+      if(dd.erro){ alert(dd.erro); $("#guardarDia").textContent="Guardar"; $("#guardarDia").disabled=false; return; }
+      c.gs=idxOf(iso);
+      log("local",`dia de carregamento de "${c.titulo}" alterado para ${iso}`);
+      renderLogistica(); closeSheet();
+    }catch(e){ alert("Falhou a guardar: "+e); $("#guardarDia").textContent="Guardar"; $("#guardarDia").disabled=false; }
+  };
   $("#guardarQuem").onclick=async()=>{
     const quem_carrega=$("#logQuem").value.trim();
     $("#guardarQuem").textContent="A guardar…"; $("#guardarQuem").disabled=true;
