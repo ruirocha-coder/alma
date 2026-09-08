@@ -336,22 +336,6 @@ def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None) -
     r.raise_for_status()
     return _formatar_item(r.json())
 
-def atualizar_titulo_card(card_id: int, titulo: str, projeto: str) -> dict:
-    """Renomeia um card já existente num quadro Kanban — usado pelo
-    quadro de planeamento de produção para corrigir retroativamente a
-    ordem "Peça — Cliente" para "Cliente — Peça" nos cards que já
-    existiam antes dessa troca (pedido explícito do Rui, 2026-09).
-
-    Segue o mesmo padrão documentado da API do Basecamp usado por
-    apagar_card (PUT a /buckets/ID/card_tables/cards/ID.json)."""
-    p = _encontrar_projeto(projeto)
-    if not p:
-        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
-    r = httpx.put(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
-                  headers=_headers(), json={"title": titulo}, timeout=30)
-    r.raise_for_status()
-    return _formatar_item(r.json())
-
 def apagar_card(card_id: int, projeto: str) -> None:
     """Manda um card para o lixo do Basecamp (reversível lá durante algum
     tempo, tal como apagar manualmente na interface) — usado pelo quadro

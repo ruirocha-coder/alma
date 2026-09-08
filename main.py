@@ -644,18 +644,6 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/planeamento-ecos-largos/corrigir-titulos")
-def planeamento_ecos_largos_corrigir_titulos():
-    """Correção pontual (pedido explícito do Rui, 2026-09): troca a ordem
-    dos cards já existentes de "Peça — Cliente" para "Cliente — Peça" —
-    ver tools/planeamento_serracao.corrigir_ordem_titulos_existentes.
-    Endpoint temporário, para remover depois de usado uma vez."""
-    try:
-        resultado = planeamento_serracao.corrigir_ordem_titulos_existentes()
-    except Exception as e:
-        return JSONResponse({"erro": f"falhou a corrigir no Basecamp: {e}"}, status_code=502)
-    return JSONResponse(resultado)
-
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
