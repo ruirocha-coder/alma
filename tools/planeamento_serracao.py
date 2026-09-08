@@ -169,41 +169,6 @@ def estado_planeamento_serracao() -> dict:
 
 LIMITE_DIAS_REPARTIR = 60  # nunca tentar expandir a duração indefinidamente à procura de espaço
 
-def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
-                        excluir_id: int = None) -> int:
-    """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
-    (m³) e da capacidade diária dessa linha (editável, ver
-    atualizar_capacidade_linha).
-
-    Aproveita sempre ao máximo a capacidade de cada dia (pedido explícito
-    do Rui, 2026-09): se `dia_inicio` já tiver outra(s) encomenda(s) a
-    ocupar parte da capacidade da linha nesse dia, esta encomenda não é
-    simplesmente recusada — a duração vai crescendo (1, 2, 3... dias) até
-    encontrar a mais curta cujo ritmo diário (volume ÷ duração) caiba,
-    todos os dias, no espaço ainda livre (ver _ocupacao_diaria); ou seja,
-    reparte-se sozinha por esse dia e pelos seguintes em vez de ocupar só
-    o primeiro. Sem `dia_inicio` (ainda na fila, sem dia definido) ou sem
-    capacidade configurada para a linha, usa só volume ÷ capacidade
-    plena, sem olhar a ocupação (não há ainda dia nenhum para verificar)."""
-    if not volume_m3:
-        return 1
-    capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
-    if capacidade <= 0:
-        return 1
-    duracao_minima = max(1, math.ceil(volume_m3 / capacidade))
-    if not dia_inicio:
-        return duracao_minima
-    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
-    inicio = date.fromisoformat(dia_inicio)
-    for duracao in range(duracao_minima, LIMITE_DIAS_REPARTIR + 1):
-        ritmo = volume_m3 / duracao
-        if all(
-            ocupacao.get((inicio + timedelta(days=i)).isoformat(), 0) + ritmo <= capacidade + 1e-9
-            for i in range(duracao)
-        ):
-            return duracao
-    return duracao_minima  # não coube em espaço nenhum razoável — deixa _validar_capacidade recusar com a mensagem certa
-
 def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
     """Quanto de m³/dia já está ocupado, dia a dia, numa linha — soma o
     "ritmo diário" (volume ÷ duração) de cada OF já agendada nessa linha
@@ -229,32 +194,94 @@ def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
                 ocupacao[dia] = ocupacao.get(dia, 0) + ritmo
     return ocupacao
 
+def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
+                             volume_m3: float, limite: int = LIMITE_DIAS_REPARTIR):
+    """Simula encaixar `volume_m3` numa linha a partir de `dia_inicio`,
+    usando sempre primeiro o que ainda sobra de capacidade em cada dia
+    (ver `ocupacao`, de _ocupacao_diaria) — só o que não couber passa
+    para o dia seguinte. Pedido explícito do Rui (2026-09): aproveitar ao
+    máximo a capacidade de cada dia, em vez de exigir um ritmo diário
+    igual em todos os dias que a encomenda ocupa (isso desperdiçava dias
+    inteiros quase vazios só porque o primeiro dia já tinha pouca folga —
+    ex: 35 m³ numa linha de 33 m³/dia, com 22 já ocupados no 1º dia e
+    nada no 2º, cabe em 2 dias — 11 no primeiro, 24 no segundo — e não em
+    4 como uma repartição uniforme exigiria).
+
+    Devolve quantos dias de calendário isso ocupa (o número de dias
+    percorridos até o volume caber todo, mesmo que algum desses dias não
+    tenha contribuído nada — ex: um dia reservado por completo por outra
+    OF sem volume definido não dá espaço nenhum, mas continua a contar
+    como um dia ocupado do calendário), ou None se não couber dentro de
+    `limite` dias."""
+    inicio = date.fromisoformat(dia_inicio)
+    restante = float(volume_m3)
+    for dias in range(1, limite + 1):
+        dia = (inicio + timedelta(days=dias - 1)).isoformat()
+        usado = ocupacao.get(dia, 0)
+        livre = 0 if usado == float("inf") else max(0, capacidade - usado)
+        restante -= livre
+        if restante <= 1e-9:
+            return dias
+    return None
+
+def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
+                        excluir_id: int = None) -> int:
+    """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
+    (m³) e da capacidade diária dessa linha (editável, ver
+    atualizar_capacidade_linha) — a mais curta possível que caiba,
+    repartindo greedily pelo espaço livre de cada dia a partir de
+    `dia_inicio` (ver _dias_necessarios_greedy). Sem `dia_inicio` (ainda
+    na fila, sem dia definido) ou sem capacidade configurada para a
+    linha, usa só volume ÷ capacidade plena, sem olhar a ocupação (não há
+    ainda dia nenhum para verificar)."""
+    if not volume_m3:
+        return 1
+    capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
+    if capacidade <= 0:
+        return 1
+    duracao_minima = max(1, math.ceil(volume_m3 / capacidade))
+    if not dia_inicio:
+        return duracao_minima
+    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
+    dias = _dias_necessarios_greedy(capacidade, ocupacao, dia_inicio, volume_m3)
+    return dias if dias is not None else duracao_minima  # não coube em espaço nenhum razoável — deixa _validar_capacidade recusar com a mensagem certa
+
 def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
                         volume_m3: float, excluir_id: int = None) -> str:
-    """Confirma que colocar esta OF (com este volume/duração) nesta linha,
-    a partir deste dia, não ultrapassa a capacidade (m³/dia) da linha em
-    nenhum dos dias que ocupa — pedido explícito do Rui (2026-09): se já
-    ultrapassar a capacidade nesse dia, não deve ser possível; se ainda
-    houver folga, deve ser possível colocar outra encomenda no mesmo
-    espaço. Devolve uma mensagem de erro, ou None se estiver tudo bem."""
+    """Confirma que colocar esta OF (com este volume, repartido greedily
+    pelo espaço livre de cada dia — ver _dias_necessarios_greedy) nesta
+    linha, a partir deste dia, cabe dentro de `duracao_dias` dias sem
+    ultrapassar a capacidade da linha em dia nenhum. Devolve uma mensagem
+    de erro, ou None se estiver tudo bem."""
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
-    ritmo_card = (volume_m3 / duracao_dias) if volume_m3 else None
     ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
     inicio = date.fromisoformat(dia_inicio)
-    for i in range(duracao_dias):
-        dia = (inicio + timedelta(days=i)).isoformat()
-        usado = ocupacao.get(dia, 0)
-        if ritmo_card is None:
+    if not volume_m3:
+        for i in range(duracao_dias):
+            dia = (inicio + timedelta(days=i)).isoformat()
+            usado = ocupacao.get(dia, 0)
+            if usado == float("inf"):
+                return f"a linha {linha!r} está reservada por completo em {dia} por outra encomenda sem volume definido"
             if usado > 0:
                 return (f"a linha {linha!r} já tem outra encomenda em {dia} — sem volume "
                         "definido, esta encomenda precisaria da linha só para ela nesse dia")
-            continue
-        if usado == float("inf"):
-            return f"a linha {linha!r} está reservada por completo em {dia} por outra encomenda sem volume definido"
-        if capacidade > 0 and usado + ritmo_card > capacidade + 1e-9:
-            sobra = max(0, capacidade - usado)
-            return (f"capacidade excedida em {dia} na linha {linha!r}: já há {usado:.1f} "
-                    f"m³/dia ocupados de {capacidade:.1f} m³/dia (sobram só {sobra:.1f} m³/dia)")
+        return None
+    if capacidade <= 0:
+        # sem capacidade configurada para a linha: só bloqueia se algum
+        # dia já estiver reservado por completo por uma OF sem volume
+        for i in range(duracao_dias):
+            dia = (inicio + timedelta(days=i)).isoformat()
+            if ocupacao.get(dia, 0) == float("inf"):
+                return f"a linha {linha!r} está reservada por completo em {dia} por outra encomenda sem volume definido"
+        return None
+    if _dias_necessarios_greedy(capacidade, ocupacao, dia_inicio, volume_m3, limite=duracao_dias) is None:
+        faltam = float(volume_m3)
+        for i in range(duracao_dias):
+            dia = (inicio + timedelta(days=i)).isoformat()
+            usado = ocupacao.get(dia, 0)
+            faltam -= 0 if usado == float("inf") else max(0, capacidade - usado)
+        return (f"não há capacidade suficiente na linha {linha!r} a partir de {dia_inicio} "
+                f"em {duracao_dias} dia(s) — faltariam {max(0, faltam):.1f} m³")
     return None
 
 DIAS_CURA_MADEIRA = {"seca": 4, "verde": 1}
@@ -639,9 +666,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .blk:hover{box-shadow:0 2px 7px rgba(0,0,0,.13)}
   .blk:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
   .blk .tt{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .blk .of{font-size:11.5px;color:var(--dim);margin-top:1px;white-space:nowrap}
+  .blk .of{font-size:11.5px;color:var(--dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dense .blk{padding:3px 6px;border-radius:7px}
-  .dense .blk .of{display:none}
+  .dense .blk .of{font-size:10px}
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
   .blk.flash,.qcard.flash{animation:flash 1s ease-out}
@@ -1058,8 +1085,9 @@ function days(){ return MASTER.slice(view.start,view.start+view.len); }
 let desvioLog=0;
 function daysLog(){ return MASTER.slice(view.start+desvioLog,view.start+desvioLog+view.len); }
 function renderLabels(){
-  $("#labels").innerHTML='<div class="head"></div>'+LINHAS.map(n=>
-    `<div class="lbl" data-linha="${n}"><div class="n">${n}</div>
+  calcularAlturasLinhas();
+  $("#labels").innerHTML='<div class="head"></div>'+LINHAS.map((n,li)=>
+    `<div class="lbl" data-linha="${n}" style="height:${ALTURAS_LINHA[li]||LANE}px"><div class="n">${n}</div>
      <div class="c">${CAPACIDADES[n]!=null?CAPACIDADES[n]+" m³/dia":"definir capacidade"} · editar</div></div>`).join("");
   $("#labels").querySelectorAll(".lbl").forEach(el=>{
     el.onclick=()=>editarCapacidade(el.dataset.linha);
@@ -1081,53 +1109,83 @@ function renderDays(){
 }
 /* várias OFs cabem na mesma linha/dia enquanto a soma dos seus ritmos
    diários (volume ÷ duração) não ultrapassar a capacidade dessa linha —
-   pedido explícito do Rui (2026-09). Para nunca ficarem sobrepostas (o
-   que as fazia "desaparecer" umas atrás das outras), cada card recebe
-   aqui uma fatia vertical própria dentro da lane (uma acima, outra
-   abaixo), com altura proporcional ao seu ritmo diário — quanto mais m³
-   por dia ocupar, maior o card. Calculado sobre TODOS os cards da linha
-   (não só os visíveis), para a posição de cada um não saltar ao navegar
-   entre semanas.*/
-const ALTURA_MIN_FRACAO=0.38;
-function encaixarCardsLinha(cardsLinha, capacidade){
-  const ocupado={};
+   pedido explícito do Rui (2026-09). Para nunca ficarem sobrepostas nem
+   apertadas ao ponto de esconder informação (todos os cards têm de
+   mostrar sempre os m³, pedido explícito do Rui), cada card ocupa um
+   "slot" inteiro (0, 1, 2...) de altura fixa — o primeiro ainda livre em
+   todos os dias que atravessa — e a LINHA cresce sozinha (altura
+   própria, independente das outras linhas) até caber o dia mais cheio
+   dela, em vez de espremer os cards numa altura fixa (ver
+   calcularAlturasLinhas). Calculado sobre TODOS os cards da linha (não
+   só os visíveis), para a posição de cada um não saltar ao navegar entre
+   semanas. */
+const ITEM_PROD_H=44, ITEM_PROD_GAP=4, ITEM_PROD_PAD=6;
+function encaixarCardsLinha(cardsLinha){
+  const ocupado={}; // índice do dia -> Set de slots já usados nesse dia
+  let maxSlots=1;
   [...cardsLinha].sort((a,b)=>a.gs-b.gs||(a.ordem||0)-(b.ordem||0)||a.id-b.id).forEach(c=>{
-    const ritmo=c.volume?c.volume/c.dur:null;
-    const fracao=(ritmo&&capacidade>0)?clamp(ritmo/capacidade,ALTURA_MIN_FRACAO,1):1;
-    let topo=0;
-    for(let k=0;k<c.dur;k++) topo=Math.max(topo,ocupado[c.gs+k]||0);
-    c._topoFracao=topo; c._alturaFracao=fracao;
-    for(let k=0;k<c.dur;k++) ocupado[c.gs+k]=topo+fracao;
+    let slot=0;
+    for(;;slot++){
+      let livre=true;
+      for(let k=0;k<c.dur;k++){
+        if((ocupado[c.gs+k]||new Set()).has(slot)){ livre=false; break; }
+      }
+      if(livre) break;
+    }
+    c._slot=slot;
+    for(let k=0;k<c.dur;k++){
+      if(!ocupado[c.gs+k]) ocupado[c.gs+k]=new Set();
+      ocupado[c.gs+k].add(slot);
+    }
+    maxSlots=Math.max(maxSlots,slot+1);
   });
+  return maxSlots;
+}
+let ALTURAS_LINHA=[], OFFSETS_LINHA=[];
+function calcularAlturasLinhas(){
+  ALTURAS_LINHA=LINHAS.map((nome,li)=>{
+    const maxSlots=encaixarCardsLinha(cards.filter(c=>c.linha===li));
+    return Math.max(LANE, maxSlots*ITEM_PROD_H+(maxSlots-1)*ITEM_PROD_GAP+ITEM_PROD_PAD*2);
+  });
+  let acumulado=0;
+  OFFSETS_LINHA=ALTURAS_LINHA.map(alt=>{ const topo=acumulado; acumulado+=alt; return topo; });
+}
+/* a que linha corresponde uma posição vertical (em px, relativa ao topo
+   de #lanes) — usado ao arrastar, já que as linhas já não têm todas a
+   mesma altura (ver calcularAlturasLinhas). */
+function linhaDeY(y){
+  if(y<0) return 0;
+  let acumulado=0;
+  for(let i=0;i<LINHAS.length;i++){
+    acumulado+=ALTURAS_LINHA[i];
+    if(y<acumulado) return i;
+  }
+  return LINHAS.length-1;
 }
 function renderLanes(){
+  calcularAlturasLinhas();
   const D=days();
   let h="";
-  LINHAS.forEach(()=>{ h+='<div class="row">'+D.map(d=>{
+  LINHAS.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LINHA[li]}px">`+D.map(d=>{
     const hoje=MASTER.indexOf(d)===HOJE;
     return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
-  LINHAS.forEach((nome,li)=>{
-    encaixarCardsLinha(cards.filter(c=>c.linha===li), CAPACIDADES[nome]||0);
-  });
-  const PAD=4;
   cards.filter(c=>c.linha!==null).forEach(c=>{
     const a=c.gs-view.start, b=a+c.dur;
     if(b<=0||a>=view.len) return;
     const l=Math.max(a,0), r=Math.min(b,view.len);
-    const usavel=LANE-PAD;
     const el=document.createElement("div");
     el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"")+(atrasado(c)?" atrasado":"");
     el.tabIndex=0; el.dataset.id=c.id;
     el.style.borderLeftColor=corProduto(c);
     const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
     el.style.left=(l*DAY+3)+"px";
-    el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
+    el.style.top=(OFFSETS_LINHA[c.linha]+ITEM_PROD_PAD+c._slot*(ITEM_PROD_H+ITEM_PROD_GAP))+"px";
     el.style.width=((r-l)*DAY-8)+"px";
-    el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
+    el.style.height=ITEM_PROD_H+"px";
     el.innerHTML=`<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
       <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`;
     bl.appendChild(el);
@@ -1259,11 +1317,14 @@ $("#lanes").addEventListener("pointerdown",e=>{
 });
 $("#lanes").addEventListener("pointermove",e=>{
   if(!drag)return;
-  let dd=Math.round((e.clientX-drag.x0)/DAY), dl=Math.round((e.clientY-drag.y0)/LANE);
+  let dd=Math.round((e.clientX-drag.x0)/DAY);
   dd=clamp(dd, -drag.gs0, MASTER.length-drag.dur0-drag.gs0);
-  dl=clamp(dl, -drag.lin0, LINHAS.length-1-drag.lin0);
+  const r=$("#lanes").getBoundingClientRect();
+  const linhaAtual=linhaDeY(e.clientY-r.top);
+  const dl=clamp(linhaAtual-drag.lin0, -drag.lin0, LINHAS.length-1-drag.lin0);
   drag.dx=dd; drag.dy=dl;
-  drag.el.style.transform=`translate(${dd*DAY}px,${dl*LANE}px)`;
+  const desvioY=OFFSETS_LINHA[drag.lin0+dl]-OFFSETS_LINHA[drag.lin0];
+  drag.el.style.transform=`translate(${dd*DAY}px,${desvioY}px)`;
 });
 $("#lanes").addEventListener("pointerup",()=>{
   if(!drag)return; const c=drag.c;
@@ -1301,7 +1362,7 @@ $("#fila").addEventListener("pointerup",e=>{
   const c=card(id);
   const anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
   undoStack.push(anterior);
-  c.linha=clamp(Math.floor(y/LANE),0,LINHAS.length-1);
+  c.linha=linhaDeY(y);
   c.gs=view.start+clamp(Math.floor(x/DAY),0,view.len-c.dur);
   renderFila(); renderLanes(); sync(c, anterior);
 });
