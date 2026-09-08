@@ -446,6 +446,32 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     db.remover_logistica_carregamento(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
+def corrigir_duracoes_existentes() -> dict:
+    """Correção pontual (pedido explícito do Rui, 2026-09): recalcula a
+    duração de todas as OFs já agendadas com a lógica greedy nova (ver
+    _dias_necessarios_greedy), para corrigir as que ficaram com uma
+    duração maior do que precisavam sob a lógica antiga (ritmo uniforme).
+
+    Processa por linha, do dia de início mais cedo para o mais tarde: ao
+    recalcular a duração de uma OF, todas as anteriores na mesma linha já
+    ficaram com a duração correta, por isso a ocupação usada é sempre a
+    mais atual. Nunca aumenta uma duração (a lógica antiga era sempre
+    segura, conservadora — só desperdiçava dias a mais —, por isso
+    recalcular só pode encolher ou manter, nunca ultrapassar capacidade)."""
+    resultados = []
+    agendamentos = [a for a in db.agendamentos_producao_ecos_largos() if a["linha"] and a["dia_inicio"]]
+    agendamentos.sort(key=lambda a: (a["linha"], a["dia_inicio"], a["basecamp_card_id"]))
+    for a in agendamentos:
+        antes = a["duracao_dias"]
+        resultado = agendar(a["basecamp_card_id"], a["linha"], a["dia_inicio"], a["volume_m3"])
+        if "erro" in resultado:
+            resultados.append({"basecamp_card_id": a["basecamp_card_id"], "linha": a["linha"],
+                               "erro": resultado["erro"], "duracao_antes": antes})
+        else:
+            resultados.append({"basecamp_card_id": a["basecamp_card_id"], "linha": a["linha"],
+                               "duracao_antes": antes, "duracao_depois": resultado["duracao_dias"]})
+    return {"resultados": resultados}
+
 def mover_logistica(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Muda manualmente o dia de carregamento de uma OF já duplicada —
     independente da produção a partir daí (ver nota da tabela em db.py)."""

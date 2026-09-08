@@ -708,6 +708,16 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/corrigir-duracoes")
+def planeamento_ecos_largos_corrigir_duracoes():
+    """Correção pontual (pedido explícito do Rui, 2026-09): recalcula a
+    duração de todas as OFs já agendadas com a lógica greedy nova — ver
+    tools/planeamento_serracao.corrigir_duracoes_existentes. Endpoint
+    temporário, para remover depois de usado uma vez."""
+    resultado = planeamento_serracao.corrigir_duracoes_existentes()
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
