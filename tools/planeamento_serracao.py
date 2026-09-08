@@ -46,7 +46,21 @@ LINHAS = [
 # — além destas, uma OF tem uma cor automática de fundo, de acordo com a
 # coluna real no Basecamp (ver ESTADOS_COR/cores_estado no template) —
 # também editável pela equipa, não só a manual.
-CORES_VALIDAS = {"vermelho", "amarelo", "verde", "azul", "roxo", "laranja", "cinza"}
+# paleta alargada (pedido explícito do Rui, 2026-09: "as mesmas cores que
+# o Google Calendar/Gmail têm" — uma grelha de 4 tons por matiz, como no
+# seletor de cores deles). Os 6 nomes base (sem sufixo) continuam válidos
+# tal e qual — são a mesma cor que já podia estar guardada em cards e nos
+# estados automáticos (ver CORES_ESTADO/db.SEED_CORES_ESTADO_ECOS_LARGOS)
+# antes desta expansão, só com o tom (hex) atualizado no frontend.
+CORES_VALIDAS = {
+    "cinza",
+    "vermelho_escuro", "vermelho", "vermelho_medio", "vermelho_claro",
+    "laranja_escuro", "laranja", "laranja_medio", "laranja_claro",
+    "amarelo_escuro", "amarelo", "amarelo_medio", "amarelo_claro",
+    "verde_escuro", "verde", "verde_medio", "verde_claro",
+    "azul_escuro", "azul", "azul_medio", "azul_claro",
+    "roxo_escuro", "roxo", "roxo_medio", "roxo_claro",
+}
 
 # estados/colunas do Basecamp que têm uma cor automática de fundo no
 # quadro, editável pela equipa (ver atualizar_cor_estado) — chave interna
@@ -641,7 +655,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .owner{font-size:12.5px;color:var(--dim);margin-top:12px;background:var(--canvas);
     border-radius:8px;padding:9px 11px}
   .acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
-  .cores{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .cores{display:grid;grid-template-columns:repeat(6,24px);gap:8px;margin-top:8px}
   .swatch{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;padding:0}
   .swatch.sel{border-color:var(--ink)}
   .swatch:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
@@ -807,14 +821,38 @@ function aplicarSelecao(){
    - Atrasada (prazo do Basecamp ultrapassado): já não usa cor nenhuma
      das duas — passa a um contorno vermelho próprio (ver .atrasado no
      CSS), para nunca competir com a cor de produto nem a de estado. */
+// grelha de 4 tons x 6 matizes (pedido explícito do Rui, 2026-09: "as
+// mesmas cores que o Google Calendar/Gmail têm") — ordem de inserção
+// propositada (uma linha por tom, da mais escura à mais clara) para a
+// grelha CSS de 6 colunas (ver .cores) desenhar visualmente as mesmas
+// linhas por tom que o seletor deles tem. Os 6 nomes sem sufixo mantêm o
+// significado de sempre (cor "normal" de cada matiz) — só o hex mudou.
 const CORES={
+  vermelho_escuro:{hex:"#D32F2F",label:"Vermelho escuro"},
+  laranja_escuro:{hex:"#F57C00",label:"Laranja escuro"},
+  amarelo_escuro:{hex:"#FFA000",label:"Amarelo escuro"},
+  verde_escuro:{hex:"#388E3C",label:"Verde escuro"},
+  azul_escuro:{hex:"#1976D2",label:"Azul escuro"},
+  roxo_escuro:{hex:"#7B1FA2",label:"Roxo escuro"},
+  vermelho:{hex:"#F44336",label:"Vermelho"},
+  laranja:{hex:"#FF9800",label:"Laranja"},
+  amarelo:{hex:"#FFC107",label:"Amarelo"},
+  verde:{hex:"#4CAF50",label:"Verde"},
+  azul:{hex:"#2196F3",label:"Azul"},
+  roxo:{hex:"#9C27B0",label:"Roxo"},
+  vermelho_medio:{hex:"#E57373",label:"Vermelho médio"},
+  laranja_medio:{hex:"#FFB74D",label:"Laranja médio"},
+  amarelo_medio:{hex:"#FFD54F",label:"Amarelo médio"},
+  verde_medio:{hex:"#81C784",label:"Verde médio"},
+  azul_medio:{hex:"#64B5F6",label:"Azul médio"},
+  roxo_medio:{hex:"#BA68C8",label:"Roxo médio"},
+  vermelho_claro:{hex:"#FFCDD2",label:"Vermelho claro"},
+  laranja_claro:{hex:"#FFE0B2",label:"Laranja claro"},
+  amarelo_claro:{hex:"#FFECB3",label:"Amarelo claro"},
+  verde_claro:{hex:"#C8E6C9",label:"Verde claro"},
+  azul_claro:{hex:"#BBDEFB",label:"Azul claro"},
+  roxo_claro:{hex:"#E1BEE7",label:"Roxo claro"},
   cinza:{hex:"#9AA0A6",label:"Automática"},
-  vermelho:{hex:"#C4452E",label:"Vermelho"},
-  amarelo:{hex:"#EAB308",label:"Amarelo"},
-  verde:{hex:"#4E9A51",label:"Verde"},
-  azul:{hex:"#1B6AC9",label:"Azul"},
-  roxo:{hex:"#8A6FA0",label:"Roxo"},
-  laranja:{hex:"#EA580C",label:"Laranja"},
 };
 // estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
 const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido"};
