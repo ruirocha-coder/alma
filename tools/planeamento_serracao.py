@@ -734,7 +734,7 @@ const atrasado=c=>c.prazo && c.prazo<hojeISO;
 function selecionar(id, origem){
   selecionadoId = (selecionadoId===id) ? null : id;
   aplicarSelecao();
-  if(selecionadoId===null) return;
+  if(selecionadoId===null){ resetScroll(); return; }
   const cP=card(id), cL=cardLog(id);
   const prodColocado = cP && cP.linha!==null && cP.gs!==null;
   if(!prodColocado || !cL) return;
@@ -859,7 +859,7 @@ function setMode(m){
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
     view.len=MASTER.filter(x=>x.mo===d.mo && x.y===d.y).length;
   }
-  render();
+  render(); resetScroll();
 }
 function step(dir){
   if(view.mode==="mes"){
@@ -873,8 +873,13 @@ function step(dir){
   }else{
     view.start=clamp(view.start+dir*view.len,0,Math.max(MASTER.length-view.len,0));
   }
-  render();
+  render(); resetScroll();
 }
+/* as duas tabelas mostram sempre as mesmas datas — ao mudar de período
+   (semana/mês, ‹ ›, Hoje) repõe as duas alinhadas em scroll 0; só o
+   destaque de um par (ver selecionar) desalinha uma delas de propósito,
+   para comparar duas datas diferentes lado a lado. */
+function resetScroll(){ $("#scroll").scrollLeft=0; $("#scrollLog").scrollLeft=0; }
 function rangeLabel(){
   const a=MASTER[view.start], b=MASTER[Math.min(view.start+view.len-1,MASTER.length-1)];
   if(!a||!b) return "";
@@ -1434,15 +1439,6 @@ document.addEventListener("keydown",e=>{
   if(e.key==="ArrowRight"&&!e.target.closest("select"))step(1);
 });
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(render,120)});
-
-/* as duas tabelas mostram sempre as mesmas datas — sincroniza o scroll
-   horizontal entre elas para os dias ficarem sempre alinhados ao navegar. */
-let scrollSync=false;
-function ligarScrollSync(a,b){
-  a.addEventListener("scroll",()=>{ if(scrollSync)return; scrollSync=true; b.scrollLeft=a.scrollLeft; scrollSync=false; });
-}
-ligarScrollSync($("#scroll"),$("#scrollLog"));
-ligarScrollSync($("#scrollLog"),$("#scroll"));
 
 carregar();
 /* relê o Basecamp sozinho de vez em quando (ex: para apanhar uma OF que
