@@ -538,6 +538,52 @@ def planeamento_ecos_largos_reordenar(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/madeira")
+def planeamento_ecos_largos_madeira(corpo: dict = Body(...)):
+    """Define o tipo de madeira (seca/verde) de uma OF — pode duplicar
+    logo para a logística se já estiver agendada — ver
+    tools/planeamento_serracao.definir_tipo_madeira."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.definir_tipo_madeira(basecamp_card_id, corpo.get("tipo_madeira"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/logistica/mover")
+def planeamento_ecos_largos_logistica_mover(corpo: dict = Body(...)):
+    """Muda o dia de carregamento de uma OF já duplicada na logística —
+    ver tools/planeamento_serracao.mover_logistica."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.mover_logistica(basecamp_card_id, corpo.get("dia_carregamento"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/logistica/cor")
+def planeamento_ecos_largos_logistica_cor(corpo: dict = Body(...)):
+    """Define ou limpa a cor manual de um card de logística — ver
+    tools/planeamento_serracao.definir_cor_logistica."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_serracao.definir_cor_logistica(basecamp_card_id, corpo.get("cor"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-ecos-largos/logistica/apagar")
+def planeamento_ecos_largos_logistica_apagar(corpo: dict = Body(...)):
+    """Remove só o duplicado de logística de uma OF — ver
+    tools/planeamento_serracao.apagar_logistica."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    return JSONResponse(planeamento_serracao.apagar_logistica(basecamp_card_id))
+
 @app.post("/planeamento-ecos-largos/desagendar")
 def planeamento_ecos_largos_desagendar(corpo: dict = Body(...)):
     """Devolve uma OF à bolsa por agendar — só na base local."""

@@ -217,6 +217,24 @@ CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
     volume_m3 NUMERIC,
     ordem INTEGER NOT NULL DEFAULT 0,
     cor TEXT,
+    tipo_madeira TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    atualizado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- duplicado de carregamento/logística de uma OF (ver
+-- tools/planeamento_serracao.py) — criado automaticamente quando uma OF é
+-- agendada numa linha/dia E já tem tipo de madeira definido: dia_carregamento
+-- é calculado a partir do FIM da produção (dia_inicio + duração - 1) mais 4
+-- dias (madeira seca) ou 1 dia (madeira verde), avançado para a segunda-feira
+-- seguinte se calhar a sábado/domingo. Uma OF só é duplicada UMA VEZ — depois
+-- disso este registo é totalmente independente do agendamento de produção
+-- (a equipa da logística pode movê-lo/apagá-lo sem afetar a produção).
+CREATE TABLE IF NOT EXISTS logistica_carregamento_ecos_largos (
+    id SERIAL PRIMARY KEY,
+    basecamp_card_id BIGINT NOT NULL UNIQUE,
+    dia_carregamento DATE NOT NULL,
+    cor TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
@@ -319,6 +337,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS documentos_gerados_card_id_idx
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS volume_m3 NUMERIC;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS cor TEXT;
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS tipo_madeira TEXT;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -771,7 +790,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, tipo_madeira
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -782,6 +801,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
                 "ordem": l["ordem"],
                 "cor": l["cor"],
+                "tipo_madeira": l["tipo_madeira"],
             } for l in cur.fetchall()]
 
 def agendamento_producao(basecamp_card_id: int) -> dict:
@@ -791,7 +811,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, tipo_madeira
                    FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s""",
                 (basecamp_card_id,)
             )
@@ -806,6 +826,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
                 "volume_m3": float(l["volume_m3"]) if l["volume_m3"] is not None else None,
                 "ordem": l["ordem"],
                 "cor": l["cor"],
+                "tipo_madeira": l["tipo_madeira"],
             }
 
 def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str,
@@ -880,6 +901,106 @@ def guardar_cor_producao(basecamp_card_id: int, cor: str) -> dict:
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_tipo_madeira_producao(basecamp_card_id: int, tipo_madeira: str) -> dict:
+    """Define/atualiza o tipo de madeira (seca/verde) de uma OF — usado
+    para calcular o dia de carregamento do duplicado de logística (ver
+    tools/planeamento_serracao._talvez_duplicar_logistica). Funciona tanto
+    na fila como já agendada."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO planeamento_producao_ecos_largos (basecamp_card_id, tipo_madeira)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       tipo_madeira = EXCLUDED.tipo_madeira, atualizado_em = now()""",
+                (basecamp_card_id, tipo_madeira)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def logistica_carregamentos_ecos_largos() -> list[dict]:
+    """Todos os duplicados de carregamento/logística — ver
+    tools/planeamento_serracao.py, que cruza isto com os cards reais do
+    Basecamp pelo basecamp_card_id (título, url, prazo, etc. vêm de lá,
+    não são guardados aqui em duplicado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT basecamp_card_id, dia_carregamento, cor FROM logistica_carregamento_ecos_largos"
+            )
+            return [{
+                "basecamp_card_id": l["basecamp_card_id"],
+                "dia_carregamento": l["dia_carregamento"].isoformat(),
+                "cor": l["cor"],
+            } for l in cur.fetchall()]
+
+def logistica_carregamento(basecamp_card_id: int) -> dict:
+    """O duplicado de logística de uma única OF, ou None se ainda não
+    existir — usado para nunca duplicar duas vezes a mesma OF (ver
+    tools/planeamento_serracao._talvez_duplicar_logistica)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT basecamp_card_id, dia_carregamento, cor FROM logistica_carregamento_ecos_largos "
+                "WHERE basecamp_card_id = %s",
+                (basecamp_card_id,)
+            )
+            l = cur.fetchone()
+            if not l:
+                return None
+            return {"basecamp_card_id": l["basecamp_card_id"],
+                    "dia_carregamento": l["dia_carregamento"].isoformat(), "cor": l["cor"]}
+
+def criar_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
+    """Cria o duplicado de logística de uma OF — só uma vez (ON CONFLICT DO
+    NOTHING: se já existir, não mexe, mesmo que o dia calculado agora seja
+    diferente — a partir de criado, é independente, ver nota da tabela)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO logistica_carregamento_ecos_largos (basecamp_card_id, dia_carregamento)
+                   VALUES (%s, %s) ON CONFLICT (basecamp_card_id) DO NOTHING""",
+                (basecamp_card_id, dia_carregamento)
+            )
+        conn.commit()
+    return {"criado": True, "basecamp_card_id": basecamp_card_id}
+
+def mover_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
+    """Muda manualmente o dia de carregamento de uma OF já duplicada —
+    usado ao arrastar o card na tabela de logística."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE logistica_carregamento_ecos_largos SET dia_carregamento = %s, atualizado_em = now() "
+                "WHERE basecamp_card_id = %s",
+                (dia_carregamento, basecamp_card_id)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor manual de um card de logística."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE logistica_carregamento_ecos_largos SET cor = %s, atualizado_em = now() "
+                "WHERE basecamp_card_id = %s",
+                (cor, basecamp_card_id)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def remover_logistica_carregamento(basecamp_card_id: int):
+    """Remove o duplicado de logística de uma OF — só esse duplicado, não
+    toca no agendamento de produção nem no card real no Basecamp."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM logistica_carregamento_ecos_largos WHERE basecamp_card_id = %s",
+                (basecamp_card_id,)
+            )
+        conn.commit()
 
 def capacidades_linhas_producao_ecos_largos() -> dict:
     """Capacidade de produção (m³/dia) de cada linha da serração da Ecos

@@ -63,12 +63,16 @@ def _cards_of_ativos() -> list[dict]:
 
 def estado_planeamento_serracao() -> dict:
     """Junta os cards de OF reais do Basecamp com o agendamento local
-    (linha/dia/duração/volume) — devolve as capacidades atuais de cada
-    linha, a bolsa (OFs sem linha/dia atribuídos, mais recentes criadas
-    primeiro) e as OFs já agendadas, prontas a desenhar no quadro."""
+    (linha/dia/duração/volume/madeira) — devolve as capacidades atuais de
+    cada linha, a bolsa (OFs sem linha/dia atribuídos, mais recentes
+    criadas primeiro), as OFs já agendadas, prontas a desenhar no quadro,
+    e os duplicados de logística/carregamento (ver
+    _talvez_duplicar_logistica)."""
+    cards_ativos = _cards_of_ativos()
+    cards_por_id = {c["id"]: c for c in cards_ativos}
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     bolsa, agendadas = [], []
-    for c in _cards_of_ativos():
+    for c in cards_ativos:
         agendamento = agendamentos.get(c["id"])
         tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
         # a fila (bolsa por agendar) só mostra OFs ainda em Triagem — uma OF
@@ -88,6 +92,7 @@ def estado_planeamento_serracao() -> dict:
             "url": c["url"],
             "volume_m3": agendamento["volume_m3"] if agendamento else None,
             "cor": agendamento["cor"] if agendamento else None,
+            "tipo_madeira": agendamento["tipo_madeira"] if agendamento else None,
         }
         if tem_agendamento:
             info["linha"] = agendamento["linha"]
@@ -102,11 +107,27 @@ def estado_planeamento_serracao() -> dict:
     # prazo definido) não ficar escondida ao fundo da fila.
     bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
     capacidades = db.capacidades_linhas_producao_ecos_largos()
+
+    logistica = []
+    for lg in db.logistica_carregamentos_ecos_largos():
+        c = cards_por_id.get(lg["basecamp_card_id"])
+        if not c:
+            continue  # OF já saiu do fluxo ativo (arquivada/Vendido) — deixa de aparecer
+        logistica.append({
+            "basecamp_card_id": lg["basecamp_card_id"],
+            "titulo": c["titulo"],
+            "coluna_basecamp": c["estado"],
+            "url": c["url"],
+            "dia_carregamento": lg["dia_carregamento"],
+            "cor": lg["cor"],
+        })
+
     return {
         "linhas": LINHAS,
         "capacidades": {linha: capacidades.get(linha) for linha in LINHAS},
         "bolsa": bolsa,
         "agendadas": agendadas,
+        "logistica": logistica,
     }
 
 def _duracao_por_volume(linha: str, volume_m3: float) -> int:
@@ -176,6 +197,34 @@ def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
                     f"m³/dia ocupados de {capacidade:.1f} m³/dia (sobram só {sobra:.1f} m³/dia)")
     return None
 
+DIAS_CURA_MADEIRA = {"seca": 4, "verde": 1}
+
+def _calcular_dia_carregamento(dia_inicio: str, duracao_dias: int, tipo_madeira: str) -> str:
+    """Dia de carregamento de uma OF: conta a partir do FIM da produção
+    (dia_inicio + duração - 1) mais 4 dias (madeira seca) ou 1 dia
+    (madeira verde) — pedido explícito do Rui (2026-09). Se calhar a
+    sábado ou domingo, avança para a segunda-feira seguinte."""
+    fim_producao = date.fromisoformat(dia_inicio) + timedelta(days=max(1, duracao_dias or 1) - 1)
+    dia = fim_producao + timedelta(days=DIAS_CURA_MADEIRA[tipo_madeira])
+    if dia.weekday() == 5:  # sábado
+        dia += timedelta(days=2)
+    elif dia.weekday() == 6:  # domingo
+        dia += timedelta(days=1)
+    return dia.isoformat()
+
+def _talvez_duplicar_logistica(basecamp_card_id: int, dia_inicio: str, duracao_dias: int, tipo_madeira: str):
+    """Cria o duplicado de logística/carregamento de uma OF — só quando já
+    tem linha/dia E tipo de madeira definidos, e só uma vez (ver
+    db.criar_logistica_carregamento, ON CONFLICT DO NOTHING): pedido
+    explícito do Rui (2026-09), para a equipa da logística saber em que
+    dia a OF estará pronta a carregar, assim que ela sair da fila."""
+    if not dia_inicio or not tipo_madeira or tipo_madeira not in DIAS_CURA_MADEIRA:
+        return
+    if db.logistica_carregamento(basecamp_card_id):
+        return
+    dia_carregamento = _calcular_dia_carregamento(dia_inicio, duracao_dias, tipo_madeira)
+    db.criar_logistica_carregamento(basecamp_card_id, dia_carregamento)
+
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
     escreve nada no Basecamp (ver nota no topo do módulo). A duração é
@@ -184,11 +233,13 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     indicado, mantém o volume já guardado anteriormente para esta OF (não
     o apaga só por não vir neste pedido). Recusa o agendamento (ver
     _validar_capacidade) se ultrapassar a capacidade da linha nalgum dos
-    dias ocupados."""
+    dias ocupados. Se já tiver tipo de madeira definido, duplica para a
+    logística (ver _talvez_duplicar_logistica)."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
         return {"erro": "falta indicar o dia de início"}
+    existente = db.agendamento_producao(basecamp_card_id)
     if volume_m3 is not None:
         try:
             volume_m3 = float(volume_m3)
@@ -197,13 +248,14 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
         if volume_m3 <= 0:
             return {"erro": "volume tem de ser maior que 0"}
     else:
-        existente = db.agendamento_producao(basecamp_card_id)
         volume_m3 = existente["volume_m3"] if existente else None
     duracao_dias = _duracao_por_volume(linha, volume_m3)
     erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3, excluir_id=basecamp_card_id)
     if erro:
         return {"erro": erro}
     db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+    tipo_madeira = existente["tipo_madeira"] if existente else None
+    _talvez_duplicar_logistica(basecamp_card_id, dia_inicio, duracao_dias, tipo_madeira)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id,
             "duracao_dias": duracao_dias, "volume_m3": volume_m3}
 
@@ -272,11 +324,39 @@ def reordenar(basecamp_card_id: int, direcao: str) -> dict:
 def apagar_encomenda(basecamp_card_id: int) -> dict:
     """Apaga uma encomenda por completo: manda o card real para o lixo do
     Basecamp (ver basecamp.apagar_card — reversível lá, durante algum
-    tempo, tal como apagar manualmente) e remove o agendamento local, se
-    existir. Ação a usar só quando for mesmo preciso (ex: encomenda criada
-    por engano) — pedido explícito do Rui, 2026-09."""
+    tempo, tal como apagar manualmente) e remove o agendamento local e o
+    duplicado de logística, se existirem. Ação a usar só quando for mesmo
+    preciso (ex: encomenda criada por engano) — pedido explícito do Rui,
+    2026-09."""
     basecamp.apagar_card(basecamp_card_id, projeto=PROJETO)
     db.remover_agendamento_producao(basecamp_card_id)
+    db.remover_logistica_carregamento(basecamp_card_id)
+    return {"apagado": True, "basecamp_card_id": basecamp_card_id}
+
+def mover_logistica(basecamp_card_id: int, dia_carregamento: str) -> dict:
+    """Muda manualmente o dia de carregamento de uma OF já duplicada —
+    independente da produção a partir daí (ver nota da tabela em db.py)."""
+    if not dia_carregamento:
+        return {"erro": "falta indicar o dia de carregamento"}
+    if not db.logistica_carregamento(basecamp_card_id):
+        return {"erro": "esta OF ainda não tem duplicado de logística"}
+    return db.mover_logistica_carregamento(basecamp_card_id, dia_carregamento)
+
+def definir_cor_logistica(basecamp_card_id: int, cor: str) -> dict:
+    """Define ou limpa a cor manual de um card de logística (mesma lista
+    fixa, ver CORES_VALIDAS)."""
+    cor = (cor or "").strip().lower() or None
+    if cor and cor not in CORES_VALIDAS:
+        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
+    if not db.logistica_carregamento(basecamp_card_id):
+        return {"erro": "esta OF ainda não tem duplicado de logística"}
+    db.guardar_cor_logistica(basecamp_card_id, cor)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "cor": cor}
+
+def apagar_logistica(basecamp_card_id: int) -> dict:
+    """Remove só o duplicado de logística de uma OF — não toca no
+    agendamento de produção nem no card real no Basecamp."""
+    db.remover_logistica_carregamento(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
 TIPOS_MADEIRA = {"seca": "Seca", "verde": "Verde"}
@@ -324,6 +404,8 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
     if notas:
         partes_notas.append(notas)
     card = basecamp.criar_card("Triagem", titulo_basecamp, "\n".join(partes_notas), projeto=PROJETO)
+    if tipo_madeira:
+        db.guardar_tipo_madeira_producao(card["id"], tipo_madeira)
     resultado = {
         "basecamp_card_id": card["id"],
         "titulo": card["titulo"],
@@ -331,8 +413,11 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
         "prazo": card["prazo"],
         "url": card["url"],
         "volume_m3": volume_m3,
+        "tipo_madeira": tipo_madeira,
     }
     if linha and dia_inicio:
+        # ver agendar(): lê o tipo de madeira já guardado acima e duplica
+        # logo para a logística, se aplicável.
         agendamento = agendar(card["id"], linha, dia_inicio, volume_m3)
         resultado.update({"linha": linha, "dia_inicio": dia_inicio,
                           "duracao_dias": agendamento.get("duracao_dias", 1)})
@@ -341,6 +426,21 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
         # não se perder quando for agendada mais tarde.
         db.guardar_volume_producao(card["id"], volume_m3)
     return resultado
+
+def definir_tipo_madeira(basecamp_card_id: int, tipo_madeira: str) -> dict:
+    """Define o tipo de madeira (seca/verde) de uma OF — se ela já
+    estiver agendada e ainda não tiver duplicado de logística, cria-o
+    agora (ver _talvez_duplicar_logistica): cobre o caso de uma OF que foi
+    agendada antes de se saber o tipo de madeira."""
+    tipo_madeira = (tipo_madeira or "").strip().lower()
+    if tipo_madeira not in TIPOS_MADEIRA:
+        return {"erro": "tipo de madeira desconhecido — usa \"seca\" ou \"verde\""}
+    db.guardar_tipo_madeira_producao(basecamp_card_id, tipo_madeira)
+    existente = db.agendamento_producao(basecamp_card_id)
+    if existente and existente["linha"] and existente["dia_inicio"]:
+        _talvez_duplicar_logistica(basecamp_card_id, existente["dia_inicio"],
+                                   existente["duracao_dias"], tipo_madeira)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "tipo_madeira": tipo_madeira}
 
 def pagina_planeamento() -> str:
     return _TEMPLATE
@@ -401,13 +501,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .filaHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
   .filaHead h2{margin:0;font-size:15px;font-weight:700;color:var(--ink)}
   .filaRow{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 4px}
-  .qcard{flex:0 0 auto;min-width:190px;max-width:230px;background:var(--paper);border:1px solid var(--line);
+  .qcard{position:relative;flex:0 0 auto;min-width:190px;max-width:230px;background:var(--paper);border:1px solid var(--line);
     border-left:5px solid var(--grey);border-radius:9px;padding:9px 11px;touch-action:none;cursor:grab;
     box-shadow:0 1px 2px rgba(0,0,0,.07)}
   .qcard:hover{box-shadow:0 2px 6px rgba(0,0,0,.10)}
   .qcard .tt{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .qcard .of{font-size:12px;color:var(--dim);margin-top:2px}
   .empty{color:var(--dim);font-size:13.5px;padding:6px 0}
+
+  .secTit{font-size:15px;font-weight:700;color:var(--ink);margin:22px 0 10px}
+  .lblLog{cursor:default}
+  .lblLog:hover{background:transparent}
 
   .board{display:flex;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
@@ -459,6 +563,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .blk.clipL{border-top-left-radius:0;border-bottom-left-radius:0;border-left-style:dashed}
   .blk.clipR{border-top-right-radius:0;border-bottom-right-radius:0;border-right:1px dashed var(--edge)}
   .ghost{position:fixed;z-index:99;pointer-events:none;box-shadow:0 8px 22px rgba(0,0,0,.22);opacity:.95}
+
+  .blk.selecionado,.qcard.selecionado{outline:2px solid var(--blue);outline-offset:1px;z-index:8}
+  .editBtn{position:absolute;top:2px;right:2px;width:19px;height:19px;line-height:19px;
+    text-align:center;border-radius:5px;background:rgba(255,255,255,.85);color:var(--dim);
+    font-size:11px;cursor:pointer;pointer-events:auto}
+  .editBtn:hover{background:#fff;color:var(--ink)}
+  .qcard .editBtn{background:var(--canvas)}
 
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
@@ -553,6 +664,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 
+  <h2 class="secTit">Logística — dia de carregamento</h2>
+  <div class="board boardLog" id="boardLog">
+    <div class="labels" id="labelsLog"><div class="head"></div><div class="lbl lblLog">Carregar</div></div>
+    <div class="scroll" id="scrollLog">
+      <div class="track">
+        <div class="days" id="daysLog"></div>
+        <div class="lanes" id="lanesLog"></div>
+      </div>
+    </div>
+  </div>
+
   <details class="log" open>
     <summary>Registo — o que foi gravado</summary>
     <ul id="log"></ul>
@@ -584,13 +706,31 @@ const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
 let LINHAS=[];
 let CAPACIDADES={};
 let cards=[];
+let cardsLog=[];
+let selecionadoId=null;
 let view={mode:"semana",start:Math.max(HOJE,0),len:6};
 let undoStack=[], logs=[], DAY=92, LANE=78;
 
 const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
+const cardLog=id=>cardsLog.find(c=>c.id===id);
 const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const atrasado=c=>c.prazo && c.prazo<hojeISO;
+
+/* clicar num card (fila, produção ou logística) destaca-o a ele e ao seu
+   par na outra tabela (mesma OF, mesmo basecamp_card_id) — em vez de abrir
+   logo a ficha de edição (pedido explícito do Rui, 2026-09: um clique
+   simples só alinha visualmente os dois; a edição passa a ter um botão
+   próprio, "✎", em cada card). */
+function selecionar(id){
+  selecionadoId = (selecionadoId===id) ? null : id;
+  aplicarSelecao();
+}
+function aplicarSelecao(){
+  document.querySelectorAll(".blk,.qcard").forEach(el=>{
+    el.classList.toggle("selecionado", selecionadoId!==null && +el.dataset.id===selecionadoId);
+  });
+}
 
 /* lista fixa de cores manuais — uma OF sem cor manual usa a cor
    automática (amarelo em Produzido, vermelho se atrasada, cinza por
@@ -620,18 +760,33 @@ async function carregar(){
     LINHAS=d.linhas; CAPACIDADES=d.capacidades||{};
     cards=[
       ...d.bolsa.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,linha:null,gs:null,dur:1,ordem:0})),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
-        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,linha:LINHAS.indexOf(c.linha),
+        prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
         gs:idxOf(c.dia_inicio),dur:c.duracao_dias,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
+    cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
+      url:c.url,cor:c.cor,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render();
-    log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas`);
+    log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas, ${cardsLog.length} na logística`);
   }catch(e){
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Falhou a ligação ao Basecamp";
     log("local",`erro a ler o Basecamp: ${e}`);
   }
+}
+
+/* releitura mais leve, só da logística — usada depois de agendar/definir
+   madeira, para apanhar um duplicado novo que possa ter sido criado do
+   lado do servidor, sem perturbar o resto do ecrã. */
+async function atualizarLogistica(){
+  try{
+    const r=await fetch("/planeamento-ecos-largos/dados");
+    const d=await r.json();
+    cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
+      url:c.url,cor:c.cor,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
+    renderLogistica();
+  }catch(e){ /* falha silenciosa — não é uma ação que a pessoa pediu diretamente */ }
 }
 
 /* ---------- capacidade por linha (m³/dia), editável ---------- */
@@ -698,6 +853,7 @@ function metrics(){
   document.documentElement.style.setProperty("--day",DAY+"px");
   document.documentElement.style.setProperty("--lane",LANE+"px");
   $("#board").classList.toggle("dense",DAY<70);
+  $("#boardLog").classList.toggle("dense",DAY<70);
 }
 function days(){ return MASTER.slice(view.start,view.start+view.len); }
 function renderLabels(){
@@ -710,13 +866,14 @@ function renderLabels(){
 }
 function renderDays(){
   const D=days();
-  $("#days").innerHTML=D.map((d,i)=>{
+  const html=D.map((d,i)=>{
     const wk=d.dow===6, hoje=view.start+i===HOJE;
     return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}">
       <div class="dn">${view.mode==="mes"?d.dd:DOW[d.dow]+" "+d.dd}</div>
       <div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div></div>`;
   }).join("");
-  $("#days").style.width=(D.length*DAY)+"px";
+  $("#days").innerHTML=html; $("#days").style.width=(D.length*DAY)+"px";
+  $("#daysLog").innerHTML=html; $("#daysLog").style.width=(D.length*DAY)+"px";
 }
 /* várias OFs cabem na mesma linha/dia enquanto a soma dos seus ritmos
    diários (volume ÷ duração) não ultrapassar a capacidade dessa linha —
@@ -766,26 +923,59 @@ function renderLanes(){
     el.style.top=(c.linha*LANE+PAD+c._topoFracao*usavel)+"px";
     el.style.width=((r-l)*DAY-8)+"px";
     el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
-    el.innerHTML=`<div class="tt">${c.titulo}</div>
+    el.innerHTML=`<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
       <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`;
     bl.appendChild(el);
   });
-  stats();
+  stats(); aplicarSelecao();
 }
 function renderFila(){
   const q=cards.filter(c=>c.linha===null);
   $("#fila").innerHTML = q.length ? q.map(c=>
     `<div class="qcard" data-id="${c.id}" style="border-left-color:${corCard(c)}">
+     <div class="editBtn" data-edit="${c.id}" title="Editar">✎</div>
      <div class="tt">${c.titulo}</div>
      <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`).join("")
     : '<div class="empty">Fila vazia.</div>';
+  aplicarSelecao();
+}
+/* logística: uma única "linha" (sem divisão por linhas de produção),
+   cards empilhados pela mesma lógica de encaixe (capacidade 0 = sempre
+   altura inteira, um por cima do outro). */
+function renderLogistica(){
+  const D=days();
+  const hoje=(d)=>MASTER.indexOf(d)===HOJE;
+  let h='<div class="row">'+D.map(d=>
+    `<div class="cell${d.dow===6?" wk":""}${hoje(d)?" hoje":""}"></div>`).join("")+'</div>';
+  h+='<div class="blocks" id="blocksLog"></div>';
+  const lanes=$("#lanesLog"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
+  const bl=$("#blocksLog");
+  encaixarCardsLinha(cardsLog, 0);
+  const PAD=4;
+  cardsLog.forEach(c=>{
+    const a=c.gs-view.start;
+    if(a<0||a>=view.len) return;
+    const usavel=LANE-PAD;
+    const el=document.createElement("div");
+    el.className="blk";
+    el.tabIndex=0; el.dataset.id=c.id;
+    el.style.borderLeftColor=corCard(c);
+    el.style.left=(a*DAY+3)+"px";
+    el.style.top=(PAD+c._topoFracao*usavel)+"px";
+    el.style.width=(DAY-8)+"px";
+    el.style.height=Math.max(16,c._alturaFracao*usavel-PAD)+"px";
+    el.innerHTML=`<div class="editBtn" data-editlog="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
+      <div class="of">${c.coluna||""}</div>`;
+    bl.appendChild(el);
+  });
+  aplicarSelecao();
 }
 function stats(){
   $("#statBolsa").textContent=cards.filter(c=>c.linha===null).length;
   $("#statAgendadas").textContent=cards.filter(c=>c.linha!==null).length;
 }
 function render(){
-  metrics(); renderLabels(); renderDays(); renderLanes(); renderFila();
+  metrics(); renderLabels(); renderDays(); renderLanes(); renderFila(); renderLogistica();
   $("#range").textContent=rangeLabel();
   document.querySelectorAll("#seg button").forEach(b=>b.classList.toggle("on",b.dataset.m===view.mode));
 }
@@ -821,6 +1011,7 @@ async function guardarAgendamento(c, anterior){
     }else{
       c.dur=d.duracao_dias; c.volume=d.volume_m3;
       log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${c.dur}d`);
+      atualizarLogistica(); // pode ter criado agora o duplicado de logística
     }
   }catch(e){ log("local",`erro ao guardar: ${e}`); }
   $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
@@ -839,6 +1030,7 @@ function sync(c, anterior){ if(c.linha!==null && c.gs!==null) guardarAgendamento
 /* ---------- arrastar dentro da grelha ---------- */
 let drag=null;
 $("#lanes").addEventListener("pointerdown",e=>{
+  if(e.target.closest(".editBtn"))return;
   const b=e.target.closest(".blk"); if(!b)return;
   const c=card(+b.dataset.id);
   drag={el:b,c,x0:e.clientX,y0:e.clientY,gs0:c.gs,lin0:c.linha,dur0:c.dur,dx:0,dy:0};
@@ -871,6 +1063,7 @@ $("#lanes").addEventListener("pointerup",()=>{
 /* fila → grelha */
 let qdrag=null;
 $("#fila").addEventListener("pointerdown",e=>{
+  if(e.target.closest(".editBtn"))return;
   const q=e.target.closest(".qcard"); if(!q)return;
   const g=q.cloneNode(true); g.className="qcard ghost";
   g.style.width=q.offsetWidth+"px"; document.body.appendChild(g);
@@ -892,12 +1085,59 @@ $("#fila").addEventListener("pointerup",e=>{
   renderFila(); renderLanes(); sync(c, anterior);
 });
 
+/* ---------- arrastar na logística (só o dia muda, não há linhas) ---------- */
+let dragLog=null;
+$("#lanesLog").addEventListener("pointerdown",e=>{
+  if(e.target.closest(".editBtn"))return;
+  const b=e.target.closest(".blk"); if(!b)return;
+  const c=cardLog(+b.dataset.id);
+  dragLog={el:b,c,x0:e.clientX,gs0:c.gs,dx:0};
+  b.setPointerCapture(e.pointerId); b.classList.add("drag"); e.preventDefault();
+});
+$("#lanesLog").addEventListener("pointermove",e=>{
+  if(!dragLog)return;
+  let dd=Math.round((e.clientX-dragLog.x0)/DAY);
+  dd=clamp(dd, -dragLog.gs0, MASTER.length-1-dragLog.gs0);
+  dragLog.dx=dd;
+  dragLog.el.style.transform=`translate(${dd*DAY}px,0)`;
+});
+$("#lanesLog").addEventListener("pointerup",()=>{
+  if(!dragLog)return; const c=dragLog.c;
+  const moved=dragLog.dx;
+  dragLog.el.classList.remove("drag");
+  if(!moved){ dragLog.el.style.transform=""; dragLog=null; return; }
+  c.gs+=dragLog.dx;
+  dragLog=null;
+  renderLogistica(); moverLogisticaServidor(c);
+});
+async function moverLogisticaServidor(c){
+  $("#syncDot").classList.add("busy"); $("#syncTxt").textContent="A gravar…";
+  try{
+    const r=await fetch("/planeamento-ecos-largos/logistica/mover",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({basecamp_card_id:c.id,dia_carregamento:MASTER[c.gs].iso})});
+    const d=await r.json();
+    if(d.erro){ log("local",`erro ao mover carregamento: ${d.erro}`); }
+    else log("local",`carregamento de "${c.titulo}" movido para ${MASTER[c.gs].iso}`);
+  }catch(e){ log("local",`erro ao mover carregamento: ${e}`); }
+  $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
+}
+
 /* ---------- ficha ---------- */
+/* um clique simples num card (fila, produção ou logística) só destaca-o a
+   ele e ao seu par na outra tabela — a edição fica no botão "✎" de cada
+   card (pedido explícito do Rui, 2026-09). */
 $("#lanes").addEventListener("click",e=>{
-  const b=e.target.closest(".blk"); if(b) openSheet(+b.dataset.id);
+  if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
+  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id);
 });
 $("#fila").addEventListener("click",e=>{
-  const q=e.target.closest(".qcard"); if(q) openSheet(+q.dataset.id);
+  if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
+  const q=e.target.closest(".qcard"); if(q) selecionar(+q.dataset.id);
+});
+$("#lanesLog").addEventListener("click",e=>{
+  if(e.target.closest(".editBtn")){ openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
+  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id);
 });
 function openSheet(id){
   const c=card(id);
@@ -918,6 +1158,12 @@ function openSheet(id){
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
     <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30"></div>
     <div class="acts"><button class="btn" id="guardarVol">Guardar volume</button></div>
+    <div class="frow"><label>Madeira</label><select id="fMad">
+      <option value="">Não especificado</option>
+      <option value="seca"${c.madeira==="seca"?" selected":""}>Seca</option>
+      <option value="verde"${c.madeira==="verde"?" selected":""}>Verde</option>
+    </select></div>
+    <div class="acts"><button class="btn" id="guardarMad">Guardar madeira</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
     <div class="cores">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
@@ -996,6 +1242,22 @@ function openSheet(id){
       render(); closeSheet();
     }catch(e){ alert("Falhou a guardar: "+e); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; }
   };
+  $("#guardarMad").onclick=async()=>{
+    const tipo=$("#fMad").value;
+    if(!tipo){ alert("Escolhe Seca ou Verde."); return; }
+    $("#guardarMad").textContent="A guardar…"; $("#guardarMad").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/madeira",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,tipo_madeira:tipo})});
+      const d=await r.json();
+      if(d.erro){ alert(d.erro); $("#guardarMad").textContent="Guardar madeira"; $("#guardarMad").disabled=false; return; }
+      c.madeira=tipo;
+      log("local",`madeira de "${c.titulo}" atualizada: ${tipo}`);
+      await atualizarLogistica();
+      render(); closeSheet();
+    }catch(e){ alert("Falhou a guardar: "+e); $("#guardarMad").textContent="Guardar madeira"; $("#guardarMad").disabled=false; }
+  };
   $("#apagar").onclick=async()=>{
     if(!confirm(`Apagar definitivamente "${c.titulo}"?\n\nIsto manda o card para o lixo no Basecamp (fica lá recuperável durante algum tempo, tal como apagar manualmente).`)) return;
     $("#apagar").textContent="A apagar…"; $("#apagar").disabled=true;
@@ -1006,12 +1268,65 @@ function openSheet(id){
       const d=await r.json();
       if(d.erro){ alert(d.erro); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; return; }
       cards=cards.filter(x=>x.id!==c.id);
+      cardsLog=cardsLog.filter(x=>x.id!==c.id);
       log("local",`apagado: ${c.titulo}`);
       render(); closeSheet();
     }catch(e){ alert("Falhou a apagar: "+e); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; }
   };
 }
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
+
+/* ---------- ficha de logística ---------- */
+function openSheetLogistica(id){
+  const c=cardLog(id);
+  const d=MASTER[c.gs];
+  $("#sheet").innerHTML=`
+    <div class="of mono">card ${c.id} · logística</div>
+    <h3>${c.titulo}</h3>
+    <div class="kv"><span>Dia de carregamento</span><b>${DOW[d.dow]} ${d.dd} ${MESC[d.mo]}</b></div>
+    <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
+    <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor</label>
+    <div class="cores">${Object.entries(CORES).map(([chave,v])=>
+      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+    <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp.</div>
+    <div class="acts">
+      ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
+      <button class="btn warn" id="apagarLog">Apagar duplicado</button>
+      <button class="btn" id="close">Fechar</button>
+    </div>`;
+  $("#veil").classList.add("on"); $("#sheet").classList.add("on");
+  $("#close").onclick=$("#veil").onclick=closeSheet;
+  $(".cores").querySelectorAll(".swatch").forEach(sw=>{
+    sw.onclick=async()=>{
+      const cor=sw.dataset.cor;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/logistica/cor",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,cor})});
+        const dd=await r.json();
+        if(dd.erro){ alert(dd.erro); return; }
+        c.cor=cor||null;
+        $(".cores").querySelectorAll(".swatch").forEach(x=>x.classList.remove("sel"));
+        sw.classList.add("sel");
+        log("local",`cor do carregamento de "${c.titulo}" atualizada`);
+        renderLogistica();
+      }catch(e){ alert("Falhou a guardar: "+e); }
+    };
+  });
+  $("#apagarLog").onclick=async()=>{
+    if(!confirm(`Apagar o duplicado de logística de "${c.titulo}"?\n\nNão afeta a produção nem o Basecamp.`)) return;
+    $("#apagarLog").textContent="A apagar…"; $("#apagarLog").disabled=true;
+    try{
+      await fetch("/planeamento-ecos-largos/logistica/apagar",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id})});
+      cardsLog=cardsLog.filter(x=>x.id!==c.id);
+      log("local",`duplicado de logística apagado: ${c.titulo}`);
+      renderLogistica(); closeSheet();
+    }catch(e){ alert("Falhou a apagar: "+e); $("#apagarLog").textContent="Apagar duplicado"; $("#apagarLog").disabled=false; }
+  };
+}
 
 /* ---------- nova encomenda ---------- */
 function openForm(pref){
@@ -1062,8 +1377,9 @@ function openForm(pref){
       const d=await r.json();
       if(d.erro){ $("#fErr").textContent=d.erro; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; return; }
       cards.unshift({id:d.basecamp_card_id,titulo:d.titulo,coluna:d.coluna_basecamp,prazo:d.prazo,url:d.url,
-        volume:d.volume_m3,cor:null,ordem:0,linha:linhaIdx,gs,dur:d.duracao_dias||1});
+        volume:d.volume_m3,madeira:d.tipo_madeira||null,cor:null,ordem:0,linha:linhaIdx,gs,dur:d.duracao_dias||1});
       log("local",`criado no Basecamp (Triagem): ${d.titulo}`);
+      if(linhaIdx!==null) atualizarLogistica();
       render(); closeSheet();
       setTimeout(()=>{ const b=document.querySelector(`.blk[data-id="${d.basecamp_card_id}"]`)||
         document.querySelector(`.qcard[data-id="${d.basecamp_card_id}"]`); if(b)b.classList.add("flash"); },30);
@@ -1098,12 +1414,21 @@ document.addEventListener("keydown",e=>{
 });
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 
+/* as duas tabelas mostram sempre as mesmas datas — sincroniza o scroll
+   horizontal entre elas para os dias ficarem sempre alinhados ao navegar. */
+let scrollSync=false;
+function ligarScrollSync(a,b){
+  a.addEventListener("scroll",()=>{ if(scrollSync)return; scrollSync=true; b.scrollLeft=a.scrollLeft; scrollSync=false; });
+}
+ligarScrollSync($("#scroll"),$("#scrollLog"));
+ligarScrollSync($("#scrollLog"),$("#scroll"));
+
 carregar();
 /* relê o Basecamp sozinho de vez em quando (ex: para apanhar uma OF que
    mudou de coluna lá, sem ser preciso recarregar a página à mão) — nunca
    enquanto a ficha estiver aberta ou a arrastar algo, para não perder o
    que a pessoa está a fazer. */
-setInterval(()=>{ if(!drag && !qdrag && !$("#veil").classList.contains("on")) carregar(); }, 120000);
+setInterval(()=>{ if(!drag && !dragLog && !qdrag && !$("#veil").classList.contains("on")) carregar(); }, 120000);
 </script>
 </body>
 </html>
