@@ -176,12 +176,22 @@ def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
     conhecido: ocupa a linha por completo nesses dias (`float("inf")`),
     tal como acontecia antes de existir volume/capacidade — conservador,
     para nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora
-    o próprio card (para permitir reagendar/mover uma OF já colocada)."""
+    o próprio card (para permitir reagendar/mover uma OF já colocada).
+
+    Bug real (Rui, 2026-09): uma OF que já saiu do fluxo ativo no
+    Basecamp (apagada/arquivada por lá diretamente, sem passar por
+    apagar_encomenda) deixa o agendamento local órfão — sem isto, esse
+    órfão continuava a "ocupar" a linha para sempre, invisível no quadro,
+    forçando encomendas novas a repartir-se sem motivo nenhum visível.
+    Por isso só conta OFs que ainda existem mesmo no Basecamp."""
+    ids_ativos = {c["id"] for c in _cards_of_ativos()}
     ocupacao = {}
     for a in db.agendamentos_producao_ecos_largos():
         if a["linha"] != linha or not a["dia_inicio"]:
             continue
         if excluir_id is not None and a["basecamp_card_id"] == excluir_id:
+            continue
+        if a["basecamp_card_id"] not in ids_ativos:
             continue
         duracao = max(1, a["duracao_dias"] or 1)
         ritmo = (a["volume_m3"] / duracao) if a["volume_m3"] else None
