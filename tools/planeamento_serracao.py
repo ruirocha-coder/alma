@@ -398,6 +398,24 @@ def apagar_logistica(basecamp_card_id: int) -> dict:
     db.remover_logistica_carregamento(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
+def corrigir_ordem_titulos_existentes() -> dict:
+    """Correção pontual (pedido explícito do Rui, 2026-09): troca a ordem
+    dos cards já existentes de "Peça — Cliente" para "Cliente — Peça",
+    para ficarem iguais aos criados a partir de agora (ver
+    criar_encomenda). Só mexe em títulos com exatamente um " — " e as
+    duas partes não vazias — para nunca arriscar baralhar um título sem
+    cliente associado."""
+    alterados = []
+    for card in _cards_of_ativos():
+        titulo = card.get("titulo") or ""
+        partes = titulo.split(" — ")
+        if len(partes) != 2 or not partes[0].strip() or not partes[1].strip():
+            continue
+        novo_titulo = f"{partes[1].strip()} — {partes[0].strip()}"
+        basecamp.atualizar_titulo_card(card["id"], novo_titulo, PROJETO)
+        alterados.append({"basecamp_card_id": card["id"], "antes": titulo, "depois": novo_titulo})
+    return {"alterados": alterados}
+
 TIPOS_MADEIRA = {"seca": "Seca", "verde": "Verde"}
 
 def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tipo_madeira: str = None,
