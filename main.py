@@ -769,6 +769,15 @@ def diagnostico_avaliacoes_cargas_toros(ano: int = None):
     avaliacoes = avaliacoes_cargas_toros_ano(ano_resolvido)
     return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
 
+@app.get("/ecos-largos/diagnostico-dashboard-bruto")
+def diagnostico_dashboard_bruto_producao():
+    """Diagnóstico temporário: mostra o JSON bruto devolvido pela API do
+    dashboard de produção — usado para verificar se os alertas de setor já
+    trazem algum campo de linha/localização, antes de decidir como
+    apresentar essa correspondência no resumo diário (ver
+    agents/resumo_diario_ecos_largos.py). A remover depois de usado."""
+    return ecos_largos.ler_dashboard_producao()
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
