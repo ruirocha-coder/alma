@@ -574,7 +574,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .filaHead h2{margin:0;font-size:15px;font-weight:700;color:var(--ink)}
   .filaRow{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 4px}
   .qcard{position:relative;flex:0 0 auto;min-width:190px;max-width:230px;background:var(--paper);border:1px solid var(--line);
-    border-left:5px solid var(--grey);border-radius:9px;padding:9px 11px;touch-action:none;cursor:grab;
+    border-left:10px solid var(--grey);border-radius:9px;padding:9px 11px;touch-action:none;cursor:grab;
     box-shadow:0 1px 2px rgba(0,0,0,.07)}
   .qcard:hover{box-shadow:0 2px 6px rgba(0,0,0,.10)}
   .qcard .tt{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -620,7 +620,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .blocks{position:absolute;inset:0;pointer-events:none}
   .blk{position:absolute;box-sizing:border-box;
-    background:var(--paper);border:1px solid var(--line);border-left:5px solid var(--grey);
+    background:var(--paper);border:1px solid var(--line);border-left:10px solid var(--grey);
     border-radius:9px;padding:5px 9px;overflow:hidden;pointer-events:auto;cursor:grab;
     touch-action:none;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,.09)}
   .blk:hover{box-shadow:0 2px 7px rgba(0,0,0,.13)}
