@@ -1484,8 +1484,8 @@ function openSheetLogistica(id){
 function openForm(){
   $("#sheet").innerHTML=`
     <h3>Criar encomenda</h3>
-    <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
     <div class="frow"><label>Cliente</label><input id="fCli" placeholder="Ex: Casa Cerne"></div>
+    <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
     <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" placeholder="Ex: 30"></div>
     <div class="frow"><label>Madeira</label><select id="fMadeira">
       <option value="">Não especificado</option>
@@ -1501,7 +1501,7 @@ function openForm(){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $("#fTt").focus();
+  $("#fCli").focus();
   $("#fSave").onclick=async()=>{
     const titulo=$("#fTt").value.trim(), cliente=$("#fCli").value.trim(), notas=$("#fNotas").value.trim();
     const volume=$("#fVol").value?+$("#fVol").value:null;
