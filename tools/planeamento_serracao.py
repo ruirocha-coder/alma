@@ -43,11 +43,15 @@ LINHAS = [
 ]
 
 # lista fixa e pequena de cores manuais (pedido explícito do Rui, 2026-09)
-# — além destas, uma OF tem uma cor automática: amarelo quando chega à
-# coluna Produzido no Basecamp, vermelho quando está atrasada, cinza por
-# omissão (ver corCard no template). Uma cor manual sobrepõe-se sempre à
-# automática, até ser limpa (cor=None).
+# — além destas, uma OF tem uma cor automática de fundo, de acordo com a
+# coluna real no Basecamp (ver ESTADOS_COR/cores_estado no template) —
+# também editável pela equipa, não só a manual.
 CORES_VALIDAS = {"vermelho", "amarelo", "verde", "azul", "roxo", "laranja", "cinza"}
+
+# estados/colunas do Basecamp que têm uma cor automática de fundo no
+# quadro, editável pela equipa (ver atualizar_cor_estado) — chave interna
+# -> título exato da coluna no Basecamp.
+ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido"}
 
 def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
@@ -115,7 +119,7 @@ def estado_planeamento_serracao() -> dict:
     for lg in db.logistica_carregamentos_ecos_largos():
         c = cards_por_id.get(lg["basecamp_card_id"])
         if not c:
-            continue  # OF já saiu do fluxo ativo (arquivada/Vendido) — deixa de aparecer
+            continue  # OF já saiu do fluxo ativo no Basecamp — deixa de aparecer
         logistica.append({
             "basecamp_card_id": lg["basecamp_card_id"],
             "titulo": c["titulo"],
@@ -128,6 +132,7 @@ def estado_planeamento_serracao() -> dict:
     return {
         "linhas": LINHAS,
         "capacidades": {linha: capacidades.get(linha) for linha in LINHAS},
+        "cores_estado": db.cores_estado_producao(),
         "bolsa": bolsa,
         "agendadas": agendadas,
         "logistica": logistica,
@@ -274,6 +279,18 @@ def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
     if capacidade_m3_dia <= 0:
         return {"erro": "capacidade tem de ser maior que 0"}
     return db.atualizar_capacidade_linha_producao(linha, capacidade_m3_dia)
+
+def atualizar_cor_estado(estado: str, cor: str) -> dict:
+    """Atualiza a cor automática de fundo de um estado/coluna do Basecamp
+    (ver ESTADOS_COR) — editável pela equipa, tal como a capacidade de
+    cada linha (pedido explícito do Rui, 2026-09: as duas paletas de cor,
+    a manual por OF e a automática por estado, devem poder ser mudadas)."""
+    if estado not in ESTADOS_COR:
+        return {"erro": f"estado desconhecido: {estado!r} — usa uma de {sorted(ESTADOS_COR)}"}
+    cor = (cor or "").strip().lower()
+    if cor not in CORES_VALIDAS:
+        return {"erro": f"cor desconhecida: {cor!r} — usa uma de {sorted(CORES_VALIDAS)}"}
+    return db.atualizar_cor_estado_producao(estado, cor)
 
 def desagendar(basecamp_card_id: int) -> dict:
     """Devolve uma OF à bolsa por agendar — só na base local."""
@@ -680,6 +697,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 
+  <details class="log">
+    <summary>Cores por estado (fundo automático dos cards)</summary>
+    <div id="coresEstadoLista" style="padding:2px 16px 14px"></div>
+  </details>
+
   <details class="log" open>
     <summary>Registo — o que foi gravado</summary>
     <ul id="log"></ul>
@@ -750,39 +772,44 @@ function aplicarSelecao(){
 /* lista fixa de cores — pedido explícito do Rui (2026-09):
    - Produção/fila: a barra lateral é manual (tipo de produto, ex:
      quadradilho) — ver corProduto; o FUNDO do card é automático, de
-     acordo com a coluna do Basecamp — ver corEstadoFundo (amarelo em
-     Produzido, laranja em Em Produção, roxo em Vendido, sem cor nas
-     restantes colunas).
+     acordo com a coluna do Basecamp — ver corEstadoFundo (uma cor por
+     estado, editável pela equipa — ver CORES_ESTADO/painel "Cores por
+     estado").
    - Logística: continua uma única cor por card (como antes) — manual
      (a equipa marca a verde assim que carrega) sobrepõe-se à automática
-     (mesmas 3 cores de estado) — ver corLogistica.
+     (mesmas cores de estado) — ver corLogistica.
    - Atrasada (prazo do Basecamp ultrapassado): já não usa cor nenhuma
      das duas — passa a um contorno vermelho próprio (ver .atrasado no
      CSS), para nunca competir com a cor de produto nem a de estado. */
 const CORES={
   cinza:{hex:"#9AA0A6",label:"Automática"},
   vermelho:{hex:"#C4452E",label:"Vermelho"},
-  amarelo:{hex:"#E0A02C",label:"Amarelo",fundo:"#FBEBD3"},
+  amarelo:{hex:"#E0A02C",label:"Amarelo"},
   verde:{hex:"#4E9A51",label:"Verde"},
   azul:{hex:"#1B6AC9",label:"Azul"},
-  roxo:{hex:"#8A6FA0",label:"Roxo",fundo:"#EAE4F1"},
-  laranja:{hex:"#D97B29",label:"Laranja",fundo:"#F9E3CD"},
+  roxo:{hex:"#8A6FA0",label:"Roxo"},
+  laranja:{hex:"#D97B29",label:"Laranja"},
 };
+// estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
+const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido"};
+let CORES_ESTADO={}; // chave interna -> chave de CORES, carregado em carregar()
+function tintRgba(hex,alpha){
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 function corEstadoFundo(c){
-  if(c.coluna==="Vendido") return CORES.roxo.fundo;
-  if(c.coluna==="Produzido") return CORES.amarelo.fundo;
-  if(c.coluna==="Em Produção") return CORES.laranja.fundo;
-  return null;
+  const chave=ESTADOS_COR[c.coluna];
+  const cor=chave&&CORES_ESTADO[chave];
+  return (cor&&CORES[cor]) ? tintRgba(CORES[cor].hex,.22) : null;
 }
 function corProduto(c){
   return (c.cor && CORES[c.cor]) ? CORES[c.cor].hex : CORES.cinza.hex;
 }
 function corLogistica(c){
   if(c.cor && CORES[c.cor]) return CORES[c.cor].hex;
-  if(c.coluna==="Vendido") return CORES.roxo.hex;
-  if(c.coluna==="Produzido") return CORES.amarelo.hex;
-  if(c.coluna==="Em Produção") return CORES.laranja.hex;
-  return CORES.cinza.hex;
+  const chave=ESTADOS_COR[c.coluna];
+  const cor=chave&&CORES_ESTADO[chave];
+  return (cor&&CORES[cor]) ? CORES[cor].hex : CORES.cinza.hex;
 }
 
 /* ---------- carregar dados reais do Basecamp + agendamento local ---------- */
@@ -791,7 +818,7 @@ async function carregar(){
   try{
     const r=await fetch("/planeamento-ecos-largos/dados");
     const d=await r.json();
-    LINHAS=d.linhas; CAPACIDADES=d.capacidades||{};
+    LINHAS=d.linhas; CAPACIDADES=d.capacidades||{}; CORES_ESTADO=d.cores_estado||{};
     cards=[
       ...d.bolsa.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
@@ -802,7 +829,7 @@ async function carregar(){
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
       url:c.url,cor:c.cor,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
-    render();
+    render(); renderCoresEstado();
     log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas, ${cardsLog.length} na logística`);
   }catch(e){
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Falhou a ligação ao Basecamp";
@@ -840,6 +867,35 @@ async function editarCapacidade(linha){
     log("local",`capacidade de "${linha}" atualizada para ${num} m³/dia`);
     renderLabels();
   }catch(e){ alert("Falhou a guardar: "+e); }
+}
+
+/* painel "Cores por estado" — pedido explícito do Rui (2026-09): tal como
+   a cor manual de cada OF já era editável, a cor automática de cada
+   estado/coluna do Basecamp também passa a ser, com a mesma paleta. */
+function renderCoresEstado(){
+  $("#coresEstadoLista").innerHTML=Object.entries(ESTADOS_COR).map(([coluna,chave])=>`
+    <div style="margin:10px 0">
+      <div style="font-size:13px;color:var(--dim);margin-bottom:6px">${coluna}</div>
+      <div class="cores">${Object.entries(CORES).filter(([k])=>k!=="cinza").map(([k,v])=>
+        `<button class="swatch${CORES_ESTADO[chave]===k?" sel":""}" data-estado="${chave}" data-cor="${k}"
+          style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+    </div>`).join("");
+  $("#coresEstadoLista").querySelectorAll(".swatch").forEach(sw=>{
+    sw.onclick=async()=>{
+      const estado=sw.dataset.estado, cor=sw.dataset.cor;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/cor-estado",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({estado,cor})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); return; }
+        CORES_ESTADO[estado]=cor;
+        renderCoresEstado();
+        renderLanes(); renderFila(); renderLogistica();
+        log("local",`cor de "${sw.dataset.estado}" atualizada`);
+      }catch(e){ alert("Falhou a guardar: "+e); }
+    };
+  });
 }
 
 /* ---------- período ---------- */

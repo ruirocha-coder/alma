@@ -247,6 +247,15 @@ CREATE TABLE IF NOT EXISTS linhas_producao_ecos_largos (
     linha TEXT PRIMARY KEY,
     capacidade_m3_dia NUMERIC NOT NULL DEFAULT 40
 );
+
+-- cor automática de fundo de cada estado/coluna do Basecamp no quadro de
+-- planeamento (produzido/em_producao/vendido) — editável pela equipa (ver
+-- tools/planeamento_serracao.py), tal como a cor manual (tipo de produto)
+-- de cada OF já é. `cor` é sempre uma das chaves de CORES_VALIDAS.
+CREATE TABLE IF NOT EXISTS cores_estado_ecos_largos (
+    estado TEXT PRIMARY KEY,
+    cor TEXT NOT NULL
+);
 """
 
 # período de férias já anunciado pelo Rui no Mural da Gestão (post "Boas
@@ -305,6 +314,17 @@ INSERT INTO linhas_producao_ecos_largos (linha, capacidade_m3_dia) VALUES
     ('Linha 5 Tabuinha', 40),
     ('Linha 6 Alinhadeira', 40)
 ON CONFLICT (linha) DO NOTHING;
+"""
+
+# valores de partida pedidos pelo Rui (amarelo/laranja/roxo) — a equipa
+# edita isto no próprio quadro (ver tools/planeamento_serracao.py) —
+# ON CONFLICT DO NOTHING para nunca sobrescrever uma escolha já feita.
+SEED_CORES_ESTADO_ECOS_LARGOS = """
+INSERT INTO cores_estado_ecos_largos (estado, cor) VALUES
+    ('produzido', 'amarelo'),
+    ('em_producao', 'laranja'),
+    ('vendido', 'roxo')
+ON CONFLICT (estado) DO NOTHING;
 """
 
 # à parte do SCHEMA principal: a tabela perfis já existe em produção com
@@ -378,6 +398,7 @@ def inicializar_schema():
             cur.execute(SEED_PARAMETROS_ESTIMATIVA)
             cur.execute(SEED_PAUSA_FERIAS_AGOSTO_2026)
             cur.execute(SEED_LINHAS_PRODUCAO_ECOS_LARGOS)
+            cur.execute(SEED_CORES_ESTADO_ECOS_LARGOS)
         conn.commit()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
@@ -1025,6 +1046,29 @@ def atualizar_capacidade_linha_producao(linha: str, capacidade_m3_dia: float) ->
             )
         conn.commit()
     return {"linha": linha, "capacidade_m3_dia": capacidade_m3_dia}
+
+def cores_estado_producao() -> dict:
+    """Cor automática de fundo de cada estado/coluna do Basecamp
+    (produzido/em_producao/vendido) no quadro de planeamento — editável
+    pela equipa (ver tools/planeamento_serracao.atualizar_cor_estado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT estado, cor FROM cores_estado_ecos_largos")
+            return {l["estado"]: l["cor"] for l in cur.fetchall()}
+
+def atualizar_cor_estado_producao(estado: str, cor: str) -> dict:
+    """Atualiza a cor automática de fundo de um estado/coluna do
+    Basecamp."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO cores_estado_ecos_largos (estado, cor)
+                   VALUES (%s, %s)
+                   ON CONFLICT (estado) DO UPDATE SET cor = EXCLUDED.cor""",
+                (estado, cor)
+            )
+        conn.commit()
+    return {"estado": estado, "cor": cor}
 
 def desagendar_producao(basecamp_card_id: int) -> dict:
     """Volta a pôr uma OF na bolsa por agendar (linha/dia a NULL), sem

@@ -500,6 +500,16 @@ def planeamento_ecos_largos_capacidade(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/cor-estado")
+def planeamento_ecos_largos_cor_estado(corpo: dict = Body(...)):
+    """Atualiza a cor automática de fundo de um estado/coluna do Basecamp
+    (produzido/em_producao/vendido) — ver
+    tools/planeamento_serracao.atualizar_cor_estado."""
+    resultado = planeamento_serracao.atualizar_cor_estado(corpo.get("estado"), corpo.get("cor"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/volume")
 def planeamento_ecos_largos_volume(corpo: dict = Body(...)):
     """Define/atualiza o volume (m³) de uma OF ainda na fila (sem linha/dia)
