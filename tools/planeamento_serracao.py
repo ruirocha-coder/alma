@@ -217,18 +217,33 @@ def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
     nada no 2º, cabe em 2 dias — 11 no primeiro, 24 no segundo — e não em
     4 como uma repartição uniforme exigiria).
 
+    Sábado e domingo nunca dão capacidade nenhuma (pedido explícito do
+    Rui, 2026-09): uma encomenda demasiado grande para acabar até
+    sexta-feira não passa para sábado — salta o fim de semana inteiro
+    (conta como dias de calendário ocupados, sem produção nenhuma neles)
+    e só continua a ser produzida na segunda-feira seguinte.
+
     Devolve quantos dias de calendário isso ocupa (o número de dias
     percorridos até o volume caber todo, mesmo que algum desses dias não
-    tenha contribuído nada — ex: um dia reservado por completo por outra
-    OF sem volume definido não dá espaço nenhum, mas continua a contar
-    como um dia ocupado do calendário), ou None se não couber dentro de
-    `limite` dias."""
+    tenha contribuído nada — um fim de semana, ou um dia reservado por
+    completo por outra OF sem volume definido, não dão espaço nenhum, mas
+    continuam a contar como dias ocupados do calendário), ou None se não
+    couber dentro de `limite` dias."""
     inicio = date.fromisoformat(dia_inicio)
     restante = float(volume_m3)
     for dias in range(1, limite + 1):
-        dia = (inicio + timedelta(days=dias - 1)).isoformat()
+        data = inicio + timedelta(days=dias - 1)
+        dia = data.isoformat()
         usado = ocupacao.get(dia, 0)
-        livre = 0 if usado == float("inf") else max(0, capacidade - usado)
+        # fim de semana não é dia de produção — nunca dá capacidade
+        # nenhuma, esteja o que estiver ocupado nesse dia (pedido
+        # explícito do Rui, 2026-09): uma encomenda grande demais para
+        # acabar até sexta-feira não passa para sábado, salta o fim de
+        # semana inteiro e continua na segunda-feira seguinte.
+        if data.weekday() >= 5:  # sábado=5, domingo=6
+            livre = 0
+        else:
+            livre = 0 if usado == float("inf") else max(0, capacidade - usado)
         restante -= livre
         if restante <= 1e-9:
             return dias
