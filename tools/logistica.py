@@ -231,7 +231,7 @@ def _campo(valor, rotulo: str) -> str:
 # nunca haver deriva na redação combinada com a equipa.
 CONDICOES_COM_TEXTO_FIXO = {"A", "B", "C", "D", "E", "I"}
 
-_ROTULO_CAMPO = {"data_entrada_armazem": "data de entrada em armazém",
+_ROTULO_CAMPO = {"data_entrada_armazem": "Data de Entrega do Fornecedor",
                  "data_entrega_cliente": "data de entrega ao cliente"}
 
 def gerar_texto_condicao_fixa(condicao: str, dados: dict, campos_em_falta: list = None) -> str:
@@ -250,7 +250,7 @@ def gerar_texto_condicao_fixa(condicao: str, dados: dict, campos_em_falta: list 
     numero = _campo(dados.get("numero_encomenda"), "N.º da encomenda")
     projeto_cliente = _campo(dados.get("cliente"), "nome do cliente/projeto")
     fornecedor = _campo(dados.get("fornecedor"), "nome do fornecedor")
-    data_entrada = _campo(_fmt_data(dados.get("data_entrada_armazem")), "data de entrada em armazém")
+    data_entrada = _campo(_fmt_data(dados.get("data_entrada_armazem")), "Data de Entrega do Fornecedor")
     data_entrega = _campo(_fmt_data(dados.get("data_entrega_cliente")), "data de entrega ao cliente")
 
     if condicao == "A":
@@ -278,7 +278,7 @@ Responsável: @Conceição Costa — por favor valida e envia."""
                 "48h. Sugere-se contacto telefónico. CC: @Conceição Costa @Isa Moreira")
 
     if condicao == "D":
-        return (f"A data de entrada em armazém prevista ({data_entrada}) já passou sem registo de "
+        return (f"A Data de Entrega do Fornecedor prevista ({data_entrada}) já passou sem registo de "
                 "confirmação. É necessário apurar o estado com o fornecedor e, se houver atraso, "
                 "comunicar ao cliente em menos de 24h. Proposta de email ao cliente disponível a "
                 "pedido. CC: @Conceição Costa @Isa Moreira")

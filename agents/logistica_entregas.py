@@ -14,11 +14,18 @@
 # para ser partilhada entre a sugestão semanal e o diagnóstico — nunca
 # duas versões desta lógica a divergir). A assunção original (um campo
 # tipo on_hold_at/on_hold no próprio card) estava errada e foi removida.
-# - As duas datas críticas (entrada em armazém / entrega ao cliente) e os
-#   restantes dados (cliente, n.º de encomenda, fornecedor) vêm das notas
-#   do card em texto livre, por isso são extraídos por IA (não há um
-#   formato fixo garantido) — revê os primeiros ciclos para confirmar que
-#   a extração está a funcionar bem com o formato real usado pela equipa.
+# - As duas datas críticas (Data de Entrega do Fornecedor / entrega ao
+#   cliente) e os restantes dados (cliente, n.º de encomenda, fornecedor)
+#   vêm das notas do card em texto livre, por isso são extraídos por IA
+#   (não há um formato fixo garantido) — revê os primeiros ciclos para
+#   confirmar que a extração está a funcionar bem com o formato real
+#   usado pela equipa. IMPORTANTE (pedido explícito do Rui, 2026-09-09):
+#   "chegou ao armazém" NUNCA é uma data nas notas — é decidido só pela
+#   coluna do card no Basecamp (ver tools.logistica.fase_encomenda). A
+#   "Data de Entrega do Fornecedor" é uma data diferente e anterior a
+#   isso: quando o FORNECEDOR promete entregar, usada só enquanto a
+#   encomenda ainda está em "Produção" (ver _MISSAO_EXTRACAO abaixo e
+#   tools.logistica.avaliar_condicao, condições B e D).
 import json, threading
 from datetime import date, datetime, timezone
 from agents.base import client
@@ -140,6 +147,25 @@ ENTREGA:&nbsp;", e por vezes com uma palavra extra antes da data, ex:
 aparece a seguir a essa etiqueta como "data_entrega_cliente". Procura
 sempre por essa etiqueta primeiro, antes de concluir que a data não está
 presente; só uses null se ela genuinamente não existir nas notas.
+
+REGRA ESPECIAL E ABSOLUTA para "data_entrada_armazem" (pedido explícito
+do Rui, 2026-09-09): este campo NUNCA significa "já chegou ao armazém"
+— isso é decidido só pela coluna do card no Basecamp (ver
+tools.logistica.fase_encomenda), nunca por uma data nas notas. O que
+este campo guarda é a "Data de Entrega do Fornecedor" — a data prevista
+em que o FORNECEDOR vai entregar a encomenda (usada só enquanto a
+encomenda ainda está em "Produção", para pressionar o fornecedor a
+tempo e avisar se essa data passar sem confirmação — ver
+tools.logistica.avaliar_condicao, condições B e D). Tal como
+"data_entrega_cliente" acima, as notas do card têm de ter um campo
+rotulado explicitamente "Data de Entrega do Fornecedor" (tolera
+variações óbvias de maiúsculas/espaçamento/pontuação, ex: "Data de
+Entrega do Fornecedor:", "DATA DE ENTREGA DO FORNECEDOR -") — usa SÓ E
+APENAS a data a seguir a essa etiqueta. Se essa etiqueta não existir nas
+notas, usa null — NUNCA infiras esta data de outro texto solto, e nunca
+a confundas com "data_entrega_cliente" (são campos independentes, um é
+o fornecedor a entregar à Interior Guider/Boa Safra, o outro é a entrega
+final ao cliente).
 
 "produtos_encomendados" resume, em poucas palavras, o que foi
 encomendado — o orçamento/PDF da encomenda, quando fornecido a seguir às
@@ -311,7 +337,7 @@ Dados da encomenda:
 - N.º de encomenda: {dados.get('numero_encomenda') or '(não identificado)'}
 - Fornecedor: {dados.get('fornecedor') or '(não identificado)'}
 - Designer responsável: {dados.get('designer') or '(não identificado)'}
-- Data de entrada em armazém: {dados.get('data_entrada_armazem') or '(não identificada)'}
+- Data de Entrega do Fornecedor: {dados.get('data_entrada_armazem') or '(não identificada)'}
 - Data de entrega ao cliente: {dados.get('data_entrega_cliente') or '(não identificada)'}
 
 Documentos de referência disponíveis (projeto Alma Data e outros documentos
