@@ -1157,22 +1157,51 @@ function renderDays(){
    só os visíveis), para a posição de cada um não saltar ao navegar entre
    semanas. */
 const ITEM_PROD_H=44, ITEM_PROD_GAP=4, ITEM_PROD_PAD=6;
+/* fim de semana não é dia de produção (pedido explícito do Rui, 2026-09):
+   um card que atravessa sábado/domingo não deve aparecer a "ocupar"
+   esses dias no quadro — só os dias em que se produz mesmo (ex: uma
+   encomenda de sexta a segunda mostra-se só na sexta e na segunda,
+   nunca um bloco contínuo a cobrir o fim de semana também). `c.dur`
+   continua a ser a duração em dias de calendário (usada pelo backend
+   para calcular capacidade/carregamento, ver _dias_necessarios_greedy),
+   mas a apresentação usa só os dias úteis dentro desse intervalo. */
+function diasUteisCard(c){
+  const dias=[];
+  for(let k=0;k<c.dur;k++){
+    const idx=c.gs+k, d=MASTER[idx];
+    if(d && !FDS(d)) dias.push(idx);
+  }
+  return dias;
+}
+/* agrupa os dias úteis de um card em blocos contíguos (segmentos) — um
+   card de sexta a segunda tem 2 segmentos (sexta sozinha, segunda
+   sozinha), separados pelo fim de semana que fica em branco entre eles. */
+function segmentosCard(c){
+  const segmentos=[];
+  diasUteisCard(c).forEach(idx=>{
+    const atual=segmentos[segmentos.length-1];
+    if(atual && idx===atual.fim+1) atual.fim=idx;
+    else segmentos.push({inicio:idx,fim:idx});
+  });
+  return segmentos;
+}
 function encaixarCardsLinha(cardsLinha){
   const ocupado={}; // índice do dia -> Set de slots já usados nesse dia
   let maxSlots=1;
   [...cardsLinha].sort((a,b)=>a.gs-b.gs||(a.ordem||0)-(b.ordem||0)||a.id-b.id).forEach(c=>{
+    const dias=diasUteisCard(c);
     let slot=0;
     for(;;slot++){
       let livre=true;
-      for(let k=0;k<c.dur;k++){
-        if((ocupado[c.gs+k]||new Set()).has(slot)){ livre=false; break; }
+      for(const idx of dias){
+        if((ocupado[idx]||new Set()).has(slot)){ livre=false; break; }
       }
       if(livre) break;
     }
     c._slot=slot;
-    for(let k=0;k<c.dur;k++){
-      if(!ocupado[c.gs+k]) ocupado[c.gs+k]=new Set();
-      ocupado[c.gs+k].add(slot);
+    for(const idx of dias){
+      if(!ocupado[idx]) ocupado[idx]=new Set();
+      ocupado[idx].add(slot);
     }
     maxSlots=Math.max(maxSlots,slot+1);
   });
@@ -1211,21 +1240,31 @@ function renderLanes(){
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   cards.filter(c=>c.linha!==null).forEach(c=>{
-    const a=c.gs-view.start, b=a+c.dur;
-    if(b<=0||a>=view.len) return;
-    const l=Math.max(a,0), r=Math.min(b,view.len);
-    const el=document.createElement("div");
-    el.className="blk"+(a<0?" clipL":"")+(b>view.len?" clipR":"")+(atrasado(c)?" atrasado":"");
-    el.tabIndex=0; el.dataset.id=c.id;
-    el.style.borderLeftColor=corProduto(c);
-    const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
-    el.style.left=(l*DAY+3)+"px";
-    el.style.top=(OFFSETS_LINHA[c.linha]+ITEM_PROD_PAD+c._slot*(ITEM_PROD_H+ITEM_PROD_GAP))+"px";
-    el.style.width=((r-l)*DAY-8)+"px";
-    el.style.height=ITEM_PROD_H+"px";
-    el.innerHTML=`<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-      <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`;
-    bl.appendChild(el);
+    // um card que atravessa um fim de semana desenha-se em vários
+    // segmentos (um por cada grupo de dias úteis seguidos), com um
+    // espaço em branco por cima do sábado/domingo — nunca um bloco
+    // contínuo a cobrir dias em que não há produção (ver segmentosCard).
+    const segmentos=segmentosCard(c);
+    segmentos.forEach((seg,i)=>{
+      const a=seg.inicio-view.start, b=seg.fim-view.start+1;
+      if(b<=0||a>=view.len) return;
+      const l=Math.max(a,0), r=Math.min(b,view.len);
+      const clipL=a<0||i>0, clipR=b>view.len||i<segmentos.length-1;
+      const el=document.createElement("div");
+      el.className="blk"+(clipL?" clipL":"")+(clipR?" clipR":"")+(atrasado(c)?" atrasado":"");
+      el.tabIndex=0; el.dataset.id=c.id;
+      el.style.borderLeftColor=corProduto(c);
+      const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
+      el.style.left=(l*DAY+3)+"px";
+      el.style.top=(OFFSETS_LINHA[c.linha]+ITEM_PROD_PAD+c._slot*(ITEM_PROD_H+ITEM_PROD_GAP))+"px";
+      el.style.width=((r-l)*DAY-8)+"px";
+      el.style.height=ITEM_PROD_H+"px";
+      el.innerHTML = i===0
+        ? `<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
+           <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`
+        : `<div class="tt">${c.titulo}</div>`;
+      bl.appendChild(el);
+    });
   });
   stats(); aplicarSelecao();
 }
@@ -1349,8 +1388,13 @@ $("#lanes").addEventListener("pointerdown",e=>{
   if(e.target.closest(".editBtn"))return;
   const b=e.target.closest(".blk"); if(!b)return;
   const c=card(+b.dataset.id);
-  drag={el:b,c,x0:e.clientX,y0:e.clientY,gs0:c.gs,lin0:c.linha,dur0:c.dur,dx:0,dy:0};
-  b.setPointerCapture(e.pointerId); b.classList.add("drag"); e.preventDefault();
+  // um card com fim de semana no meio tem vários segmentos (ver
+  // segmentosCard) — agarrar em qualquer um deles tem de arrastar todos
+  // juntos, senão só o segmento tocado se move durante o gesto e o
+  // outro fica visualmente para trás até ao próximo render.
+  const els=[...$("#blocks").querySelectorAll(`.blk[data-id="${c.id}"]`)];
+  drag={els,c,x0:e.clientX,y0:e.clientY,gs0:c.gs,lin0:c.linha,dur0:c.dur,dx:0,dy:0};
+  b.setPointerCapture(e.pointerId); els.forEach(el=>el.classList.add("drag")); e.preventDefault();
 });
 $("#lanes").addEventListener("pointermove",e=>{
   if(!drag)return;
@@ -1361,13 +1405,13 @@ $("#lanes").addEventListener("pointermove",e=>{
   const dl=clamp(linhaAtual-drag.lin0, -drag.lin0, LINHAS.length-1-drag.lin0);
   drag.dx=dd; drag.dy=dl;
   const desvioY=OFFSETS_LINHA[drag.lin0+dl]-OFFSETS_LINHA[drag.lin0];
-  drag.el.style.transform=`translate(${dd*DAY}px,${desvioY}px)`;
+  drag.els.forEach(el=>{ el.style.transform=`translate(${dd*DAY}px,${desvioY}px)`; });
 });
 $("#lanes").addEventListener("pointerup",()=>{
   if(!drag)return; const c=drag.c;
   const moved=drag.dx||drag.dy;
-  drag.el.classList.remove("drag");
-  if(!moved){ drag.el.style.transform=""; drag=null; return; }
+  drag.els.forEach(el=>el.classList.remove("drag"));
+  if(!moved){ drag.els.forEach(el=>el.style.transform=""); drag=null; return; }
   // só re-desenha quando algo realmente mudou de posição — voltar a
   // desenhar sempre (mesmo num simples clique sem arrastar) destruía o
   // próprio bloco clicado a meio do gesto, e o "click" que abre a ficha
