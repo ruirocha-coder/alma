@@ -310,16 +310,27 @@ def _calcular_dia_carregamento(dia_inicio: str, duracao_dias: int, tipo_madeira:
     return dia.isoformat()
 
 def _talvez_duplicar_logistica(basecamp_card_id: int, dia_inicio: str, duracao_dias: int, tipo_madeira: str):
-    """Cria o duplicado de logística/carregamento de uma OF — só quando já
-    tem linha/dia E tipo de madeira definidos, e só uma vez (ver
-    db.criar_logistica_carregamento, ON CONFLICT DO NOTHING): pedido
-    explícito do Rui (2026-09), para a equipa da logística saber em que
-    dia a OF estará pronta a carregar, assim que ela sair da fila."""
+    """Cria o duplicado de logística/carregamento de uma OF, quando já tem
+    linha/dia E tipo de madeira definidos — pedido explícito do Rui
+    (2026-09), para a equipa da logística saber em que dia a OF estará
+    pronta a carregar, assim que ela sair da fila.
+
+    Se o duplicado já existir, recalcula o dia de carregamento a partir
+    dos dados atuais e move-o se tiver mudado — pedido explícito do Rui
+    (2026-09): sempre que a produção desta OF muda (linha, dia de início,
+    ou o volume — que muda a duração), o dia de carregamento na logística
+    tem de acompanhar, mesmo depois de já ter sido calculado uma vez (ex:
+    a OF passa para a semana seguinte na produção → o carregamento também
+    avança). A independência da logística mantém-se só no outro sentido:
+    mover ou apagar o duplicado ali nunca mexe na produção."""
     if not dia_inicio or not tipo_madeira or tipo_madeira not in DIAS_CURA_MADEIRA:
         return
-    if db.logistica_carregamento(basecamp_card_id):
-        return
     dia_carregamento = _calcular_dia_carregamento(dia_inicio, duracao_dias, tipo_madeira)
+    existente = db.logistica_carregamento(basecamp_card_id)
+    if existente:
+        if existente["dia_carregamento"] != dia_carregamento:
+            db.mover_logistica_carregamento(basecamp_card_id, dia_carregamento)
+        return
     db.criar_logistica_carregamento(basecamp_card_id, dia_carregamento)
 
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:

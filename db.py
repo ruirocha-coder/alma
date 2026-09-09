@@ -228,9 +228,12 @@ CREATE TABLE IF NOT EXISTS planeamento_producao_ecos_largos (
 -- agendada numa linha/dia E já tem tipo de madeira definido: dia_carregamento
 -- é calculado a partir do FIM da produção (dia_inicio + duração - 1) mais 4
 -- dias (madeira seca) ou 1 dia (madeira verde), avançado para a segunda-feira
--- seguinte se calhar a sábado/domingo. Uma OF só é duplicada UMA VEZ — depois
--- disso este registo é totalmente independente do agendamento de produção
--- (a equipa da logística pode movê-lo/apagá-lo sem afetar a produção).
+-- seguinte se calhar a sábado/domingo. A independência é só num sentido: a
+-- equipa da logística pode mover/apagar este registo sem afetar a produção.
+-- No outro sentido, NÃO é independente (pedido explícito do Rui, 2026-09):
+-- sempre que a produção da OF muda (linha, dia de início, volume/duração),
+-- o dia de carregamento é recalculado e o registo move-se com ela — ver
+-- tools.planeamento_serracao._talvez_duplicar_logistica.
 CREATE TABLE IF NOT EXISTS logistica_carregamento_ecos_largos (
     id SERIAL PRIMARY KEY,
     basecamp_card_id BIGINT NOT NULL UNIQUE,
@@ -1010,9 +1013,12 @@ def logistica_carregamento(basecamp_card_id: int) -> dict:
                     "quem_carrega": l["quem_carrega"]}
 
 def criar_logistica_carregamento(basecamp_card_id: int, dia_carregamento: str) -> dict:
-    """Cria o duplicado de logística de uma OF — só uma vez (ON CONFLICT DO
-    NOTHING: se já existir, não mexe, mesmo que o dia calculado agora seja
-    diferente — a partir de criado, é independente, ver nota da tabela)."""
+    """Cria o duplicado de logística de uma OF — só a primeira vez (ON
+    CONFLICT DO NOTHING). Se já existir, este INSERT não mexe nele — quem
+    chama (tools.planeamento_serracao._talvez_duplicar_logistica) trata
+    esse caso à parte, chamando antes mover_logistica_carregamento quando
+    o dia recalculado mudou (pedido explícito do Rui, 2026-09: a produção
+    mudar de dia/linha tem de mover também o carregamento na logística)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
