@@ -545,6 +545,19 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     db.remover_logistica_carregamento(basecamp_card_id)
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
+def renomear_encomenda(basecamp_card_id: int, titulo: str) -> dict:
+    """Muda o título do card real no Basecamp — pedido explícito do Rui
+    (2026-09): poder corrigir/editar o nome de uma encomenda mesmo depois
+    de já estar agendada na tabela (bolsa ou já numa linha), sem ter de
+    ir ao Basecamp à parte. O título não é guardado localmente em lado
+    nenhum — o Basecamp continua a ser a única fonte deste campo, tal
+    como para a coluna/prazo."""
+    titulo = (titulo or "").strip()
+    if not titulo:
+        return {"erro": "o nome não pode ficar vazio"}
+    basecamp.atualizar_titulo_card(basecamp_card_id, titulo, projeto=PROJETO)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "titulo": titulo}
+
 
 def mover_logistica(basecamp_card_id: int, dia_carregamento: str) -> dict:
     """Muda manualmente o dia de carregamento de uma OF já duplicada —
@@ -1580,7 +1593,8 @@ function openSheet(id){
   }
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id}</div>
-    <h3>${c.titulo}</h3>
+    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
+    <div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
@@ -1612,6 +1626,23 @@ function openSheet(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  $("#guardarTitulo").onclick=async()=>{
+    const titulo=$("#fTitulo").value.trim();
+    if(!titulo){ alert("O nome não pode ficar vazio."); return; }
+    $("#guardarTitulo").textContent="A guardar…"; $("#guardarTitulo").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/renomear",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,titulo})});
+      const d=await r.json();
+      if(d.erro){ alert(d.erro); return; }
+      c.titulo=titulo;
+      const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo;
+      log("local",`nome atualizado para "${titulo}"`);
+      render();
+    }catch(e){ alert("Falhou a guardar: "+e); }
+    finally{ $("#guardarTitulo").textContent="Guardar nome"; $("#guardarTitulo").disabled=false; }
+  };
   $("#coresBarra").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
@@ -1750,7 +1781,8 @@ function openSheetLogistica(id){
   const d=MASTER[c.gs];
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id} · logística</div>
-    <h3>${c.titulo}</h3>
+    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
+    <div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Dia de carregamento</label>
     <div class="frow"><input id="logDia" type="date" value="${d.iso}"><button class="btn" id="guardarDia">Guardar</button></div>
@@ -1772,6 +1804,23 @@ function openSheetLogistica(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  $("#guardarTitulo").onclick=async()=>{
+    const titulo=$("#fTitulo").value.trim();
+    if(!titulo){ alert("O nome não pode ficar vazio."); return; }
+    $("#guardarTitulo").textContent="A guardar…"; $("#guardarTitulo").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/renomear",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,titulo})});
+      const d=await r.json();
+      if(d.erro){ alert(d.erro); return; }
+      c.titulo=titulo;
+      const gemeo=cards.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo;
+      log("local",`nome atualizado para "${titulo}"`);
+      render();
+    }catch(e){ alert("Falhou a guardar: "+e); }
+    finally{ $("#guardarTitulo").textContent="Guardar nome"; $("#guardarTitulo").disabled=false; }
+  };
   $("#guardarDia").onclick=async()=>{
     const iso=$("#logDia").value;
     if(!iso){ alert("Escolhe uma data."); return; }

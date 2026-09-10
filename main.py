@@ -692,6 +692,22 @@ def planeamento_ecos_largos_apagar(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/renomear")
+def planeamento_ecos_largos_renomear(corpo: dict = Body(...)):
+    """Muda o título (nome) do card real no Basecamp — pedido explícito do
+    Rui (2026-09): poder editar o nome de uma encomenda mesmo depois de já
+    estar na tabela — ver tools/planeamento_serracao.renomear_encomenda."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    try:
+        resultado = planeamento_serracao.renomear_encomenda(basecamp_card_id, corpo.get("titulo"))
+    except Exception as e:
+        return JSONResponse({"erro": f"falhou a renomear no Basecamp: {e}"}, status_code=502)
+    if "erro" not in resultado:
+        _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/nova-encomenda")
 def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     """Cria uma encomenda nova: um card real no Basecamp (coluna Triagem,
