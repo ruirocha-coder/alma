@@ -229,14 +229,14 @@ def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
     dias, _ = _repartir_greedy(capacidade, ocupacao, dia_inicio, volume_m3, limite)
     return dias
 
-def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
+def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None) -> dict:
     """Quanto de m³/dia está mesmo ocupado, dia a dia, numa linha —
     replica a fila de OFs já agendadas nessa linha pela mesma repartição
     greedy usada para encaixar uma OF nova (_repartir_greedy), em vez de
     assumir que cada OF produz sempre a mesma média (volume ÷ duração)
     todos os dias que ocupa.
 
-    Bug real (Rui, 2026-09): a versão antiga somava essa média por OF,
+    Bug real #1 (Rui, 2026-09): a versão antiga somava essa média por OF,
     independente das outras — o que divergia da regra "aproveita ao
     máximo a capacidade de cada dia primeiro" usada para colocar OFs
     novas (ver _repartir_greedy), montando duas contas diferentes para a
@@ -244,18 +244,34 @@ def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
     no mesmo dia — a versão antiga via só 13+8,7=21,7 m³ ocupados nesse
     dia (médias das duas), escondendo que, aplicando a mesma regra greedy
     às duas seguidas, a primeira OF a chegar já usa os 26 m³ inteiros
-    logo no 1º dia, sem sobrar nada para a segunda. Processa as OFs por
-    ordem de chegada (dia_inicio, depois basecamp_card_id como
-    desempate) — a primeira a começar tem sempre prioridade sobre a
-    capacidade desse dia.
+    logo no 1º dia, sem sobrar nada para a segunda.
+
+    `antes_de`, se dado, é (dia_inicio, basecamp_card_id) da OF que está a
+    ser validada — só conta OFs com prioridade ESTRITAMENTE anterior a
+    essa (dia_inicio mais cedo, ou o mesmo dia mas basecamp_card_id mais
+    baixo = criada primeiro no Basecamp), nunca as que vêm depois.
+
+    Bug real #2 (Rui, 2026-09): antes disto, esta função só excluía o
+    próprio card (`excluir_id`) mas contava TODAS as outras, incluindo as
+    que vêm depois na fila — o que criava um paradoxo quando duas OFs
+    começavam no mesmo dia: cada uma, ao validar-se a si própria,
+    excluía-se e via a OUTRA com prioridade total e sem concorrência
+    nenhuma (26 m³ inteiros, coube-lhe tudo num só dia), concluindo por
+    isso as duas que só sobravam 7 m³ livres nesse dia — as duas a
+    "perder" a vez uma para a outra ao mesmo tempo. Com `antes_de`, só a
+    OF com prioridade real (a mais cedo a chegar ao Basecamp, desempatada
+    por basecamp_card_id) vê o dia livre por completo; a outra vê
+    corretamente que a primeira já lá está.
 
     Uma OF sem volume definido não entra nesta simulação (não há volume
     para repartir): ocupa a linha por completo nos dias da sua própria
     duração guardada (`float("inf")`), tal como antes — conservador, para
-    nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora o
-    próprio card (para permitir reagendar/mover uma OF já colocada).
+    nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora
+    sempre o próprio card, independentemente da prioridade (necessário ao
+    mover uma OF já colocada: a sua própria linha antiga, ainda na base
+    de dados com o dia_inicio antigo, nunca deve contar contra si mesma).
 
-    Bug real (Rui, 2026-09): uma OF que já saiu do fluxo ativo no
+    Bug real #3 (Rui, 2026-09): uma OF que já saiu do fluxo ativo no
     Basecamp (apagada/arquivada por lá diretamente, sem passar por
     apagar_encomenda) deixa o agendamento local órfão — sem isto, esse
     órfão continuava a "ocupar" a linha para sempre, invisível no quadro,
@@ -266,7 +282,8 @@ def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
     agendamentos = [a for a in db.agendamentos_producao_ecos_largos()
                     if a["linha"] == linha and a["dia_inicio"]
                     and a["basecamp_card_id"] in ids_ativos
-                    and (excluir_id is None or a["basecamp_card_id"] != excluir_id)]
+                    and a["basecamp_card_id"] != excluir_id
+                    and (antes_de is None or (a["dia_inicio"], a["basecamp_card_id"]) < antes_de)]
     agendamentos.sort(key=lambda a: (a["dia_inicio"], a["basecamp_card_id"]))
     ocupacao = {}
     for a in agendamentos:
@@ -284,16 +301,27 @@ def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
             ocupacao[dia] = ocupacao.get(dia, 0) + valor
     return ocupacao
 
+def _prioridade(dia_inicio: str, basecamp_card_id: int = None) -> tuple:
+    """Chave de prioridade (dia_inicio, basecamp_card_id) para desempate de
+    fila entre OFs a começar no mesmo dia — quem chegou primeiro ao
+    Basecamp (basecamp_card_id mais baixo) tem sempre prioridade sobre a
+    capacidade desse dia. Sem id ainda (encomenda a ser criada agora, ver
+    criar_encomenda), usa +infinito: uma OF novíssima nunca "corta a
+    fila" a nenhuma que já esteja no quadro para o mesmo dia."""
+    return (dia_inicio, basecamp_card_id if basecamp_card_id is not None else float("inf"))
+
 def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
                         excluir_id: int = None) -> int:
     """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
     (m³) e da capacidade diária dessa linha (editável, ver
     atualizar_capacidade_linha) — a mais curta possível que caiba,
     repartindo greedily pelo espaço livre de cada dia a partir de
-    `dia_inicio` (ver _dias_necessarios_greedy). Sem `dia_inicio` (ainda
-    na fila, sem dia definido) ou sem capacidade configurada para a
-    linha, usa só volume ÷ capacidade plena, sem olhar a ocupação (não há
-    ainda dia nenhum para verificar)."""
+    `dia_inicio` (ver _dias_necessarios_greedy), respeitando a prioridade
+    de quem chegou primeiro ao Basecamp em dias partilhados com outras OFs
+    (ver _ocupacao_diaria, `antes_de`). Sem `dia_inicio` (ainda na fila,
+    sem dia definido) ou sem capacidade configurada para a linha, usa só
+    volume ÷ capacidade plena, sem olhar a ocupação (não há ainda dia
+    nenhum para verificar)."""
     if not volume_m3:
         return 1
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
@@ -302,7 +330,7 @@ def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
     duracao_minima = max(1, math.ceil(volume_m3 / capacidade))
     if not dia_inicio:
         return duracao_minima
-    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
+    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id), excluir_id=excluir_id)
     dias = _dias_necessarios_greedy(capacidade, ocupacao, dia_inicio, volume_m3)
     return dias if dias is not None else duracao_minima  # não coube em espaço nenhum razoável — deixa _validar_capacidade recusar com a mensagem certa
 
@@ -314,7 +342,7 @@ def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
     ultrapassar a capacidade da linha em dia nenhum. Devolve uma mensagem
     de erro, ou None se estiver tudo bem."""
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
-    ocupacao = _ocupacao_diaria(linha, excluir_id=excluir_id)
+    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id), excluir_id=excluir_id)
     inicio = date.fromisoformat(dia_inicio)
     if not volume_m3:
         for i in range(duracao_dias):
