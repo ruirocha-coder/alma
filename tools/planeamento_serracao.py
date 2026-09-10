@@ -169,53 +169,18 @@ def estado_planeamento_serracao() -> dict:
 
 LIMITE_DIAS_REPARTIR = 60  # nunca tentar expandir a duração indefinidamente à procura de espaço
 
-def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
-    """Quanto de m³/dia já está ocupado, dia a dia, numa linha — soma o
-    "ritmo diário" (volume ÷ duração) de cada OF já agendada nessa linha
-    que cubra esse dia. Uma OF sem volume definido não tem ritmo diário
-    conhecido: ocupa a linha por completo nesses dias (`float("inf")`),
-    tal como acontecia antes de existir volume/capacidade — conservador,
-    para nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora
-    o próprio card (para permitir reagendar/mover uma OF já colocada).
-
-    Bug real (Rui, 2026-09): uma OF que já saiu do fluxo ativo no
-    Basecamp (apagada/arquivada por lá diretamente, sem passar por
-    apagar_encomenda) deixa o agendamento local órfão — sem isto, esse
-    órfão continuava a "ocupar" a linha para sempre, invisível no quadro,
-    forçando encomendas novas a repartir-se sem motivo nenhum visível.
-    Por isso só conta OFs que ainda existem mesmo no Basecamp."""
-    ids_ativos = {c["id"] for c in _cards_of_ativos()}
-    ocupacao = {}
-    for a in db.agendamentos_producao_ecos_largos():
-        if a["linha"] != linha or not a["dia_inicio"]:
-            continue
-        if excluir_id is not None and a["basecamp_card_id"] == excluir_id:
-            continue
-        if a["basecamp_card_id"] not in ids_ativos:
-            continue
-        duracao = max(1, a["duracao_dias"] or 1)
-        ritmo = (a["volume_m3"] / duracao) if a["volume_m3"] else None
-        inicio = date.fromisoformat(a["dia_inicio"])
-        for i in range(duracao):
-            dia = (inicio + timedelta(days=i)).isoformat()
-            if ritmo is None:
-                ocupacao[dia] = float("inf")
-            else:
-                ocupacao[dia] = ocupacao.get(dia, 0) + ritmo
-    return ocupacao
-
-def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
-                             volume_m3: float, limite: int = LIMITE_DIAS_REPARTIR):
-    """Simula encaixar `volume_m3` numa linha a partir de `dia_inicio`,
-    usando sempre primeiro o que ainda sobra de capacidade em cada dia
-    (ver `ocupacao`, de _ocupacao_diaria) — só o que não couber passa
-    para o dia seguinte. Pedido explícito do Rui (2026-09): aproveitar ao
-    máximo a capacidade de cada dia, em vez de exigir um ritmo diário
-    igual em todos os dias que a encomenda ocupa (isso desperdiçava dias
-    inteiros quase vazios só porque o primeiro dia já tinha pouca folga —
-    ex: 35 m³ numa linha de 33 m³/dia, com 22 já ocupados no 1º dia e
-    nada no 2º, cabe em 2 dias — 11 no primeiro, 24 no segundo — e não em
-    4 como uma repartição uniforme exigiria).
+def _repartir_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
+                     volume_m3: float, limite: int = LIMITE_DIAS_REPARTIR):
+    """Núcleo da repartição greedy: simula encaixar `volume_m3` numa linha
+    a partir de `dia_inicio`, usando sempre primeiro o que ainda sobra de
+    capacidade em cada dia (ver `ocupacao`, de _ocupacao_diaria) — só o
+    que não couber passa para o dia seguinte. Pedido explícito do Rui
+    (2026-09): aproveitar ao máximo a capacidade de cada dia, em vez de
+    exigir um ritmo diário igual em todos os dias que a encomenda ocupa
+    (isso desperdiçava dias inteiros quase vazios só porque o primeiro
+    dia já tinha pouca folga — ex: 35 m³ numa linha de 33 m³/dia, com 22
+    já ocupados no 1º dia e nada no 2º, cabe em 2 dias — 11 no primeiro,
+    24 no segundo — e não em 4 como uma repartição uniforme exigiria).
 
     Sábado e domingo nunca dão capacidade nenhuma (pedido explícito do
     Rui, 2026-09): uma encomenda demasiado grande para acabar até
@@ -223,14 +188,18 @@ def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
     (conta como dias de calendário ocupados, sem produção nenhuma neles)
     e só continua a ser produzida na segunda-feira seguinte.
 
-    Devolve quantos dias de calendário isso ocupa (o número de dias
-    percorridos até o volume caber todo, mesmo que algum desses dias não
-    tenha contribuído nada — um fim de semana, ou um dia reservado por
-    completo por outra OF sem volume definido, não dão espaço nenhum, mas
-    continuam a contar como dias ocupados do calendário), ou None se não
-    couber dentro de `limite` dias."""
+    Devolve (dias, alocacao): `dias` é quantos dias de calendário isso
+    ocupa (mesmo que algum desses dias não tenha contribuído nada — um
+    fim de semana, ou um dia reservado por completo por outra OF sem
+    volume definido, não dão espaço nenhum, mas continuam a contar como
+    dias ocupados do calendário); `alocacao` é {dia_iso: m³ que esta
+    encomenda ficou mesmo a ocupar nesse dia} — os m³ REAIS usados, nunca
+    uma média, para quem chamar poder somar a `ocupacao` sem repetir o
+    erro do ritmo uniforme (ver _ocupacao_diaria). Devolve (None, {}) se
+    não couber dentro de `limite` dias — e nesse caso não aloca nada."""
     inicio = date.fromisoformat(dia_inicio)
     restante = float(volume_m3)
+    alocacao = {}
     for dias in range(1, limite + 1):
         data = inicio + timedelta(days=dias - 1)
         dia = data.isoformat()
@@ -244,10 +213,76 @@ def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
             livre = 0
         else:
             livre = 0 if usado == float("inf") else max(0, capacidade - usado)
+        tomado = min(livre, restante)
+        if tomado > 1e-9:
+            alocacao[dia] = tomado
         restante -= livre
         if restante <= 1e-9:
-            return dias
-    return None
+            return dias, alocacao
+    return None, {}
+
+def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
+                             volume_m3: float, limite: int = LIMITE_DIAS_REPARTIR):
+    """Só o número de dias de _repartir_greedy — usado por quem só quer
+    validar/decidir a duração de uma OF nova, sem precisar da alocação
+    dia a dia (ver _duracao_por_volume, _validar_capacidade)."""
+    dias, _ = _repartir_greedy(capacidade, ocupacao, dia_inicio, volume_m3, limite)
+    return dias
+
+def _ocupacao_diaria(linha: str, excluir_id: int = None) -> dict:
+    """Quanto de m³/dia está mesmo ocupado, dia a dia, numa linha —
+    replica a fila de OFs já agendadas nessa linha pela mesma repartição
+    greedy usada para encaixar uma OF nova (_repartir_greedy), em vez de
+    assumir que cada OF produz sempre a mesma média (volume ÷ duração)
+    todos os dias que ocupa.
+
+    Bug real (Rui, 2026-09): a versão antiga somava essa média por OF,
+    independente das outras — o que divergia da regra "aproveita ao
+    máximo a capacidade de cada dia primeiro" usada para colocar OFs
+    novas (ver _repartir_greedy), montando duas contas diferentes para a
+    mesma linha. Ex: linha de 33 m³/dia com duas OFs de 26 m³ a começar
+    no mesmo dia — a versão antiga via só 13+8,7=21,7 m³ ocupados nesse
+    dia (médias das duas), escondendo que, aplicando a mesma regra greedy
+    às duas seguidas, a primeira OF a chegar já usa os 26 m³ inteiros
+    logo no 1º dia, sem sobrar nada para a segunda. Processa as OFs por
+    ordem de chegada (dia_inicio, depois basecamp_card_id como
+    desempate) — a primeira a começar tem sempre prioridade sobre a
+    capacidade desse dia.
+
+    Uma OF sem volume definido não entra nesta simulação (não há volume
+    para repartir): ocupa a linha por completo nos dias da sua própria
+    duração guardada (`float("inf")`), tal como antes — conservador, para
+    nunca sobre-comprometer uma linha sem dados. `excluir_id` ignora o
+    próprio card (para permitir reagendar/mover uma OF já colocada).
+
+    Bug real (Rui, 2026-09): uma OF que já saiu do fluxo ativo no
+    Basecamp (apagada/arquivada por lá diretamente, sem passar por
+    apagar_encomenda) deixa o agendamento local órfão — sem isto, esse
+    órfão continuava a "ocupar" a linha para sempre, invisível no quadro,
+    forçando encomendas novas a repartir-se sem motivo nenhum visível.
+    Por isso só conta OFs que ainda existem mesmo no Basecamp."""
+    ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
+    agendamentos = [a for a in db.agendamentos_producao_ecos_largos()
+                    if a["linha"] == linha and a["dia_inicio"]
+                    and a["basecamp_card_id"] in ids_ativos
+                    and (excluir_id is None or a["basecamp_card_id"] != excluir_id)]
+    agendamentos.sort(key=lambda a: (a["dia_inicio"], a["basecamp_card_id"]))
+    ocupacao = {}
+    for a in agendamentos:
+        if not a["volume_m3"]:
+            duracao = max(1, a["duracao_dias"] or 1)
+            inicio = date.fromisoformat(a["dia_inicio"])
+            for i in range(duracao):
+                dia = (inicio + timedelta(days=i)).isoformat()
+                ocupacao[dia] = float("inf")
+            continue
+        if capacidade <= 0:
+            continue  # sem capacidade configurada: não há m³/dia nenhum para repartir
+        _, alocacao = _repartir_greedy(capacidade, ocupacao, a["dia_inicio"], a["volume_m3"])
+        for dia, valor in alocacao.items():
+            ocupacao[dia] = ocupacao.get(dia, 0) + valor
+    return ocupacao
 
 def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
                         excluir_id: int = None) -> int:
