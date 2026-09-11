@@ -1337,7 +1337,7 @@ function renderLanes(){
       el.style.height=ITEM_PROD_H+"px";
       el.innerHTML = i===0
         ? `<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-           <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`
+           <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):("#"+c.id)}</div>`
         : `<div class="tt">${c.titulo}</div>`;
       bl.appendChild(el);
     });
