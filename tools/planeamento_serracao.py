@@ -733,11 +733,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .qcard .tt{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .qcard .of{font-size:12px;color:var(--dim);margin-top:2px}
   .empty{color:var(--dim);font-size:13.5px;padding:6px 0}
-  /* id do card do Basecamp (pedido explícito do Rui, 2026-09): identificar
-     visualmente a que card real do Basecamp cada card do quadro
-     corresponde, sem ter de abrir a ficha — é o número no fim do URL do
-     card no Basecamp (ver "Abrir card no Basecamp" na ficha de edição). */
-  .bcid{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
   .secTit{font-size:15px;font-weight:700;color:var(--ink);margin:22px 0 10px}
   .lblLog{cursor:default}
@@ -1340,10 +1335,9 @@ function renderLanes(){
       el.style.top=(OFFSETS_LINHA[c.linha]+ITEM_PROD_PAD+c._slot*(ITEM_PROD_H+ITEM_PROD_GAP))+"px";
       el.style.width=((r-l)*DAY-8)+"px";
       el.style.height=ITEM_PROD_H+"px";
-      el.title=`card ${c.id}`; // pedido explícito do Rui (2026-09): identificar sempre a que card do Basecamp corresponde, mesmo se o texto abaixo for cortado por falta de espaço
       el.innerHTML = i===0
         ? `<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-           <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"} · <span class="bcid">#${c.id}</span></div>`
+           <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.prazo?("prazo "+c.prazo):"sem prazo"}</div>`
         : `<div class="tt">${c.titulo}</div>`;
       bl.appendChild(el);
     });
@@ -1354,11 +1348,11 @@ function renderFila(){
   const q=cards.filter(c=>c.linha===null);
   $("#fila").innerHTML = q.length ? q.map(c=>{
     const fundo=fundoCard(c);
-    return `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}" title="card ${c.id}"
+    return `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}"
        style="border-left-color:${corProduto(c)}${fundo?(";background:"+fundo):""}">
      <div class="editBtn" data-edit="${c.id}" title="Editar">✎</div>
      <div class="tt">${c.titulo}</div>
-     <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""} · <span class="bcid">#${c.id}</span></div></div>`;
+     <div class="of">${c.volume?(c.volume+" m³ · "):""}${c.coluna||""}${c.prazo?(" · prazo "+c.prazo):""}</div></div>`;
   }).join("")
     : '<div class="empty">Fila vazia.</div>';
   aplicarSelecao();
@@ -1400,9 +1394,8 @@ function renderLogistica(){
       el.style.top=(ITEM_LOG_PAD+i*(ITEM_LOG_H+ITEM_LOG_GAP))+"px";
       el.style.width=(DAY-8)+"px";
       el.style.height=ITEM_LOG_H+"px";
-      el.title=`card ${c.id}`;
       el.innerHTML=`<div class="editBtn" data-editlog="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-        <div class="of">${c.quemCarrega?("carrega: "+c.quemCarrega):(c.coluna||"")} · <span class="bcid">#${c.id}</span></div>`;
+        <div class="of">${c.quemCarrega?("carrega: "+c.quemCarrega):(c.coluna||"")}</div>`;
       bl.appendChild(el);
     });
   });
