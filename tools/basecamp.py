@@ -915,6 +915,20 @@ def comentar(recording_id: int, texto: str, projeto: str = None):
     r.raise_for_status()
     return r.json()
 
+def editar_comentario(comment_id: int, bucket_id: int, texto: str, projeto: str = None):
+    """Substitui o conteúdo de um comentário já publicado (ex: corrigir
+    uma menção "@Nome" que não resolveu à primeira, ou um erro de
+    texto). Ao contrário de `comentar` (que publica num "recording",
+    válido para qualquer bucket), atualizar um comentário exige o
+    bucket_id explícito na URL — vem sempre no "bucket.id" da resposta
+    de `comentar` ou de `ler_comentarios`. Se `projeto` for indicado,
+    resolve "@Nome" no novo texto tal como em `comentar`."""
+    r = httpx.put(f"{_base_url()}/buckets/{bucket_id}/comments/{comment_id}.json",
+                  headers=_headers(), json={"content": _markdown_para_basecamp_com_mencoes(texto, projeto)},
+                  timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 # Mural (Message Board) do projeto "Gestão" — toda a equipa da Interior
 # Guider está lá, por isso serve como mural por omissão. Outros projetos
 # (ex: Ecos Largos, uma equipa parceira à parte) têm o seu próprio Mural,
