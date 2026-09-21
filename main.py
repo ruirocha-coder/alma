@@ -936,6 +936,15 @@ def registar_webhooks_basecamp():
             resultado.append({"projeto": projeto["name"], "estado": f"falhou: {e}"})
     return resultado
 
+@app.get("/temp/listar-tabelas")
+def temp_listar_tabelas(termo: str = "logist"):
+    """Endpoint temporário de diagnóstico — listar card tables cujo
+    título contenha `termo`, com o bucket/projeto de cada uma."""
+    alvo = termo.lower()
+    return [{"titulo": t.get("title"), "bucket": (t.get("bucket") or {}).get("name"),
+             "bucket_id": (t.get("bucket") or {}).get("id")}
+            for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
+
 @app.get("/temp/procurar-comentario")
 def temp_procurar_comentario(termo: str = "amanhã"):
     """Endpoint temporário de diagnóstico — encontrar o card e comentário
