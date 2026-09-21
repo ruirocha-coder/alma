@@ -279,9 +279,13 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
             cards_url = coluna.get("cards_url")
             if not cards_url:
                 continue
-            r2 = httpx.get(cards_url, headers=_headers(), timeout=30)
-            r2.raise_for_status()
-            for card in r2.json():
+            # bug real (Rui, 2026-09-21): um GET direto ao cards_url só
+            # devolve a 1ª página (a API do Basecamp pagina a 50 por
+            # página) — uma coluna com mais de 50 cards (ex: "Done" numa
+            # coluna de arquivo) perdia todos os restantes em silêncio,
+            # sem erro nenhum a avisar. _get_paginado segue o Link header
+            # até ao fim.
+            for card in _get_paginado(cards_url):
                 formatado = _formatar_item(card)
                 formatado["card_table"] = detalhe.get("title")
                 encontrados.append(formatado)
