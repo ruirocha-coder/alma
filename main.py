@@ -945,6 +945,24 @@ def temp_listar_tabelas(termo: str = "logist"):
              "bucket_id": (t.get("bucket") or {}).get("id")}
             for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
 
+@app.get("/temp/ver-card")
+def temp_ver_card(card_id: int):
+    """Diagnóstico: mostra os dados e comentários de um card específico
+    pelo id (para confirmar que é o card certo antes de comentar).
+    Remover a seguir."""
+    r = basecamp.httpx.get(f"{basecamp._base_url()}/buckets/1411340/card_tables/cards/{card_id}.json",
+                           headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    card = r.json()
+    comentarios = basecamp.ler_comentarios(card.get("comments_url")) if card.get("comments_url") else []
+    return {
+        "titulo": card.get("title"),
+        "coluna": (card.get("parent") or {}).get("title"),
+        "url": card.get("app_url"),
+        "comentarios": [{"id": c["id"], "autor": c["autor"], "criado_em": c["criado_em"],
+                         "texto": basecamp._texto_simples(c.get("conteudo") or "")} for c in comentarios],
+    }
+
 @app.get("/temp/cards-paginado")
 def temp_cards_paginado():
     """Diagnóstico: refaz cards_de_card_table("Logística","Entregas") mas
