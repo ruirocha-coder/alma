@@ -393,6 +393,40 @@ def apagar_card(card_id: int, projeto: str) -> None:
                   headers=_headers(), timeout=30)
     r.raise_for_status()
 
+def obter_card(card_id: int, projeto: str) -> dict:
+    """Vai buscar um único card pelo id (GET .../card_tables/cards/ID.json,
+    mesmo padrão de atualizar_titulo_card) — usado quando só é preciso
+    confirmar UM card já conhecido em concreto (ver obter_cards e
+    tools/planeamento_serracao._cards_of_ativos), em vez de listar uma
+    coluna inteira do quadro (ver cards_de_card_table: a coluna "Vendido"
+    do Ecos Largos tem 1000+ cards de todo o histórico da conta — pedi-la
+    inteira só para confirmar um punhado de OFs já conhecidas era
+    desperdício puro, medido ao vivo em vários segundos). Devolve None se
+    o card já não existir (apagado/arquivado diretamente no Basecamp) ou
+    se o projeto não for encontrado."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        return None
+    try:
+        r = httpx.get(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
+                      headers=_headers(), timeout=30)
+        r.raise_for_status()
+    except httpx.HTTPStatusError:
+        return None
+    return _formatar_item(r.json())
+
+def obter_cards(card_ids, projeto: str) -> list[dict]:
+    """Vai buscar vários cards pelo id, em paralelo (ver obter_card) —
+    para o mesmo caso de uso mas com vários ids de uma vez (ver
+    tools/planeamento_serracao._cards_of_ativos). Cards que já não
+    existirem ficam simplesmente de fora do resultado, sem erro."""
+    card_ids = list(card_ids)
+    if not card_ids:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(card_ids)) as executor:
+        resultados = executor.map(lambda cid: obter_card(cid, projeto), card_ids)
+    return [c for c in resultados if c]
+
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
     """Procura tarefas, cards ou card tables (de todos os projetos, ou só
     de um em concreto) cujo título ou notas contenham `termo` — pedido

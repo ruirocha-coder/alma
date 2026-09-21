@@ -24,11 +24,19 @@ PROJETO = "Ecos Largos"
 # fabrico (confirmado ao vivo, 2026-09, contra a API real). As colunas
 # "Linha 1" a "Linha 6" / Charriots / Empilhadores do mesmo quadro guardam
 # cards de ALOCAÇÃO DE PESSOAL, não OFs — ficam de fora deste quadro, por
-# pedido explícito do Rui. "Vendido" inclui-se para uma OF já agendada não
-# desaparecer do quadro quando a venda fecha no Basecamp — fica visível
-# (cor automática roxa, ver template) em vez de desaparecer; nunca entra
-# na fila (só cards em Triagem entram lá, ver estado_planeamento_serracao).
-COLUNAS_OF = {"triagem", "programacao", "em producao", "produzido", "vendido"}
+# pedido explícito do Rui.
+COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido"}
+# "Vendido" inclui-se para uma OF já agendada não desaparecer do quadro
+# quando a venda fecha no Basecamp — fica visível (cor automática roxa, ver
+# template) em vez de desaparecer; nunca entra na fila (só cards em Triagem
+# entram lá, ver estado_planeamento_serracao). Fica FORA de COLUNAS_OF_FLUXO
+# (o conjunto pedido em bloco a cada leitura, ver _cards_of_ativos) de
+# propósito: "Vendido" acumula TODO o histórico de vendas fechadas da conta
+# (medido ao vivo, 2026-09-29: 1000+ cards, 6+ segundos só para a listar) —
+# só interessam aqui as poucas OFs desta lista que já estejam agendadas
+# localmente, por isso são pedidas uma a uma (ver basecamp.obter_cards),
+# nunca a coluna inteira.
+COLUNAS_OF = COLUNAS_OF_FLUXO | {"vendido"}
 
 # linhas de produção reais da serração (mesmos nomes vistos nas colunas de
 # pessoal do Basecamp, confirmado ao vivo) — usadas aqui só como categorias
@@ -97,13 +105,32 @@ def _cards_of_ativos(forcar: bool = False) -> list[dict]:
     poucos segundos). `forcar=True` ignora a cache (usado logo a seguir a
     esta própria página criar/apagar/renomear um card — ver
     _invalidar_cache_cards_ativos — nunca é preciso chamar com forcar=True
-    a partir daqui, a invalidação já trata disso)."""
+    a partir daqui, a invalidação já trata disso).
+
+    Bug real de performance #2 (Rui, 2026-09-29): mesmo com cache e as
+    colunas em paralelo, a leitura fria continuava a demorar ~8-11s —
+    diagnosticado ao vivo: a coluna "Vendido" sozinha tinha 1000+ cards
+    (todo o histórico de vendas fechadas da conta) e 6+ segundos só para
+    paginar por ela. Só interessam aqui as OFs de "Vendido" que já estão
+    agendadas localmente (ver COLUNAS_OF) — normalmente umas dezenas, não
+    mil — por isso pede-se primeiro só as colunas de fluxo normais
+    (COLUNAS_OF_FLUXO, rápidas, poucas dezenas de cards ao todo) e depois,
+    só para as OFs já agendadas que não apareceram aí, pede-se cada card
+    individualmente e em paralelo (ver basecamp.obter_cards) — muito mais
+    barato do que listar a coluna inteira."""
     if not forcar and "itens" in _CACHE_CARDS_ATIVOS:
         ts, itens = _CACHE_CARDS_ATIVOS["itens"]
         if time.time() - ts < TTL_CARDS_ATIVOS:
             return itens
     cards = basecamp.cards_de_card_table("", projeto=PROJETO)
-    itens = [c for c in cards if _normalizar(c.get("estado")) in COLUNAS_OF]
+    itens = [c for c in cards if _normalizar(c.get("estado")) in COLUNAS_OF_FLUXO]
+    ids_no_fluxo = {c["id"] for c in itens}
+    ids_agendados = {a["basecamp_card_id"] for a in db.agendamentos_producao_ecos_largos()
+                     if a["linha"] and a["dia_inicio"]}
+    faltam = ids_agendados - ids_no_fluxo
+    for card in basecamp.obter_cards(faltam, projeto=PROJETO):
+        if _normalizar(card.get("estado")) in COLUNAS_OF:
+            itens.append(card)
     _CACHE_CARDS_ATIVOS["itens"] = (time.time(), itens)
     return itens
 

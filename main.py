@@ -478,45 +478,6 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
-@app.get("/planeamento-ecos-largos/_diag_timing")
-def planeamento_ecos_largos_diag_timing():
-    """TEMPORÁRIO (remover depois de diagnosticar, 2026-09-29): mede onde
-    vai o tempo de cards_de_card_table para o Ecos Largos — quantas
-    colunas tem, e quanto demora cada pedido individual, para perceber
-    porque é que a leitura fria continua a demorar ~8s mesmo depois de
-    paralelizar as colunas."""
-    import time as _t
-    t0 = _t.time()
-    tabelas = [t for t in basecamp._card_tables_ativos()
-               if "ecos largos" in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")]
-    t1 = _t.time()
-    colunas = []
-    detalhes = []
-    for tabela in tabelas:
-        import httpx
-        r = httpx.get(tabela["url"], headers=basecamp._headers(), timeout=30)
-        r.raise_for_status()
-        detalhe = r.json()
-        detalhes.append({"tabela": detalhe.get("title"), "n_colunas": len(detalhe.get("lists", []))})
-        for coluna in detalhe.get("lists", []):
-            if coluna.get("cards_url"):
-                colunas.append((coluna.get("title"), coluna["cards_url"]))
-    t2 = _t.time()
-    por_coluna = []
-    for nome, url in colunas:
-        ti = _t.time()
-        itens = basecamp._get_paginado(url)
-        por_coluna.append({"coluna": nome, "segundos": round(_t.time() - ti, 2), "n_cards": len(itens)})
-    t3 = _t.time()
-    return {
-        "n_card_tables": len(tabelas),
-        "tempo_card_tables_ativos": round(t1 - t0, 2),
-        "tempo_detalhe_tabelas": round(t2 - t1, 2),
-        "detalhes_tabelas": detalhes,
-        "tempo_total_colunas_sequencial": round(t3 - t2, 2),
-        "por_coluna_sequencial": por_coluna,
-    }
-
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
 # precisar de refresh. Um único processo uvicorn (sem --workers, ver
