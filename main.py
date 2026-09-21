@@ -936,12 +936,6 @@ def registar_webhooks_basecamp():
             resultado.append({"projeto": projeto["name"], "estado": f"falhou: {e}"})
     return resultado
 
-@app.post("/temp/editar-comentario")
-def temp_editar_comentario(comment_id: int, bucket_id: int, texto: str, projeto: str = "Entregas"):
-    """Endpoint temporário — uso único, corrigir a menção do comentário
-    já publicado no incidente da data do fornecedor. Remover a seguir."""
-    return basecamp.editar_comentario(comment_id, bucket_id, texto, projeto=projeto)
-
 @app.post("/basecamp/webhook")
 async def receber_webhook_basecamp(request: Request, chave: str = ""):
     """Recebe eventos do Basecamp (comentário/tarefa/card criado ou atualizado).
