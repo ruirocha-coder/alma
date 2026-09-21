@@ -376,6 +376,14 @@ ALTER TABLE logistica_carregamento_ecos_largos DROP COLUMN IF EXISTS cor_fundo;
 -- entre produção e logística — ver tools/planeamento_serracao, que lê
 -- sempre "cor" do agendamento de produção.
 ALTER TABLE logistica_carregamento_ecos_largos DROP COLUMN IF EXISTS cor;
+-- pedido explícito do Rui (2026-09-28): poder editar à mão o dia de fim de
+-- uma OF já agendada, sobrepondo-se ao cálculo automático a partir do
+-- volume (ver tools.planeamento_serracao.redefinir_fim) — para quando a
+-- realidade da produção diverge do que o modelo prevê. Uma OF marcada
+-- como manual fica de fora de _recalcular_linha (nunca é reescrita
+-- sozinha) até a duração voltar a ser definida pelo fluxo normal
+-- (agendar/mudar volume ou linha).
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS duracao_manual BOOLEAN NOT NULL DEFAULT FALSE;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -829,7 +837,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -842,6 +850,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "cor": l["cor"],
                 "cor_fundo": l["cor_fundo"],
                 "tipo_madeira": l["tipo_madeira"],
+                "duracao_manual": l["duracao_manual"],
             } for l in cur.fetchall()]
 
 def agendamento_producao(basecamp_card_id: int) -> dict:
@@ -851,7 +860,7 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual
                    FROM planeamento_producao_ecos_largos WHERE basecamp_card_id = %s""",
                 (basecamp_card_id,)
             )
@@ -868,29 +877,36 @@ def agendamento_producao(basecamp_card_id: int) -> dict:
                 "cor": l["cor"],
                 "cor_fundo": l["cor_fundo"],
                 "tipo_madeira": l["tipo_madeira"],
+                "duracao_manual": l["duracao_manual"],
             }
 
 def guardar_agendamento_producao(basecamp_card_id: int, linha: str, dia_inicio: str,
-                                 duracao_dias: int, volume_m3: float = None) -> dict:
+                                 duracao_dias: int, volume_m3: float = None,
+                                 duracao_manual: bool = False) -> dict:
     """Cria ou atualiza (upsert) o agendamento local de uma OF, pelo id do
     seu card no Basecamp — usado ao arrastar uma OF para uma linha/dia no
     quadro de planeamento, e também ao criar uma encomenda nova (ver
     tools/planeamento_serracao.criar_encomenda). `duracao_dias` já vem
     calculada a partir do volume e da capacidade da linha (ver
-    tools/planeamento_serracao.agendar) — esta função só grava."""
+    tools/planeamento_serracao.agendar) — esta função só grava.
+    `duracao_manual` marca que esta duração foi definida à mão (ver
+    tools/planeamento_serracao.redefinir_fim) — o valor por omissão
+    (False) garante que qualquer chamada pelo fluxo normal (agendar)
+    limpa uma marca manual anterior, tal como pedido."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO planeamento_producao_ecos_largos
-                   (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
-                   VALUES (%s, %s, %s, %s, %s)
+                   (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, duracao_manual)
+                   VALUES (%s, %s, %s, %s, %s, %s)
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        linha = EXCLUDED.linha,
                        dia_inicio = EXCLUDED.dia_inicio,
                        duracao_dias = EXCLUDED.duracao_dias,
                        volume_m3 = EXCLUDED.volume_m3,
+                       duracao_manual = EXCLUDED.duracao_manual,
                        atualizado_em = now()""",
-                (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+                (basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, duracao_manual)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

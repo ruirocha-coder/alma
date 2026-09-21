@@ -538,6 +538,18 @@ def planeamento_ecos_largos_agendar(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/fim")
+def planeamento_ecos_largos_fim(corpo: dict = Body(...)):
+    """Define à mão o dia de fim de produção de uma OF já agendada,
+    sobrepondo-se ao cálculo automático a partir do volume — ver
+    tools/planeamento_serracao.redefinir_fim."""
+    resultado = planeamento_serracao.redefinir_fim(
+        corpo.get("basecamp_card_id"), corpo.get("dia_fim"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/capacidade")
 def planeamento_ecos_largos_capacidade(corpo: dict = Body(...)):
     """Atualiza a capacidade (m³/dia) de uma linha de produção — ver

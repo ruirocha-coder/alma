@@ -120,6 +120,7 @@ def estado_planeamento_serracao() -> dict:
             info["linha"] = agendamento["linha"]
             info["dia_inicio"] = agendamento["dia_inicio"]
             info["duracao_dias"] = agendamento["duracao_dias"]
+            info["duracao_manual"] = agendamento["duracao_manual"]
             info["ordem"] = agendamento["ordem"]
             agendadas.append(info)
         else:
@@ -303,6 +304,24 @@ def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None,
             continue
         if capacidade <= 0:
             continue  # sem capacidade configurada: não há m³/dia nenhum para repartir
+        if a.get("duracao_manual"):
+            # pedido explícito do Rui (2026-09-28): o dia de fim de uma OF
+            # pode ser definido à mão (ver redefinir_fim), substituindo o
+            # cálculo automático — nesse caso já não faz sentido repartir
+            # greedily a partir do volume (a duração já está decidida,
+            # não é para calcular), reparte-se em vez disso um ritmo
+            # uniforme pelos dias ÚTEIS do intervalo escolhido (fins de
+            # semana continuam a não produzir nada, mesmo numa duração
+            # manual).
+            duracao = max(1, a["duracao_dias"] or 1)
+            inicio_manual = date.fromisoformat(a["dia_inicio"])
+            dias_uteis = [inicio_manual + timedelta(days=i) for i in range(duracao)
+                         if (inicio_manual + timedelta(days=i)).weekday() < 5]
+            ritmo = a["volume_m3"] / max(1, len(dias_uteis))
+            for dia_data in dias_uteis:
+                dia = dia_data.isoformat()
+                ocupacao[dia] = ocupacao.get(dia, 0) + ritmo
+            continue
         _, alocacao = _repartir_greedy(capacidade, ocupacao, a["dia_inicio"], a["volume_m3"])
         for dia, valor in alocacao.items():
             ocupacao[dia] = ocupacao.get(dia, 0) + valor
@@ -442,6 +461,11 @@ def _recalcular_linha(linha: str, excluir_id: int = None, ids_ativos: set = None
     ordem, dá sempre o resultado global correto, sem precisar de tocar
     duas vezes na mesma OF.
 
+    Nunca toca numa OF com `duracao_manual` (dia de fim definido à mão,
+    ver redefinir_fim) — essa duração foi escolhida deliberadamente pela
+    equipa, sobrepondo-se ao cálculo automático; recalculá-la aqui
+    apagaria essa escolha sem ninguém pedir.
+
     `ids_ativos`, se dado, poupa repetir o pedido ao Basecamp uma vez por
     OF da linha (lento) — busca-se aqui UMA VEZ e passa-se para cada
     chamada de _duracao_por_volume."""
@@ -449,7 +473,8 @@ def _recalcular_linha(linha: str, excluir_id: int = None, ids_ativos: set = None
         ids_ativos = {c["id"] for c in _cards_of_ativos()}
     for a in db.agendamentos_producao_ecos_largos():
         if (a["linha"] != linha or not a["dia_inicio"] or not a["volume_m3"]
-                or a["basecamp_card_id"] == excluir_id or a["basecamp_card_id"] not in ids_ativos):
+                or a["basecamp_card_id"] == excluir_id or a["basecamp_card_id"] not in ids_ativos
+                or a.get("duracao_manual")):
             continue
         nova_duracao = _duracao_por_volume(linha, a["volume_m3"], a["dia_inicio"],
                                            excluir_id=a["basecamp_card_id"], ids_ativos=ids_ativos)
@@ -503,6 +528,56 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     _recalcular_linha(linha, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id,
             "duracao_dias": duracao_dias, "volume_m3": volume_m3}
+
+def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
+    """Define à mão o dia de fim de produção de uma OF já agendada,
+    sobrepondo-se ao cálculo automático a partir do volume (pedido
+    explícito do Rui, 2026-09-28) — para quando a realidade da produção
+    diverge do que o modelo previu. Marca a OF como `duracao_manual` (ver
+    _ocupacao_diaria e _recalcular_linha): fica de fora do recálculo
+    automático a partir daqui, até o dia de início, a linha ou o volume
+    voltarem a ser alterados pelo fluxo normal (agendar), que limpa esta
+    marca de novo.
+
+    Continua a validar a capacidade da linha (nunca ultrapassa, mesmo
+    definida à mão) — repartindo o volume em partes iguais pelos dias
+    úteis do intervalo escolhido (fim de semana nunca produz, mesmo numa
+    duração manual, ver _ocupacao_diaria)."""
+    existente = db.agendamento_producao(basecamp_card_id)
+    if not existente or not existente["linha"] or not existente["dia_inicio"]:
+        return {"erro": "esta OF ainda não está agendada numa linha/dia"}
+    try:
+        fim = date.fromisoformat(dia_fim)
+    except (TypeError, ValueError):
+        return {"erro": f"data de fim inválida: {dia_fim!r}"}
+    inicio = date.fromisoformat(existente["dia_inicio"])
+    if fim < inicio:
+        return {"erro": "o dia de fim não pode ser antes do dia de início"}
+    duracao_dias = (fim - inicio).days + 1
+    linha = existente["linha"]
+    volume_m3 = existente["volume_m3"]
+    ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    if volume_m3:
+        capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
+        if capacidade > 0:
+            dias_uteis = [inicio + timedelta(days=i) for i in range(duracao_dias)
+                         if (inicio + timedelta(days=i)).weekday() < 5]
+            if not dias_uteis:
+                return {"erro": "este intervalo não tem nenhum dia útil — fim de semana nunca produz"}
+            ritmo = volume_m3 / len(dias_uteis)
+            ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(existente["dia_inicio"], basecamp_card_id),
+                                        excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
+            for dia_data in dias_uteis:
+                usado = ocupacao.get(dia_data.isoformat(), 0)
+                if usado == float("inf") or usado + ritmo > capacidade + 1e-9:
+                    return {"erro": (f"não cabe na linha {linha!r}: em {dia_data.isoformat()} já estaria(m) "
+                                     f"ocupado(s) {('a linha toda' if usado == float('inf') else f'{usado:.1f} m³ de {capacidade:.1f}')}"
+                                     f" — com este fim precisarias de mais {ritmo:.1f} m³ nesse dia")}
+    db.guardar_agendamento_producao(basecamp_card_id, linha, existente["dia_inicio"], duracao_dias,
+                                    volume_m3, duracao_manual=True)
+    _talvez_duplicar_logistica(basecamp_card_id, existente["dia_inicio"], duracao_dias, existente["tipo_madeira"])
+    _recalcular_linha(linha, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "duracao_dias": duracao_dias}
 
 def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
     """Atualiza a capacidade (m³/dia) de uma linha — editável pela equipa
@@ -1127,7 +1202,7 @@ async function carregar(){
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
-        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
+        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,duracaoManual:!!c.duracao_manual,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
       url:c.url,cor:c.cor,corFundo:c.cor_fundo,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
@@ -1651,9 +1726,13 @@ function openSheet(id){
     corpo = `
     <div class="frow"><label>Linha</label><select id="fLinha">${LINHAS.map((n,i)=>
       `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}</select></div>
-    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}"></div>
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}" data-original="${s.iso}"></div>
     <div class="acts"><button class="btn" id="guardarLinha">Guardar linha/início</button></div>
-    <div class="kv"><span>Fim</span><b>${DOW[f.dow]} ${f.dd} ${MESC[f.mo]} · ${c.dur} dias</b></div>`;
+    <div class="frow"><label>Fim</label><input id="fFim" type="date" value="${f.iso}" data-original="${f.iso}"></div>
+    <div class="acts"><button class="btn" id="guardarFim">Guardar fim</button></div>
+    <div class="owner">${c.duracaoManual
+      ? "O fim desta OF foi definido à mão — deixou de ser recalculado automaticamente. Muda a linha, o início ou o volume para voltar ao cálculo automático."
+      : `Duração calculada: ${c.dur} dias. Mudar o fim aqui passa a ser uma escolha manual — deixa de ser recalculado automaticamente.`}</div>`;
   }
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id}</div>
@@ -1686,6 +1765,9 @@ function openSheet(id){
       ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagar">Apagar encomenda</button>
+    </div>
+    <div class="acts">
+      <button class="btn primary" id="guardarTudo">Guardar tudo</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
@@ -1755,7 +1837,7 @@ function openSheet(id){
           body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],dia_inicio:iso,volume_m3:c.volume||null})});
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; return; }
-        c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3;
+        c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false;
         log("local",`"${c.titulo}" movido para ${LINHAS[linhaIdx]}, ${iso}`);
         await atualizarLogistica();
         render(); closeSheet();
@@ -1765,6 +1847,21 @@ function openSheet(id){
       undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
       c.linha=null; c.gs=null;
       renderFila(); renderLanes(); sync(c); closeSheet();
+    };
+    $("#guardarFim").onclick=async()=>{
+      const dia_fim=$("#fFim").value;
+      if(!dia_fim){ alert("Escolhe uma data de fim."); return; }
+      $("#guardarFim").textContent="A guardar…"; $("#guardarFim").disabled=true;
+      try{
+        const r=await fetch("/planeamento-ecos-largos/fim",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,dia_fim})});
+        const d=await r.json();
+        if(d.erro){ alert(d.erro); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; return; }
+        c.dur=d.duracao_dias; c.duracaoManual=true;
+        log("local",`fim de "${c.titulo}" definido à mão: ${dia_fim}`);
+        render(); closeSheet();
+      }catch(e){ alert("Falhou a guardar: "+e); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; }
     };
     const moverOrdem=direcao=>async()=>{
       try{
@@ -1792,7 +1889,7 @@ function openSheet(id){
             dia_inicio:MASTER[c.gs].iso,volume_m3:vol})});
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
-        c.dur=d.duracao_dias; c.volume=d.volume_m3;
+        c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false;
       }else{
         const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
           headers:{"Content-Type":"application/json"},
@@ -1836,6 +1933,88 @@ function openSheet(id){
       render(); closeSheet();
     }catch(e){ alert("Falhou a apagar: "+e); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; }
   };
+  $("#guardarTudo").onclick=async()=>{
+    /* pedido explícito do Rui (2026-09-28): um botão único que guarda
+       qualquer campo esquecido, sem duplo-clicar em cada "Guardar" — reusa
+       os mesmos endpoints dos botões individuais. Linha/início/volume só
+       são reenviados se realmente mudaram desde que a ficha abriu (senão
+       este botão, clicado sem tocar em nada, apagaria silenciosamente uma
+       duração definida à mão no campo Fim, que o /agendar reporia para
+       automática); Nome e Madeira são reenviados sempre que válidos, já
+       que reenviar o mesmo valor é inofensivo (endpoints idempotentes). */
+    const btn=$("#guardarTudo");
+    btn.textContent="A guardar…"; btn.disabled=true;
+    const erros=[];
+    const titulo=$("#fTitulo").value.trim();
+    if(titulo){
+      try{
+        const r=await fetch("/planeamento-ecos-largos/renomear",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,titulo})});
+        const d=await r.json();
+        if(d.erro) erros.push(`nome: ${d.erro}`);
+        else{ c.titulo=titulo; const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo; }
+      }catch(e){ erros.push(`nome: ${e}`); }
+    }else erros.push("nome: não pode ficar vazio");
+    if(agendado){
+      const linhaIdx=+$("#fLinha").value;
+      const iso=$("#fInicio").value;
+      const isoOriginal=$("#fInicio").dataset.original;
+      const vol=+$("#fVol").value;
+      const linhaMudou=linhaIdx!==c.linha, inicioMudou=iso&&iso!==isoOriginal, volMudou=vol>0&&vol!==c.volume;
+      if(linhaMudou||inicioMudou||volMudou){
+        try{
+          const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],
+              dia_inicio:iso||MASTER[c.gs].iso,volume_m3:vol>0?vol:(c.volume||null)})});
+          const d=await r.json();
+          if(d.erro) erros.push(`linha/início/volume: ${d.erro}`);
+          else{ c.linha=linhaIdx; c.gs=idxOf(iso||MASTER[c.gs].iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false; }
+        }catch(e){ erros.push(`linha/início/volume: ${e}`); }
+      }
+      const fimVal=$("#fFim").value, fimOriginal=$("#fFim").dataset.original;
+      if(fimVal && fimVal!==fimOriginal){
+        try{
+          const r=await fetch("/planeamento-ecos-largos/fim",{method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({basecamp_card_id:c.id,dia_fim:fimVal})});
+          const d=await r.json();
+          if(d.erro) erros.push(`fim: ${d.erro}`);
+          else{ c.dur=d.duracao_dias; c.duracaoManual=true; }
+        }catch(e){ erros.push(`fim: ${e}`); }
+      }
+    }else{
+      const vol=+$("#fVol").value;
+      if(vol>0){
+        try{
+          const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({basecamp_card_id:c.id,volume_m3:vol})});
+          const d=await r.json();
+          if(d.erro) erros.push(`volume: ${d.erro}`);
+          else c.volume=d.volume_m3;
+        }catch(e){ erros.push(`volume: ${e}`); }
+      }
+    }
+    const tipo=$("#fMad").value;
+    if(tipo){
+      try{
+        const r=await fetch("/planeamento-ecos-largos/madeira",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,tipo_madeira:tipo})});
+        const d=await r.json();
+        if(d.erro) erros.push(`madeira: ${d.erro}`);
+        else c.madeira=tipo;
+      }catch(e){ erros.push(`madeira: ${e}`); }
+    }
+    await atualizarLogistica();
+    log("local",`"${c.titulo}" — guardar tudo`);
+    render();
+    btn.textContent="Guardar tudo"; btn.disabled=false;
+    if(erros.length) alert("Alguns campos falharam:\n"+erros.join("\n"));
+    else closeSheet();
+  };
 }
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
 
@@ -1864,6 +2043,9 @@ function openSheetLogistica(id){
     <div class="acts">
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagarLog">Apagar duplicado</button>
+    </div>
+    <div class="acts">
+      <button class="btn primary" id="guardarTudoLog">Guardar tudo</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
@@ -1962,6 +2144,47 @@ function openSheetLogistica(id){
       log("local",`duplicado de logística apagado: ${c.titulo}`);
       renderLogistica(); closeSheet();
     }catch(e){ alert("Falhou a apagar: "+e); $("#apagarLog").textContent="Apagar duplicado"; $("#apagarLog").disabled=false; }
+  };
+  $("#guardarTudoLog").onclick=async()=>{
+    const btn=$("#guardarTudoLog");
+    btn.textContent="A guardar…"; btn.disabled=true;
+    const erros=[];
+    const titulo=$("#fTitulo").value.trim();
+    if(titulo){
+      try{
+        const r=await fetch("/planeamento-ecos-largos/renomear",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,titulo})});
+        const dd=await r.json();
+        if(dd.erro) erros.push(`nome: ${dd.erro}`);
+        else{ c.titulo=titulo; const gemeo=cards.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo; }
+      }catch(e){ erros.push(`nome: ${e}`); }
+    }else erros.push("nome: não pode ficar vazio");
+    const iso=$("#logDia").value;
+    if(iso && iso!==d.iso){
+      try{
+        const r=await fetch("/planeamento-ecos-largos/logistica/mover",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id,dia_carregamento:iso})});
+        const dd=await r.json();
+        if(dd.erro) erros.push(`dia de carregamento: ${dd.erro}`);
+        else c.gs=idxOf(iso);
+      }catch(e){ erros.push(`dia de carregamento: ${e}`); }
+    }
+    const quem_carrega=$("#logQuem").value.trim();
+    try{
+      const r=await fetch("/planeamento-ecos-largos/logistica/quem-carrega",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id,quem_carrega})});
+      const dd=await r.json();
+      if(dd.erro) erros.push(`quem carrega: ${dd.erro}`);
+      else c.quemCarrega=dd.quem_carrega||null;
+    }catch(e){ erros.push(`quem carrega: ${e}`); }
+    log("local",`"${c.titulo}" — guardar tudo (logística)`);
+    renderLogistica(); render();
+    btn.textContent="Guardar tudo"; btn.disabled=false;
+    if(erros.length) alert("Alguns campos falharam:\n"+erros.join("\n"));
+    else closeSheet();
   };
 }
 
