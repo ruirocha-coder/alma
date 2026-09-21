@@ -122,7 +122,7 @@ def _cards_of_ativos(forcar: bool = False) -> list[dict]:
         ts, itens = _CACHE_CARDS_ATIVOS["itens"]
         if time.time() - ts < TTL_CARDS_ATIVOS:
             return itens
-    cards = basecamp.cards_de_card_table("", projeto=PROJETO)
+    cards = basecamp.cards_de_card_table("", projeto=PROJETO, colunas=COLUNAS_OF_FLUXO)
     itens = [c for c in cards if _normalizar(c.get("estado")) in COLUNAS_OF_FLUXO]
     ids_no_fluxo = {c["id"] for c in itens}
     ids_agendados = {a["basecamp_card_id"] for a in db.agendamentos_producao_ecos_largos()

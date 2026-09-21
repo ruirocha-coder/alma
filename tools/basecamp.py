@@ -240,9 +240,13 @@ def _card_tables_ativos(forcar: bool = False) -> list[dict]:
     _cache["card_tables_ativos"] = (time.time(), itens)
     return itens
 
-def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
+def cards_de_card_table(nome_tabela: str, projeto: str = None, colunas: set = None) -> list[dict]:
     """Lista TODOS os cards de um card table específico (por nome, ver
     _card_tables_ativos), coluna a coluna, com as suas notas completas.
+    `colunas`, se dado, é um conjunto de títulos de coluna (normalizados,
+    ver _normalizar) — só essas colunas são pedidas ao Basecamp, as
+    outras nem chegam a ser listadas (ver nota de performance abaixo);
+    omitido (None), pede todas, como sempre foi.
 
     Bug real (Rui, 2026-08-04): pedida uma listagem de todos os cards de
     um card table ("Programa Redes Sociais"), a Alma só conseguiu extrair
@@ -265,41 +269,54 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
     concreto, sem cache (é uma operação pontual, não uma pesquisa
     repetida sobre milhares de itens).
 
-    Bug real de performance (Rui, 2026-09-29): as colunas eram pedidas uma
-    a seguir à outra — um card table com 10+ colunas (ex: o do Ecos
+    Bug real de performance #1 (Rui, 2026-09-29): as colunas eram pedidas
+    uma a seguir à outra — um card table com 10+ colunas (ex: o do Ecos
     Largos, com as OFs mais as colunas de alocação de pessoal) somava a
     latência de cada pedido HTTP, medido ao vivo em 10-12s. As colunas são
     pedidos independentes entre si (nenhuma depende do resultado de
     outra) — pedi-las todas ao mesmo tempo, em threads (I/O-bound, o GIL
     não é problema aqui), corta o tempo total para o da coluna mais
-    lenta, não a soma de todas."""
+    lenta, não a soma de todas.
+
+    Bug real de performance #2 (Rui, 2026-09-29): mesmo paralelizado,
+    quem só queria 4 colunas (ver tools/planeamento_serracao._cards_of_
+    ativos) continuava a pedir TODAS — incluindo uma coluna "Vendido" com
+    1000+ cards de todo o histórico da conta (6+ segundos só a paginar
+    por ela) e as colunas de alocação de pessoal (Linha 1-6, Charriots,
+    etc.), sempre descartadas a seguir por quem chamava. Filtrar DEPOIS
+    de ir buscar tudo não poupa nada — o `colunas` abaixo filtra ANTES de
+    pedir, para essas colunas nem chegarem a ser pedidas."""
     alvo = _normalizar(nome_tabela)
     projeto_normalizado = _normalizar(projeto) if projeto else None
+    colunas_normalizadas = {_normalizar(c) for c in colunas} if colunas is not None else None
     tabelas = [t for t in _card_tables_ativos() if alvo in _normalizar(t.get("title") or "")
               and (not projeto_normalizado
                    or projeto_normalizado in _normalizar((t.get("bucket") or {}).get("name") or ""))]
     if not tabelas:
         return []
-    colunas = []  # [(cards_url, título_do_card_table), ...]
+    alvos = []  # [(cards_url, título_do_card_table), ...]
     for tabela in tabelas:
         r = httpx.get(tabela["url"], headers=_headers(), timeout=30)
         r.raise_for_status()
         detalhe = r.json()
         for coluna in detalhe.get("lists", []):
             cards_url = coluna.get("cards_url")
-            if cards_url:
-                colunas.append((cards_url, detalhe.get("title")))
+            if not cards_url:
+                continue
+            if colunas_normalizadas is not None and _normalizar(coluna.get("title") or "") not in colunas_normalizadas:
+                continue
+            alvos.append((cards_url, detalhe.get("title")))
     encontrados = []
-    if not colunas:
+    if not alvos:
         return encontrados
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(colunas)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(alvos)) as executor:
         # bug real (Rui, 2026-09-21): um GET direto ao cards_url só devolve
         # a 1ª página (a API do Basecamp pagina a 50 por página) — uma
         # coluna com mais de 50 cards (ex: "Done" numa coluna de arquivo)
         # perdia todos os restantes em silêncio, sem erro nenhum a avisar.
         # _get_paginado segue o Link header até ao fim.
         futuros = {executor.submit(_get_paginado, cards_url): titulo_tabela
-                  for cards_url, titulo_tabela in colunas}
+                  for cards_url, titulo_tabela in alvos}
         for futuro in concurrent.futures.as_completed(futuros):
             titulo_tabela = futuros[futuro]
             for card in futuro.result():
