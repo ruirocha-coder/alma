@@ -813,6 +813,39 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
         db.guardar_volume_producao(card["id"], volume_m3)
     return resultado
 
+def duplicar_encomenda(basecamp_card_id: int) -> dict:
+    """Duplica uma encomenda: cria um card novo no Basecamp (coluna
+    Triagem, mesmo título com " (cópia)" a seguir), copiando o volume, o
+    tipo de madeira e as cores desta OF — mas sempre para a fila por
+    agendar, nunca já numa linha/dia (mesmo que o original já estivesse
+    agendado) — pedido explícito do Rui (2026-09-29), como o "duplicar" do
+    Google Calendar: a cópia fica pronta a arrastar para onde for preciso,
+    sem herdar o lugar do original. Só para cards de produção — os de
+    logística não têm esta opção (são sempre derivados automaticamente de
+    uma OF de produção, ver _talvez_duplicar_logistica). O título não vive
+    localmente em lado nenhum (ver renomear_encomenda) — por isso vai
+    buscá-lo de novo ao Basecamp, aos cards ativos."""
+    original = next((c for c in _cards_of_ativos() if c["id"] == basecamp_card_id), None)
+    if not original:
+        return {"erro": "encomenda não encontrada"}
+    existente = db.agendamento_producao(basecamp_card_id)
+    volume_m3 = existente["volume_m3"] if existente else None
+    tipo_madeira = existente["tipo_madeira"] if existente else None
+    cor = existente["cor"] if existente else None
+    cor_fundo = existente["cor_fundo"] if existente else None
+    card = basecamp.criar_card("Triagem", f"{original['titulo']} (cópia)", "", projeto=PROJETO)
+    if volume_m3:
+        db.guardar_volume_producao(card["id"], volume_m3)
+    if tipo_madeira:
+        db.guardar_tipo_madeira_producao(card["id"], tipo_madeira)
+    if cor:
+        db.guardar_cor_producao(card["id"], cor)
+    if cor_fundo:
+        db.guardar_cor_fundo_producao(card["id"], cor_fundo)
+    return {"duplicado": True, "basecamp_card_id": card["id"], "titulo": card["titulo"],
+            "coluna_basecamp": card["estado"], "url": card["url"], "volume_m3": volume_m3,
+            "tipo_madeira": tipo_madeira, "cor": cor, "cor_fundo": cor_fundo}
+
 def definir_tipo_madeira(basecamp_card_id: int, tipo_madeira: str) -> dict:
     """Define o tipo de madeira (seca/verde) de uma OF — se ela já
     estiver agendada e ainda não tiver duplicado de logística, cria-o
@@ -959,6 +992,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .editBtn:hover{background:#fff;color:var(--ink)}
   .qcard .editBtn{background:var(--canvas)}
 
+  /* modo só consulta (pedido explícito do Rui, 2026-09-29): a página abre
+     sempre assim, sem nenhum controlo de edição visível — só o botão
+     "Editar" liga tudo isto de novo. Esconder por CSS não basta sozinho
+     (ver os "if(!modoEdicao)return" nos handlers de arrastar e de abrir a
+     ficha) mas garante que nada disto aparece clicável por engano. */
+  body.viewonly .editBtn,body.viewonly #novo,body.viewonly #undo,
+  body.viewonly #painelCoresEstado{display:none}
+  body.viewonly .lbl{pointer-events:none}
+  body.viewonly .blk,body.viewonly .qcard{cursor:default}
+
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
   .log summary{padding:12px 16px;cursor:pointer;font-size:14px;font-weight:600;
@@ -1034,6 +1077,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="pill"><b id="statAgendadas">—</b> agendadas</div>
     <button class="btn" id="undo">Anular</button>
     <button class="btn" id="atualizar">Atualizar do Basecamp</button>
+    <button class="btn primary" id="modoEdicaoBtn">Editar</button>
   </div>
 
   <section class="fila">
@@ -1065,7 +1109,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <details class="log">
+  <details class="log" id="painelCoresEstado">
     <summary>Cores por estado (fundo automático dos cards)</summary>
     <div id="coresEstadoLista" style="padding:2px 16px 14px"></div>
   </details>
@@ -1112,6 +1156,11 @@ let cardsLog=[];
 let selecionadoId=null;
 let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let undoStack=[], logs=[], DAY=92, LANE=78;
+/* modo só consulta por omissão (pedido explícito do Rui, 2026-09-29): a
+   página abre sempre assim, mesmo que já se tenha ativado a edição antes
+   nesta sessão/browser — só o botão "Editar" liga a edição, e só até à
+   próxima vez que a página abrir. */
+let modoEdicao=false;
 
 const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
@@ -1366,7 +1415,7 @@ function renderLabels(){
     `<div class="lbl" data-linha="${n}" style="height:${ALTURAS_LINHA[li]||LANE}px"><div class="n">${n}</div>
      <div class="c">${CAPACIDADES[n]!=null?CAPACIDADES[n]+" m³/dia":"definir capacidade"} · editar</div></div>`).join("");
   $("#labels").querySelectorAll(".lbl").forEach(el=>{
-    el.onclick=()=>editarCapacidade(el.dataset.linha);
+    el.onclick=()=>{ if(modoEdicao) editarCapacidade(el.dataset.linha); };
   });
 }
 function diaHtml(d,hoje){
@@ -1635,6 +1684,7 @@ function sync(c, anterior){ if(c.linha!==null && c.gs!==null) guardarAgendamento
 /* ---------- arrastar dentro da grelha ---------- */
 let drag=null;
 $("#lanes").addEventListener("pointerdown",e=>{
+  if(!modoEdicao)return;
   if(e.target.closest(".editBtn"))return;
   const b=e.target.closest(".blk"); if(!b)return;
   const c=card(+b.dataset.id);
@@ -1676,6 +1726,7 @@ $("#lanes").addEventListener("pointerup",()=>{
 /* fila → grelha */
 let qdrag=null;
 $("#fila").addEventListener("pointerdown",e=>{
+  if(!modoEdicao)return;
   if(e.target.closest(".editBtn"))return;
   const q=e.target.closest(".qcard"); if(!q)return;
   const g=q.cloneNode(true); g.className="qcard ghost";
@@ -1701,6 +1752,7 @@ $("#fila").addEventListener("pointerup",e=>{
 /* ---------- arrastar na logística (só o dia muda, não há linhas) ---------- */
 let dragLog=null;
 $("#lanesLog").addEventListener("pointerdown",e=>{
+  if(!modoEdicao)return;
   if(e.target.closest(".editBtn"))return;
   const b=e.target.closest(".blk"); if(!b)return;
   const c=cardLog(+b.dataset.id);
@@ -1741,15 +1793,15 @@ async function moverLogisticaServidor(c){
    ele e ao seu par na outra tabela — a edição fica no botão "✎" de cada
    card (pedido explícito do Rui, 2026-09). */
 $("#lanes").addEventListener("click",e=>{
-  if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
+  if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"producao");
 });
 $("#fila").addEventListener("click",e=>{
-  if(e.target.closest(".editBtn")){ openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
+  if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const q=e.target.closest(".qcard"); if(q) selecionar(+q.dataset.id,"fila");
 });
 $("#lanesLog").addEventListener("click",e=>{
-  if(e.target.closest(".editBtn")){ openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
+  if(e.target.closest(".editBtn")){ if(modoEdicao) openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
   const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"logistica");
 });
 function openSheet(id){
@@ -1798,6 +1850,7 @@ function openSheet(id){
     </div>
     <div class="acts">
       ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
+      <button class="btn" id="duplicar">Duplicar</button>
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagar">Apagar encomenda</button>
     </div>
@@ -1972,6 +2025,22 @@ function openSheet(id){
          _recalcular_linha) — uma simples remoção local não bastava. */
       await carregar(); closeSheet();
     }catch(e){ alert("Falhou a apagar: "+e); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; }
+  };
+  $("#duplicar").onclick=async()=>{
+    $("#duplicar").textContent="A duplicar…"; $("#duplicar").disabled=true;
+    try{
+      const r=await fetch("/planeamento-ecos-largos/duplicar",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:c.id})});
+      const d=await r.json();
+      if(d.erro){ alert(d.erro); $("#duplicar").textContent="Duplicar"; $("#duplicar").disabled=false; return; }
+      log("local",`duplicado: "${d.titulo}" — entrou na fila por agendar`);
+      /* a cópia entra sempre na fila por agendar (pedido explícito do
+         Rui, 2026-09-29), mesmo que o original já estivesse numa linha —
+         por isso um carregar() normal já basta, não recalcula nenhuma
+         linha (a cópia ainda não ocupa nenhuma). */
+      await carregar(); closeSheet();
+    }catch(e){ alert("Falhou a duplicar: "+e); $("#duplicar").textContent="Duplicar"; $("#duplicar").disabled=false; }
   };
   $("#guardarTudo").onclick=async()=>{
     /* pedido explícito do Rui (2026-09-28): um botão único que guarda
@@ -2273,7 +2342,7 @@ function openForm(){
     }catch(e){ $("#fErr").textContent="Falhou a criar no Basecamp: "+e; $("#fSave").textContent="Criar encomenda"; $("#fSave").disabled=false; }
   };
 }
-$("#novo").onclick=()=>openForm();
+$("#novo").onclick=()=>{ if(modoEdicao) openForm(); };
 
 /* ---------- controlos ---------- */
 $("#seg").onclick=e=>{ const b=e.target.closest("button"); if(b) setMode(b.dataset.m); };
@@ -2282,12 +2351,23 @@ $("#next").onclick=()=>step(1);
 $("#hoje").onclick=()=>{ view.start=Math.max(HOJE,0); setMode(view.mode); };
 $("#atualizar").onclick=()=>carregar();
 $("#undo").onclick=()=>{
-  if(!undoStack.length)return;
+  if(!modoEdicao||!undoStack.length)return;
   const prev=undoStack.pop(); const c=card(prev.id);
   if(!c)return;
   c.linha=prev.linha; c.gs=prev.gs; c.dur=prev.dur;
   render(); sync(c); log("local","anulado");
 };
+/* modo só consulta por omissão (pedido explícito do Rui, 2026-09-29): a
+   página abre sempre em modo consulta, mesmo que já se tenha ligado a
+   edição antes nesta sessão — só o botão "Editar" liga tudo (arrastar,
+   fichas, capacidade, cores por estado, nova encomenda), até fechar ou
+   recarregar a página. */
+function aplicarModoEdicao(){
+  document.body.classList.toggle("viewonly",!modoEdicao);
+  $("#modoEdicaoBtn").textContent=modoEdicao?"Terminar edição":"Editar";
+}
+$("#modoEdicaoBtn").onclick=()=>{ modoEdicao=!modoEdicao; aplicarModoEdicao(); };
+aplicarModoEdicao();
 document.addEventListener("keydown",e=>{
   if((e.metaKey||e.ctrlKey)&&e.key==="z"){e.preventDefault();$("#undo").click();}
   if(e.key==="ArrowLeft"&&!e.target.closest("select"))step(-1);

@@ -704,6 +704,23 @@ def planeamento_ecos_largos_apagar(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
+@app.post("/planeamento-ecos-largos/duplicar")
+def planeamento_ecos_largos_duplicar(corpo: dict = Body(...)):
+    """Duplica uma encomenda de produção: cria um card novo no Basecamp
+    (coluna Triagem) copiando volume/madeira/cores, sempre para a fila por
+    agendar — ver tools/planeamento_serracao.duplicar_encomenda."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    try:
+        resultado = planeamento_serracao.duplicar_encomenda(basecamp_card_id)
+    except Exception as e:
+        return JSONResponse({"erro": f"falhou a duplicar no Basecamp: {e}"}, status_code=502)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
 @app.post("/planeamento-ecos-largos/renomear")
 def planeamento_ecos_largos_renomear(corpo: dict = Body(...)):
     """Muda o título (nome) do card real no Basecamp — pedido explícito do
