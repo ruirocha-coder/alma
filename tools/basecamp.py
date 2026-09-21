@@ -1237,8 +1237,24 @@ def meu_perfil() -> dict:
     _cache["meu_perfil"] = perfil
     return perfil
 
+TTL_PROJETOS = 900  # 15 min — a lista de projetos ativos muda tão pouco quanto os card tables (TTL_CARD_TABLES)
+
 def listar_projetos() -> list[dict]:
-    return _get_paginado(f"{_base_url()}/projects.json")
+    """Todos os projetos ativos — cacheado (ver TTL_PROJETOS): usado por
+    _encontrar_projeto, chamado com frequência (qualquer ação que precise
+    de resolver um projeto pelo nome — criar/apagar/renomear um card,
+    pessoas_projeto, os resolvers de mural/vault/schedule). Bug real de
+    performance (Rui, 2026-09-29): sem cache, cada uma dessas chamadas ia
+    sempre buscar a lista inteira de novo — com várias em paralelo (ver
+    obter_cards) isso sozinho já anulava boa parte do ganho de paralelizar
+    pedidos independentes."""
+    if "projetos" in _cache:
+        ts, itens = _cache["projetos"]
+        if time.time() - ts < TTL_PROJETOS:
+            return itens
+    itens = _get_paginado(f"{_base_url()}/projects.json")
+    _cache["projetos"] = (time.time(), itens)
+    return itens
 
 def _encontrar_projeto(nome: str) -> dict:
     """Encontra um projeto do Basecamp pelo nome — usado por
