@@ -292,7 +292,7 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
     encontrados = []
     if not colunas:
         return encontrados
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(colunas))) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(colunas)) as executor:
         # bug real (Rui, 2026-09-21): um GET direto ao cards_url só devolve
         # a 1ª página (a API do Basecamp pagina a 50 por página) — uma
         # coluna com mais de 50 cards (ex: "Done" numa coluna de arquivo)
