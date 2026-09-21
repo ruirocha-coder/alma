@@ -3,6 +3,7 @@
 # Ao contrário do BigCommerce, o Basecamp não usa um token fixo: o access_token
 # expira ao fim de ~2 semanas. Guardamos aqui só o refresh_token (não expira) e
 # trocamo-lo por um access_token novo sempre que necessário, em memória.
+import concurrent.futures
 import os, re, time, unicodedata
 from datetime import date, datetime, timedelta, timezone
 import httpx
@@ -262,7 +263,16 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
     partem de _itens_ativos (todos os cards de todos os projetos,
     cacheado), isto vai sempre buscar os dados atuais deste card table em
     concreto, sem cache (é uma operação pontual, não uma pesquisa
-    repetida sobre milhares de itens)."""
+    repetida sobre milhares de itens).
+
+    Bug real de performance (Rui, 2026-09-29): as colunas eram pedidas uma
+    a seguir à outra — um card table com 10+ colunas (ex: o do Ecos
+    Largos, com as OFs mais as colunas de alocação de pessoal) somava a
+    latência de cada pedido HTTP, medido ao vivo em 10-12s. As colunas são
+    pedidos independentes entre si (nenhuma depende do resultado de
+    outra) — pedi-las todas ao mesmo tempo, em threads (I/O-bound, o GIL
+    não é problema aqui), corta o tempo total para o da coluna mais
+    lenta, não a soma de todas."""
     alvo = _normalizar(nome_tabela)
     projeto_normalizado = _normalizar(projeto) if projeto else None
     tabelas = [t for t in _card_tables_ativos() if alvo in _normalizar(t.get("title") or "")
@@ -270,24 +280,31 @@ def cards_de_card_table(nome_tabela: str, projeto: str = None) -> list[dict]:
                    or projeto_normalizado in _normalizar((t.get("bucket") or {}).get("name") or ""))]
     if not tabelas:
         return []
-    encontrados = []
+    colunas = []  # [(cards_url, título_do_card_table), ...]
     for tabela in tabelas:
         r = httpx.get(tabela["url"], headers=_headers(), timeout=30)
         r.raise_for_status()
         detalhe = r.json()
         for coluna in detalhe.get("lists", []):
             cards_url = coluna.get("cards_url")
-            if not cards_url:
-                continue
-            # bug real (Rui, 2026-09-21): um GET direto ao cards_url só
-            # devolve a 1ª página (a API do Basecamp pagina a 50 por
-            # página) — uma coluna com mais de 50 cards (ex: "Done" numa
-            # coluna de arquivo) perdia todos os restantes em silêncio,
-            # sem erro nenhum a avisar. _get_paginado segue o Link header
-            # até ao fim.
-            for card in _get_paginado(cards_url):
+            if cards_url:
+                colunas.append((cards_url, detalhe.get("title")))
+    encontrados = []
+    if not colunas:
+        return encontrados
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(colunas))) as executor:
+        # bug real (Rui, 2026-09-21): um GET direto ao cards_url só devolve
+        # a 1ª página (a API do Basecamp pagina a 50 por página) — uma
+        # coluna com mais de 50 cards (ex: "Done" numa coluna de arquivo)
+        # perdia todos os restantes em silêncio, sem erro nenhum a avisar.
+        # _get_paginado segue o Link header até ao fim.
+        futuros = {executor.submit(_get_paginado, cards_url): titulo_tabela
+                  for cards_url, titulo_tabela in colunas}
+        for futuro in concurrent.futures.as_completed(futuros):
+            titulo_tabela = futuros[futuro]
+            for card in futuro.result():
                 formatado = _formatar_item(card)
-                formatado["card_table"] = detalhe.get("title")
+                formatado["card_table"] = titulo_tabela
                 encontrados.append(formatado)
     return encontrados
 

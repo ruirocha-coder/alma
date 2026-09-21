@@ -12,6 +12,7 @@
 # no Basecamp nunca "empurram" sozinhas para aqui — a página relê o
 # Basecamp sempre que é aberta ou atualizada manualmente.
 import math
+import time
 import unicodedata
 from datetime import date, timedelta
 import db
@@ -71,16 +72,49 @@ def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
     return sem_acentos.lower().strip()
 
-def _cards_of_ativos() -> list[dict]:
+_CACHE_CARDS_ATIVOS = {}  # {"itens": (timestamp, lista)}
+TTL_CARDS_ATIVOS = 15  # segundos
+
+def _cards_of_ativos(forcar: bool = False) -> list[dict]:
     """Todos os cards de OF ativos do quadro Kanban do Ecos Largos, só das
-    colunas de fluxo de fabrico (ver COLUNAS_OF) — vai sempre buscar dados
-    atuais ao Basecamp (basecamp.cards_de_card_table não tem cache), nunca
-    mantém cópia à parte. Passa "" como nome do quadro porque o Ecos Largos
-    tem um único card table ativo — não é preciso adivinhar o título exato
-    dele (ver basecamp.cards_de_card_table: "" é substring de qualquer
-    título)."""
+    colunas de fluxo de fabrico (ver COLUNAS_OF). Passa "" como nome do
+    quadro porque o Ecos Largos tem um único card table ativo — não é
+    preciso adivinhar o título exato dele (ver basecamp.cards_de_card_table:
+    "" é substring de qualquer título).
+
+    Bug real (Rui, 2026-09-29): "está a demorar muito a atualizar e a
+    abrir a página" — cada leitura ia sempre buscar isto ao Basecamp sem
+    cache nenhuma (10-12s reais, medidos ao vivo: um pedido para listar o
+    card table + um pedido por cada coluna dele, à espera um do outro).
+    Como esta página relê /dados a cada abertura, a cada 2 minutos, a
+    seguir a qualquer gravação (várias, desde a correção do "problema dos
+    dias") e sempre que chega um aviso de tempo real (SSE) — para esta
+    mesma sessão e para qualquer outra pessoa com a página aberta —
+    juntar tudo isto sem cache nenhuma tornava praticamente cada clique
+    numa espera de 10s. Uma cache curta (15s) reduz isto a quase zero na
+    esmagadora maioria dos pedidos, sem a informação alguma vez parecer
+    desatualizada de forma notada (a produção real não muda card a cada
+    poucos segundos). `forcar=True` ignora a cache (usado logo a seguir a
+    esta própria página criar/apagar/renomear um card — ver
+    _invalidar_cache_cards_ativos — nunca é preciso chamar com forcar=True
+    a partir daqui, a invalidação já trata disso)."""
+    if not forcar and "itens" in _CACHE_CARDS_ATIVOS:
+        ts, itens = _CACHE_CARDS_ATIVOS["itens"]
+        if time.time() - ts < TTL_CARDS_ATIVOS:
+            return itens
     cards = basecamp.cards_de_card_table("", projeto=PROJETO)
-    return [c for c in cards if _normalizar(c.get("estado")) in COLUNAS_OF]
+    itens = [c for c in cards if _normalizar(c.get("estado")) in COLUNAS_OF]
+    _CACHE_CARDS_ATIVOS["itens"] = (time.time(), itens)
+    return itens
+
+def _invalidar_cache_cards_ativos():
+    """Limpa a cache de _cards_of_ativos (ver TTL_CARDS_ATIVOS) — chamado
+    sempre que esta página escreve algo no Basecamp que muda a lista de
+    cards ativos ou o seu título (criar, apagar, renomear), para a
+    próxima leitura — normalmente o carregar() que o frontend dispara
+    logo a seguir a qualquer gravação — nunca mostrar dados de antes
+    dessa escrita só por ainda estar dentro da janela da cache."""
+    _CACHE_CARDS_ATIVOS.pop("itens", None)
 
 def estado_planeamento_serracao() -> dict:
     """Junta os cards de OF reais do Basecamp com o agendamento local
@@ -700,6 +734,7 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     de apagar, tal como agendar/atualizar_capacidade_linha já fazem."""
     existente = db.agendamento_producao(basecamp_card_id)
     basecamp.apagar_card(basecamp_card_id, projeto=PROJETO)
+    _invalidar_cache_cards_ativos()
     db.remover_agendamento_producao(basecamp_card_id)
     db.remover_logistica_carregamento(basecamp_card_id)
     if existente and existente["linha"] and existente["dia_inicio"]:
@@ -717,6 +752,7 @@ def renomear_encomenda(basecamp_card_id: int, titulo: str) -> dict:
     if not titulo:
         return {"erro": "o nome não pode ficar vazio"}
     basecamp.atualizar_titulo_card(basecamp_card_id, titulo, projeto=PROJETO)
+    _invalidar_cache_cards_ativos()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id, "titulo": titulo}
 
 
@@ -790,6 +826,7 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
     if notas:
         partes_notas.append(notas)
     card = basecamp.criar_card("Triagem", titulo_basecamp, "\n".join(partes_notas), projeto=PROJETO)
+    _invalidar_cache_cards_ativos()
     if tipo_madeira:
         db.guardar_tipo_madeira_producao(card["id"], tipo_madeira)
     resultado = {
@@ -834,6 +871,7 @@ def duplicar_encomenda(basecamp_card_id: int) -> dict:
     cor = existente["cor"] if existente else None
     cor_fundo = existente["cor_fundo"] if existente else None
     card = basecamp.criar_card("Triagem", f"{original['titulo']} (cópia)", "", projeto=PROJETO)
+    _invalidar_cache_cards_ativos()
     if volume_m3:
         db.guardar_volume_producao(card["id"], volume_m3)
     if tipo_madeira:
