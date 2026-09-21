@@ -610,8 +610,19 @@ def atualizar_cor_estado(estado: str, cor: str) -> dict:
     return db.atualizar_cor_estado_producao(estado, cor)
 
 def desagendar(basecamp_card_id: int) -> dict:
-    """Devolve uma OF à bolsa por agendar — só na base local."""
-    return db.desagendar_producao(basecamp_card_id)
+    """Devolve uma OF à bolsa por agendar — só na base local.
+
+    Bug real (Rui, 2026-09-29): tal como apagar uma OF, devolvê-la à fila
+    também liberta a capacidade que ela ocupava na linha, mas as outras
+    OFs a seguir a ela na mesma linha ficavam com a duração desatualizada
+    (ver _recalcular_linha) — ninguém a chamava aqui. Recalcula a linha
+    de onde a OF saiu, tal como os outros pontos que libertam ou ocupam
+    espaço partilhado numa linha já fazem."""
+    existente = db.agendamento_producao(basecamp_card_id)
+    resultado = db.desagendar_producao(basecamp_card_id)
+    if existente and existente["linha"] and existente["dia_inicio"]:
+        _recalcular_linha(existente["linha"])
+    return resultado
 
 def definir_volume(basecamp_card_id: int, volume_m3: float) -> dict:
     """Define/atualiza o volume (m³) de uma OF ainda na fila (sem linha/dia
@@ -678,10 +689,21 @@ def apagar_encomenda(basecamp_card_id: int) -> dict:
     tempo, tal como apagar manualmente) e remove o agendamento local e o
     duplicado de logística, se existirem. Ação a usar só quando for mesmo
     preciso (ex: encomenda criada por engano) — pedido explícito do Rui,
-    2026-09."""
+    2026-09.
+
+    Bug real (Rui, 2026-09-29): apagar uma OF já agendada libertava a
+    capacidade que ela ocupava numa linha partilhada, mas as outras OFs
+    já colocadas a seguir a ela ficavam com a duração antiga (calculada
+    contando ainda com o espaço que esta ocupava) — o mesmo "problema dos
+    dias" já corrigido para mudar m³/capacidade, só que aqui ninguém
+    chamava _recalcular_linha nenhuma. Por isso recalcula a linha depois
+    de apagar, tal como agendar/atualizar_capacidade_linha já fazem."""
+    existente = db.agendamento_producao(basecamp_card_id)
     basecamp.apagar_card(basecamp_card_id, projeto=PROJETO)
     db.remover_agendamento_producao(basecamp_card_id)
     db.remover_logistica_carregamento(basecamp_card_id)
+    if existente and existente["linha"] and existente["dia_inicio"]:
+        _recalcular_linha(existente["linha"])
     return {"apagado": True, "basecamp_card_id": basecamp_card_id}
 
 def renomear_encomenda(basecamp_card_id: int, titulo: str) -> dict:
@@ -1241,9 +1263,11 @@ async function editarCapacidade(linha){
       body:JSON.stringify({linha,capacidade_m3_dia:num})});
     const d=await r.json();
     if(d.erro){ alert(d.erro); return; }
-    CAPACIDADES[linha]=num;
     log("local",`capacidade de "${linha}" atualizada para ${num} m³/dia`);
-    renderLabels();
+    /* recarrega tudo: mudar a capacidade recalcula logo a duração de
+       todas as OFs já agendadas nessa linha (ver _recalcular_linha) —
+       uma simples atualização do rótulo não bastava. */
+    await carregar();
   }catch(e){ alert("Falhou a guardar: "+e); }
 }
 
@@ -1578,14 +1602,22 @@ async function guardarAgendamento(c, anterior){
       log("local",`recusado: ${d.erro}`);
       if(anterior){ c.linha=anterior.linha; c.gs=anterior.gs; c.dur=anterior.dur; c.volume=anterior.volume; }
       alert(d.erro);
+      $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
+      renderFila(); renderLanes();
     }else{
-      c.dur=d.duracao_dias; c.volume=d.volume_m3;
-      log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${c.dur}d`);
-      atualizarLogistica(); // pode ter criado agora o duplicado de logística
+      log("local",`guardado: ${c.titulo} → ${LINHAS[c.linha]}, ${MASTER[c.gs].iso}, ${d.duracao_dias}d`);
+      /* recarrega tudo, não só esta OF: mover uma OF já agendada
+         recalcula a duração de outras OFs já na mesma linha (ver
+         _recalcular_linha) — sem isto ficavam com a duração antiga no
+         ecrã até ao próximo refresh, bug real do Rui (2026-09-29). */
+      await carregar();
+      $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     }
-  }catch(e){ log("local",`erro ao guardar: ${e}`); }
-  $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
-  renderFila(); renderLanes();
+  }catch(e){
+    log("local",`erro ao guardar: ${e}`);
+    $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
+    renderFila(); renderLanes();
+  }
 }
 async function desagendarServidor(c){
   try{
@@ -1593,6 +1625,9 @@ async function desagendarServidor(c){
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({basecamp_card_id:c.id})});
     log("local",`devolvido à fila: ${c.titulo}`);
+    /* a linha de onde a OF saiu pode ter outras OFs recalculadas (ver
+       _recalcular_linha, chamado agora também por desagendar). */
+    await carregar();
   }catch(e){ log("local",`erro ao devolver à fila: ${e}`); }
 }
 function sync(c, anterior){ if(c.linha!==null && c.gs!==null) guardarAgendamento(c, anterior); else desagendarServidor(c); }
@@ -1837,10 +1872,12 @@ function openSheet(id){
           body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],dia_inicio:iso,volume_m3:c.volume||null})});
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; return; }
-        c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false;
         log("local",`"${c.titulo}" movido para ${LINHAS[linhaIdx]}, ${iso}`);
-        await atualizarLogistica();
-        render(); closeSheet();
+        /* recarrega tudo, não só esta OF: mudar de linha/dia recalcula a
+           duração de outras OFs já na mesma linha (ver _recalcular_linha)
+           — sem isto ficavam com a duração antiga no ecrã até ao próximo
+           refresh, bug real do Rui (2026-09-29). */
+        await carregar(); closeSheet();
       }catch(e){ alert("Falhou a guardar: "+e); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; }
     };
     $("#toFila").onclick=()=>{
@@ -1858,9 +1895,8 @@ function openSheet(id){
           body:JSON.stringify({basecamp_card_id:c.id,dia_fim})});
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; return; }
-        c.dur=d.duracao_dias; c.duracaoManual=true;
         log("local",`fim de "${c.titulo}" definido à mão: ${dia_fim}`);
-        render(); closeSheet();
+        await carregar(); closeSheet();
       }catch(e){ alert("Falhou a guardar: "+e); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; }
     };
     const moverOrdem=direcao=>async()=>{
@@ -1889,7 +1925,10 @@ function openSheet(id){
             dia_inicio:MASTER[c.gs].iso,volume_m3:vol})});
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
-        c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false;
+        log("local",`volume de "${c.titulo}" atualizado: ${d.volume_m3} m³`);
+        /* recarrega tudo: mudar o volume de uma OF já agendada recalcula
+           a duração das outras na mesma linha (ver _recalcular_linha). */
+        await carregar(); closeSheet();
       }else{
         const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
           headers:{"Content-Type":"application/json"},
@@ -1897,9 +1936,9 @@ function openSheet(id){
         const d=await r.json();
         if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
         c.volume=d.volume_m3;
+        log("local",`volume de "${c.titulo}" atualizado: ${c.volume} m³`);
+        render(); closeSheet();
       }
-      log("local",`volume de "${c.titulo}" atualizado: ${c.volume} m³`);
-      render(); closeSheet();
     }catch(e){ alert("Falhou a guardar: "+e); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; }
   };
   $("#guardarMad").onclick=async()=>{
@@ -1927,10 +1966,11 @@ function openSheet(id){
         body:JSON.stringify({basecamp_card_id:c.id})});
       const d=await r.json();
       if(d.erro){ alert(d.erro); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; return; }
-      cards=cards.filter(x=>x.id!==c.id);
-      cardsLog=cardsLog.filter(x=>x.id!==c.id);
       log("local",`apagado: ${c.titulo}`);
-      render(); closeSheet();
+      /* recarrega tudo: apagar uma OF já agendada liberta espaço e
+         recalcula a duração de outras OFs na mesma linha (ver
+         _recalcular_linha) — uma simples remoção local não bastava. */
+      await carregar(); closeSheet();
     }catch(e){ alert("Falhou a apagar: "+e); $("#apagar").textContent="Apagar encomenda"; $("#apagar").disabled=false; }
   };
   $("#guardarTudo").onclick=async()=>{
@@ -2008,9 +2048,12 @@ function openSheet(id){
         else c.madeira=tipo;
       }catch(e){ erros.push(`madeira: ${e}`); }
     }
-    await atualizarLogistica();
     log("local",`"${c.titulo}" — guardar tudo`);
-    render();
+    /* recarrega tudo, não só esta OF: linha/início/volume/fim podem ter
+       recalculado a duração de outras OFs já na mesma linha (ver
+       _recalcular_linha) — sem isto ficavam com a duração antiga no
+       ecrã até ao próximo refresh. */
+    await carregar();
     btn.textContent="Guardar tudo"; btn.disabled=false;
     if(erros.length) alert("Alguns campos falharam:\n"+erros.join("\n"));
     else closeSheet();
