@@ -936,6 +936,30 @@ def registar_webhooks_basecamp():
             resultado.append({"projeto": projeto["name"], "estado": f"falhou: {e}"})
     return resultado
 
+@app.get("/temp/procurar-comentario")
+def temp_procurar_comentario(termo: str = "amanhã"):
+    """Endpoint temporário de diagnóstico — encontrar o card e comentário
+    exatos de um incidente, para responder ao card certo. Remover depois
+    de usado."""
+    cards = basecamp.cards_de_card_table("Logistica", projeto="Entregas")
+    resultados = []
+    for c in cards:
+        if not c.get("comments_url") or not c.get("comments_count"):
+            continue
+        try:
+            comentarios = basecamp.ler_comentarios(c["comments_url"])
+        except Exception as e:
+            continue
+        for com in comentarios:
+            texto = com.get("conteudo") or ""
+            if termo.lower() in texto.lower():
+                resultados.append({
+                    "card_id": c["id"], "card_titulo": c["titulo"], "estado": c.get("estado"),
+                    "url": c["url"], "comentario_id": com["id"], "autor": com["autor"],
+                    "criado_em": com["criado_em"], "trecho": texto[:400],
+                })
+    return resultados
+
 @app.post("/basecamp/webhook")
 async def receber_webhook_basecamp(request: Request, chave: str = ""):
     """Recebe eventos do Basecamp (comentário/tarefa/card criado ou atualizado).
