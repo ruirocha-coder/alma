@@ -946,10 +946,12 @@ def temp_listar_tabelas(termo: str = "logist"):
             for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
 
 @app.get("/temp/procurar-comentario")
-def temp_procurar_comentario(termo: str = "amanhã", coluna: str = ""):
+def temp_procurar_comentario(termos: str = "amanhã,setembro", coluna: str = ""):
     """Endpoint temporário de diagnóstico — encontrar o card e comentário
-    exatos de um incidente, para responder ao card certo. Remover depois
-    de usado."""
+    exatos de um incidente, para responder ao card certo. `termos`
+    separados por vírgula: só entra se TODOS aparecerem no texto (já sem
+    html) do comentário. Remover depois de usado."""
+    alvos = [t.strip().lower() for t in termos.split(",") if t.strip()]
     cards = basecamp.cards_de_card_table("Logística", projeto="Entregas")
     if coluna:
         cards = [c for c in cards if coluna.lower() in (c.get("estado") or "").lower()]
@@ -964,8 +966,8 @@ def temp_procurar_comentario(termo: str = "amanhã", coluna: str = ""):
             continue
         total_comentarios += len(comentarios)
         for com in comentarios:
-            texto = com.get("conteudo") or ""
-            if termo.lower() in texto.lower():
+            texto = basecamp._texto_simples(com.get("conteudo") or "").lower()
+            if all(a in texto for a in alvos):
                 resultados.append({
                     "card_id": c["id"], "card_titulo": c["titulo"], "estado": c.get("estado"),
                     "url": c["url"], "comentario_id": com["id"], "autor": com["autor"],
