@@ -945,6 +945,13 @@ def temp_listar_tabelas(termo: str = "logist"):
              "bucket_id": (t.get("bucket") or {}).get("id")}
             for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
 
+@app.post("/temp/comentar")
+def temp_comentar(card_id: int, texto: str, projeto: str = "Entregas"):
+    """Endpoint temporário — publica um comentário num card específico.
+    Usado uma vez para responder ao card certo do incidente da data do
+    fornecedor. Remover a seguir."""
+    return basecamp.comentar(card_id, texto, projeto=projeto)
+
 @app.get("/temp/ver-card")
 def temp_ver_card(card_id: int):
     """Diagnóstico: mostra os dados e comentários de um card específico
