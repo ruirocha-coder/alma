@@ -229,7 +229,8 @@ def _dias_necessarios_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
     dias, _ = _repartir_greedy(capacidade, ocupacao, dia_inicio, volume_m3, limite)
     return dias
 
-def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None) -> dict:
+def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None,
+                     ids_ativos: set = None) -> dict:
     """Quanto de m³/dia está mesmo ocupado, dia a dia, numa linha —
     replica a fila de OFs já agendadas nessa linha pela mesma repartição
     greedy usada para encaixar uma OF nova (_repartir_greedy), em vez de
@@ -276,8 +277,14 @@ def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None)
     apagar_encomenda) deixa o agendamento local órfão — sem isto, esse
     órfão continuava a "ocupar" a linha para sempre, invisível no quadro,
     forçando encomendas novas a repartir-se sem motivo nenhum visível.
-    Por isso só conta OFs que ainda existem mesmo no Basecamp."""
-    ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    Por isso só conta OFs que ainda existem mesmo no Basecamp.
+
+    `ids_ativos`, se dado, poupa ir buscar os cards ativos ao Basecamp de
+    novo (chamada lenta) — usado por _recalcular_linha, que precisa desta
+    função uma vez por OF da linha e não pode repetir esse pedido de cada
+    vez (ver ali)."""
+    if ids_ativos is None:
+        ids_ativos = {c["id"] for c in _cards_of_ativos()}
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
     agendamentos = [a for a in db.agendamentos_producao_ecos_largos()
                     if a["linha"] == linha and a["dia_inicio"]
@@ -311,7 +318,7 @@ def _prioridade(dia_inicio: str, basecamp_card_id: int = None) -> tuple:
     return (dia_inicio, basecamp_card_id if basecamp_card_id is not None else float("inf"))
 
 def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
-                        excluir_id: int = None) -> int:
+                        excluir_id: int = None, ids_ativos: set = None) -> int:
     """Quantos dias uma encomenda ocupa numa linha, a partir do seu volume
     (m³) e da capacidade diária dessa linha (editável, ver
     atualizar_capacidade_linha) — a mais curta possível que caiba,
@@ -321,7 +328,8 @@ def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
     (ver _ocupacao_diaria, `antes_de`). Sem `dia_inicio` (ainda na fila,
     sem dia definido) ou sem capacidade configurada para a linha, usa só
     volume ÷ capacidade plena, sem olhar a ocupação (não há ainda dia
-    nenhum para verificar)."""
+    nenhum para verificar). `ids_ativos` só poupa uma chamada ao Basecamp
+    (ver _ocupacao_diaria) — passa em branco em condições normais."""
     if not volume_m3:
         return 1
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
@@ -330,19 +338,22 @@ def _duracao_por_volume(linha: str, volume_m3: float, dia_inicio: str = None,
     duracao_minima = max(1, math.ceil(volume_m3 / capacidade))
     if not dia_inicio:
         return duracao_minima
-    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id), excluir_id=excluir_id)
+    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id),
+                                excluir_id=excluir_id, ids_ativos=ids_ativos)
     dias = _dias_necessarios_greedy(capacidade, ocupacao, dia_inicio, volume_m3)
     return dias if dias is not None else duracao_minima  # não coube em espaço nenhum razoável — deixa _validar_capacidade recusar com a mensagem certa
 
 def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
-                        volume_m3: float, excluir_id: int = None) -> str:
+                        volume_m3: float, excluir_id: int = None, ids_ativos: set = None) -> str:
     """Confirma que colocar esta OF (com este volume, repartido greedily
     pelo espaço livre de cada dia — ver _dias_necessarios_greedy) nesta
     linha, a partir deste dia, cabe dentro de `duracao_dias` dias sem
     ultrapassar a capacidade da linha em dia nenhum. Devolve uma mensagem
-    de erro, ou None se estiver tudo bem."""
+    de erro, ou None se estiver tudo bem. `ids_ativos` só poupa uma
+    chamada ao Basecamp (ver _ocupacao_diaria)."""
     capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
-    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id), excluir_id=excluir_id)
+    ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(dia_inicio, excluir_id),
+                                excluir_id=excluir_id, ids_ativos=ids_ativos)
     inicio = date.fromisoformat(dia_inicio)
     if not volume_m3:
         for i in range(duracao_dias):
@@ -411,6 +422,43 @@ def _talvez_duplicar_logistica(basecamp_card_id: int, dia_inicio: str, duracao_d
         return
     db.criar_logistica_carregamento(basecamp_card_id, dia_carregamento)
 
+def _recalcular_linha(linha: str, excluir_id: int = None, ids_ativos: set = None):
+    """Recalcula e grava de novo a duração de TODAS as OFs já agendadas
+    numa linha (exceto `excluir_id`, se dado — a que o próprio chamador
+    acabou de guardar) — chamado sempre que algo pode ter mudado a
+    ocupação partilhada da linha para as outras, para nenhuma ficar com a
+    duração desatualizada.
+
+    Bug real (Rui, 2026-09-28): mudar os m³ de uma encomenda, ou a
+    capacidade da própria linha, só recalculava a duração dessa encomenda
+    (ou não recalculava nada nenhuma, no caso da capacidade) — as outras
+    OFs já colocadas na mesma linha ficavam com a duração antiga, por
+    vezes claramente errada (ex: o Navalon, sozinho e a caber MUITO bem
+    numa linha, aparecia a precisar de vários dias só porque uma
+    encomenda vizinha, entretanto mudada, já não justificava esse
+    espalhamento). _ocupacao_diaria já ignora a duração guardada de
+    qualquer OF com volume (deriva sempre a alocação real a partir do seu
+    volume+dia_inicio, ver ali) — por isso recalcular aqui, em qualquer
+    ordem, dá sempre o resultado global correto, sem precisar de tocar
+    duas vezes na mesma OF.
+
+    `ids_ativos`, se dado, poupa repetir o pedido ao Basecamp uma vez por
+    OF da linha (lento) — busca-se aqui UMA VEZ e passa-se para cada
+    chamada de _duracao_por_volume."""
+    if ids_ativos is None:
+        ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    for a in db.agendamentos_producao_ecos_largos():
+        if (a["linha"] != linha or not a["dia_inicio"] or not a["volume_m3"]
+                or a["basecamp_card_id"] == excluir_id or a["basecamp_card_id"] not in ids_ativos):
+            continue
+        nova_duracao = _duracao_por_volume(linha, a["volume_m3"], a["dia_inicio"],
+                                           excluir_id=a["basecamp_card_id"], ids_ativos=ids_ativos)
+        if nova_duracao == a["duracao_dias"]:
+            continue
+        db.guardar_agendamento_producao(a["basecamp_card_id"], linha, a["dia_inicio"],
+                                        nova_duracao, a["volume_m3"])
+        _talvez_duplicar_logistica(a["basecamp_card_id"], a["dia_inicio"], nova_duracao, a["tipo_madeira"])
+
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:
     """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
     escreve nada no Basecamp (ver nota no topo do módulo). A duração é
@@ -420,7 +468,13 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     o apaga só por não vir neste pedido). Recusa o agendamento (ver
     _validar_capacidade) se ultrapassar a capacidade da linha nalgum dos
     dias ocupados. Se já tiver tipo de madeira definido, duplica para a
-    logística (ver _talvez_duplicar_logistica)."""
+    logística (ver _talvez_duplicar_logistica).
+
+    Depois de guardar, recalcula as outras OFs da(s) linha(s) afetada(s)
+    (a nova, e a antiga se a OF mudou de linha — ver _recalcular_linha):
+    mudar os m³ ou o dia desta OF pode libertar ou ocupar espaço que
+    outras já lá colocadas estavam a usar/precisar, e essas nunca são
+    tocadas por nenhum outro pedido a não ser este."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
@@ -435,19 +489,27 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
             return {"erro": "volume tem de ser maior que 0"}
     else:
         volume_m3 = existente["volume_m3"] if existente else None
-    duracao_dias = _duracao_por_volume(linha, volume_m3, dia_inicio, excluir_id=basecamp_card_id)
-    erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3, excluir_id=basecamp_card_id)
+    ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    duracao_dias = _duracao_por_volume(linha, volume_m3, dia_inicio, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
+    erro = _validar_capacidade(linha, dia_inicio, duracao_dias, volume_m3, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
     if erro:
         return {"erro": erro}
     db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
     tipo_madeira = existente["tipo_madeira"] if existente else None
     _talvez_duplicar_logistica(basecamp_card_id, dia_inicio, duracao_dias, tipo_madeira)
+    linha_antiga = existente["linha"] if existente else None
+    if linha_antiga and linha_antiga != linha:
+        _recalcular_linha(linha_antiga, ids_ativos=ids_ativos)
+    _recalcular_linha(linha, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
     return {"guardado": True, "basecamp_card_id": basecamp_card_id,
             "duracao_dias": duracao_dias, "volume_m3": volume_m3}
 
 def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
     """Atualiza a capacidade (m³/dia) de uma linha — editável pela equipa
-    diretamente no quadro (pedido explícito do Rui, 2026-09)."""
+    diretamente no quadro (pedido explícito do Rui, 2026-09) — e recalcula
+    logo a seguir a duração de todas as OFs já agendadas nessa linha (ver
+    _recalcular_linha), que passam a caber de forma diferente com a nova
+    capacidade."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     try:
@@ -456,7 +518,9 @@ def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
         return {"erro": "capacidade inválida"}
     if capacidade_m3_dia <= 0:
         return {"erro": "capacidade tem de ser maior que 0"}
-    return db.atualizar_capacidade_linha_producao(linha, capacidade_m3_dia)
+    resultado = db.atualizar_capacidade_linha_producao(linha, capacidade_m3_dia)
+    _recalcular_linha(linha)
+    return resultado
 
 def atualizar_cor_estado(estado: str, cor: str) -> dict:
     """Atualiza a cor automática de fundo de um estado/coluna do Basecamp
