@@ -945,6 +945,33 @@ def temp_listar_tabelas(termo: str = "logist"):
              "bucket_id": (t.get("bucket") or {}).get("id")}
             for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
 
+@app.get("/temp/cards-paginado")
+def temp_cards_paginado():
+    """Diagnóstico: refaz cards_de_card_table("Logística","Entregas") mas
+    com paginação explícita por coluna, para confirmar se a versão sem
+    paginação está a perder cards. Remover a seguir."""
+    alvo = basecamp._normalizar("Logística")
+    projeto_normalizado = basecamp._normalizar("Entregas")
+    tabelas = [t for t in basecamp._card_tables_ativos()
+              if alvo in basecamp._normalizar(t.get("title") or "")
+              and projeto_normalizado in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")]
+    resultado = []
+    for tabela in tabelas:
+        r = basecamp.httpx.get(tabela["url"], headers=basecamp._headers(), timeout=30)
+        r.raise_for_status()
+        detalhe = r.json()
+        for coluna in detalhe.get("lists", []):
+            cards_url = coluna.get("cards_url")
+            if not cards_url:
+                continue
+            cards_pag = basecamp._get_paginado(cards_url)
+            r2 = basecamp.httpx.get(cards_url, headers=basecamp._headers(), timeout=30)
+            r2.raise_for_status()
+            cards_sem_pag = r2.json()
+            resultado.append({"coluna": coluna.get("title"), "sem_paginacao": len(cards_sem_pag),
+                              "com_paginacao": len(cards_pag)})
+    return resultado
+
 @app.get("/temp/procurar-comentario")
 def temp_procurar_comentario(termos: str = "amanhã,setembro", coluna: str = ""):
     """Endpoint temporário de diagnóstico — encontrar o card e comentário
