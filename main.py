@@ -946,11 +946,14 @@ def temp_listar_tabelas(termo: str = "logist"):
             for t in basecamp._card_tables_ativos() if alvo in (t.get("title") or "").lower()]
 
 @app.get("/temp/procurar-comentario")
-def temp_procurar_comentario(termo: str = "amanhã"):
+def temp_procurar_comentario(termo: str = "amanhã", coluna: str = ""):
     """Endpoint temporário de diagnóstico — encontrar o card e comentário
     exatos de um incidente, para responder ao card certo. Remover depois
     de usado."""
-    cards = basecamp.cards_de_card_table("Logistica", projeto="Entregas")
+    cards = basecamp.cards_de_card_table("Logística", projeto="Entregas")
+    if coluna:
+        cards = [c for c in cards if coluna.lower() in (c.get("estado") or "").lower()]
+    total_comentarios = 0
     resultados = []
     for c in cards:
         if not c.get("comments_url") or not c.get("comments_count"):
@@ -959,6 +962,7 @@ def temp_procurar_comentario(termo: str = "amanhã"):
             comentarios = basecamp.ler_comentarios(c["comments_url"])
         except Exception as e:
             continue
+        total_comentarios += len(comentarios)
         for com in comentarios:
             texto = com.get("conteudo") or ""
             if termo.lower() in texto.lower():
@@ -967,7 +971,8 @@ def temp_procurar_comentario(termo: str = "amanhã"):
                     "url": c["url"], "comentario_id": com["id"], "autor": com["autor"],
                     "criado_em": com["criado_em"], "trecho": texto[:400],
                 })
-    return resultados
+    return {"cards_verificados": len(cards), "comentarios_verificados": total_comentarios,
+            "resultados": resultados}
 
 @app.post("/basecamp/webhook")
 async def receber_webhook_basecamp(request: Request, chave: str = ""):
