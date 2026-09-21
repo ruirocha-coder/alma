@@ -936,15 +936,6 @@ def registar_webhooks_basecamp():
             resultado.append({"projeto": projeto["name"], "estado": f"falhou: {e}"})
     return resultado
 
-@app.post("/temp/testar-internet")
-def temp_testar_internet(pergunta: str, projeto: str = ""):
-    """Endpoint temporário — testa se o agente do Basecamp (responder_basecamp)
-    usa mesmo TOOLS_INTERNET (web_search/web_fetch) numa pergunta que exige
-    dados atuais, sem passar pelo Basecamp. Remover a seguir."""
-    resposta = responder_basecamp.responder(
-        "teste-diagnostico", [{"role": "user", "content": pergunta}], projeto=projeto)
-    return {"resposta": resposta}
-
 @app.post("/basecamp/webhook")
 async def receber_webhook_basecamp(request: Request, chave: str = ""):
     """Recebe eventos do Basecamp (comentário/tarefa/card criado ou atualizado).
