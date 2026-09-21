@@ -33,6 +33,31 @@ TOOLS_INTERNET = [
     {"type": "web_fetch_20260209", "name": "web_fetch"},
 ]
 
+# Bug real (Rui, 2026-09-21): a Alma respondia "não tenho acesso a dados em
+# tempo real"/"não tenho acesso à internet" em missões com uma missão muito
+# extensa e cheia de ferramentas específicas nomeadas (ex: MISSAO_CEO, no
+# projeto "Entregas") — TOOLS_INTERNET estava mesmo declarado no pedido à
+# API (herda de TOOLS_COMUNS), mas o próprio modelo nunca chegava a usá-lo:
+# com dezenas de regras "usa sempre a ferramenta X para Y" para dados da
+# empresa, e nenhuma delas a mencionar sequer que existe uma ferramenta de
+# pesquisa geral na internet, o modelo concluía (errado) que as ferramentas
+# nomeadas eram TODA a sua capacidade. Confirmado ao vivo: a mesma pergunta,
+# na missão mais curta e genérica (MISSAO_BASECAMP, sem esta lista extensa),
+# já usava a pesquisa corretamente sem precisar desta instrução — só as
+# missões mais densas em ferramentas específicas precisam dela, mas todas a
+# incluem por consistência/segurança. Qualquer missão que inclua
+# TOOLS_INTERNET deve terminar com isto (ver MISSAO_CEO, MISSAO_ECOS_LARGOS).
+INSTRUCAO_INTERNET = """
+
+Para qualquer pergunta sobre informação externa/atual que nenhuma das
+ferramentas acima cobre (ex: preços de mercado de um produto ou material,
+notícias, cotações, dados públicos, "pesquisa no mercado", tendências,
+concorrência, ou qualquer facto do mundo real fora da empresa) — usa sempre
+web_search (e web_fetch para ler o conteúdo completo de uma página
+encontrada) antes de dizeres que não tens essa informação. Nunca respondas
+"não tenho acesso a dados em tempo real" ou "não tenho acesso à internet" —
+tens sempre estas duas ferramentas disponíveis, exatamente para isto."""
+
 # Tools que qualquer agente pode incluir — quem adicionar um agente novo só
 # precisa de fazer TOOLS_X = TOOLS_COMUNS + [tools específicas do agente].
 TOOLS_COMUNS = (bigcommerce.TOOLS_COMUNS + site.TOOLS_SITE

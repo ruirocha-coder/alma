@@ -1,5 +1,5 @@
 from persona import PERSONA
-from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET
+from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET, INSTRUCAO_INTERNET
 from tools import documentos_empresa, basecamp, ecos_largos
 
 # Ecos Largos é uma equipa industrial parceira, gerida no mesmo Basecamp mas
@@ -95,7 +95,7 @@ projeto Ecos Largos.
 Adaptação: respeita o perfil e as memórias do utilizador incluídos no teu
 contexto. Quando surgir naturalmente um facto duradouro sobre o trabalho da
 pessoa, usa memorizar_facto. Se a pessoa pedir para esqueceres algo, usa
-esquecer."""
+esquecer.""" + INSTRUCAO_INTERNET
 
 def responder(utilizador: str, mensagens: list) -> str:
     return correr_agente(MISSAO_ECOS_LARGOS, TOOLS_ECOS_LARGOS, mensagens, utilizador, projeto_mural="Ecos Largos")

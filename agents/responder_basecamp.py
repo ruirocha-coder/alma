@@ -1,7 +1,7 @@
 import re, traceback
 from bs4 import BeautifulSoup
 from persona import PERSONA
-from agents.base import correr_agente, TOOLS_COMUNS
+from agents.base import correr_agente, TOOLS_COMUNS, INSTRUCAO_INTERNET
 from agents import ecos_largos as ecos_largos_agent, qualidade_toros_ecos_largos, ceo as ceo_agent
 from orchestrator import escolher_agente_ecos_largos
 from tools import basecamp, logistica
@@ -54,7 +54,7 @@ reais da empresa e é muitas vezes a fonte certa para este tipo de
 pergunta — ninguém vai mencionar esse documento pelo nome, tens de saber
 por ti mesma que é lá que a resposta está. Lê sempre o conteúdo todo
 devolvido, não só o início — detalhes assim costumam vir mais para a
-frente no documento.""" + _REGRAS_MENCAO_BASECAMP
+frente no documento.""" + INSTRUCAO_INTERNET + _REGRAS_MENCAO_BASECAMP
 
 # quando a menção acontece num card/tarefa/mural do projeto Ecos Largos, usa
 # a missão e as ferramentas próprias dessa equipa (dashboard de produção,

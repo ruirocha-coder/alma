@@ -1,6 +1,6 @@
 from persona import PERSONA
 from tools.bigcommerce import TOOL_RESUMO_VENDAS
-from agents.base import correr_agente, correr_agente_stream, TOOLS_COMUNS
+from agents.base import correr_agente, correr_agente_stream, TOOLS_COMUNS, INSTRUCAO_INTERNET
 
 # pedido explícito do Rui (2026-07-23): poder pedir, na conversa, para
 # correr já a sugestão semanal de logística de entregas (ver
@@ -326,7 +326,7 @@ equipa.
 Adaptação: respeita o perfil e as memórias do utilizador incluídos no teu
 contexto. Quando surgir naturalmente um facto duradouro sobre o trabalho da
 pessoa, usa memorizar_facto. Se a pessoa pedir para esqueceres algo, usa
-esquecer."""
+esquecer.""" + INSTRUCAO_INTERNET
 
 def responder(utilizador: str, mensagens: list) -> str:
     return correr_agente(MISSAO_CEO, TOOLS_CEO, mensagens, utilizador)
