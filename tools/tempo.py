@@ -57,6 +57,50 @@ def agora() -> dict:
     }
 
 
+def distancia_dias(data: str) -> dict:
+    """Calcula a distância em dias entre hoje e uma data (passada ou
+    futura) e devolve já a palavra relativa certa em português
+    (hoje/amanhã/depois de amanhã/ontem/anteontem/daqui a N dias/há N
+    dias) — nunca calcules isto de cabeça, chama sempre esta função antes
+    de escreveres "amanhã", "depois de amanhã", "daqui a X dias" ou
+    qualquer expressão relativa sobre uma data.
+
+    Bug real (Rui, 2026-09-17): num comentário no card de Entregas, a
+    Alma escreveu "a data do fornecedor é amanhã (25 de setembro)" com a
+    data de hoje a ser 17 de setembro — 25 de setembro estava a OITO dias
+    de distância, não a um. O erro foi calcular a distância "de cabeça"
+    em vez de contar mesmo a diferença entre as duas datas, o mesmo tipo
+    de erro já visto antes com o dia da semana (ver dia_da_semana) e com
+    contas (ver tools.calculadora.calcular). Passa `data` no formato
+    YYYY-MM-DD."""
+    try:
+        d = date.fromisoformat(data.strip())
+    except ValueError:
+        return {"erro": f"data inválida {data!r} — usa o formato YYYY-MM-DD"}
+    hoje = datetime.now(FUSO_HORARIO).date()
+    dias = (d - hoje).days
+    if dias == 0:
+        relativo = "hoje"
+    elif dias == 1:
+        relativo = "amanhã"
+    elif dias == 2:
+        relativo = "depois de amanhã"
+    elif dias == -1:
+        relativo = "ontem"
+    elif dias == -2:
+        relativo = "anteontem"
+    elif dias > 0:
+        relativo = f"daqui a {dias} dias"
+    else:
+        relativo = f"há {abs(dias)} dias"
+    return {
+        "dias": dias,
+        "relativo": relativo,
+        "data_extenso": _formatar_extenso(d),
+        "dia_semana": _DIAS_SEMANA[d.weekday()],
+    }
+
+
 def dia_da_semana(data: str) -> dict:
     """O dia da semana de QUALQUER data (passada ou futura), calculado
     aqui — nunca adivinhado. Passa `data` no formato YYYY-MM-DD. Usa
@@ -91,6 +135,22 @@ TOOLS_TEMPO = [
                         "precisares de rotular uma data com o dia da semana (ex: num relatório \"Dom 3 ago\", "
                         "\"3ª feira\", \"segunda-feira\") em vez de escreveres isso de memória: já aconteceu "
                         "escrever o dia da semana errado (uma segunda-feira rotulada como domingo)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "string", "description": "YYYY-MM-DD"}
+            },
+            "required": ["data"]
+        }
+    },
+    {
+        "name": "distancia_dias",
+        "description": ("Calcula a distância em dias entre hoje e uma data (passada ou futura), e já devolve "
+                        "a palavra relativa certa em português (hoje/amanhã/depois de amanhã/ontem/anteontem/"
+                        "daqui a N dias/há N dias) — usa isto SEMPRE antes de escreveres \"amanhã\", \"depois "
+                        "de amanhã\", \"daqui a X dias\" ou qualquer expressão relativa sobre uma data, nunca "
+                        "calcules essa distância de cabeça: já aconteceu escrever \"a data do fornecedor é "
+                        "amanhã\" para uma data que estava na verdade a 8 dias de distância."),
         "input_schema": {
             "type": "object",
             "properties": {
