@@ -1987,7 +1987,8 @@ function openSheet(id){
     const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
     corpo = `
     <div class="frow"><label>Linha</label><select id="fLinha">${LINHAS.map((n,i)=>
-      `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}</select></div>
+      `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}
+      <option value="-1">— Devolver à fila (Triagem) —</option></select></div>
     <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}" data-original="${s.iso}"></div>
     <div class="frow"><label>Fim</label><input id="fFim" type="date" value="${f.iso}" data-original="${f.iso}"></div>
     <div class="owner">${c.duracaoManual
@@ -2117,7 +2118,20 @@ function openSheet(id){
         else{ c.titulo=titulo; const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo; }
       }catch(e){ erros.push(`nome: ${e}`); }
     }else erros.push("nome: não pode ficar vazio");
-    if(agendado){
+    if(agendado && +$("#fLinha").value===-1){
+      /* pedido explícito do Rui (2026-09-30): tem de continuar a ser
+         possível devolver à fila uma OF já numa linha — a opção
+         "Devolver à fila" no próprio select de Linha faz isso pelo
+         "Guardar tudo", sem precisar de um botão à parte. */
+      try{
+        const r=await fetch("/planeamento-ecos-largos/desagendar",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:c.id})});
+        const d=await r.json();
+        if(d.erro) erros.push(`devolver à fila: ${d.erro}`);
+        else{ c.linha=null; c.gs=null; }
+      }catch(e){ erros.push(`devolver à fila: ${e}`); }
+    }else if(agendado){
       const linhaIdx=+$("#fLinha").value;
       const iso=$("#fInicio").value;
       const isoOriginal=$("#fInicio").dataset.original;
