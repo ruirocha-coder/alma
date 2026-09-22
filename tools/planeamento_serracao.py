@@ -1982,7 +1982,12 @@ $("#lanesLog").addEventListener("click",e=>{
 function openSheet(id){
   const c=card(id);
   const agendado = c.linha!==null && c.gs!==null;
-  let corpo = `<div class="kv"><span>Estado</span><b>Por agendar</b></div>`;
+  let corpo = `
+    <div class="frow"><label>Linha</label><select id="fLinha">
+      <option value="-1" selected>— Por agendar (fila) —</option>
+      ${LINHAS.map((n,i)=>`<option value="${i}">${n}</option>`).join("")}</select></div>
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${hojeISO}"></div>
+    <div class="owner">Escolhe uma linha e um dia de início para agendar esta encomenda — ao guardar, aparece logo nesse dia no quadro. O card no Basecamp continua em Triagem até seres tu a movê-lo lá.</div>`;
   if(agendado){
     const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
     corpo = `
@@ -2091,8 +2096,12 @@ function openSheet(id){
       /* a cópia entra sempre na fila por agendar (pedido explícito do
          Rui, 2026-09-29), mesmo que o original já estivesse numa linha —
          por isso um carregar() normal já basta, não recalcula nenhuma
-         linha (a cópia ainda não ocupa nenhuma). */
-      await carregar(); closeSheet();
+         linha (a cópia ainda não ocupa nenhuma). Pedido explícito do Rui
+         (2026-09-30): abre logo a ficha da cópia, tal como o Google
+         Calendar abre já os detalhes de um evento duplicado, para
+         escolher ali mesmo a linha/dia — sem isso, "Guardar tudo" na
+         cópia deixa-a na fila (comportamento normal de um card novo). */
+      await carregar(); openSheet(d.basecamp_card_id);
     }catch(e){ alert("Falhou a duplicar: "+e); $("#duplicar").textContent="Duplicar"; $("#duplicar").disabled=false; }
   };
   $("#guardarTudo").onclick=async()=>{
@@ -2167,8 +2176,29 @@ function openSheet(id){
         }catch(e){ erros.push(`fim: ${e}`); }
       }
     }else{
+      /* pedido explícito do Rui (2026-09-30): "duplicar" abre logo a ficha
+         da cópia (ver #duplicar) — escolher aqui uma linha + início agenda
+         a OF diretamente, tal como o Google Calendar abre já os detalhes
+         de um evento duplicado para escolheres a data. O card no Basecamp
+         fica sempre em Triagem (nunca se mexe sozinho, ver nota no topo
+         do módulo) até alguém o mover lá manualmente. */
+      const linhaIdx=+$("#fLinha").value;
+      const iso=$("#fInicio").value;
       const vol=+$("#fVol").value;
-      if(vol>0){
+      if(linhaIdx>=0){
+        if(!iso) erros.push("linha/início: escolhe uma data de início");
+        else{
+          try{
+            const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],
+                dia_inicio:iso,volume_m3:vol>0?vol:(c.volume||null)})});
+            const d=await r.json();
+            if(d.erro) erros.push(`linha/início: ${d.erro}`);
+            else{ c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; }
+          }catch(e){ erros.push(`linha/início: ${e}`); }
+        }
+      }else if(vol>0){
         try{
           const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
             headers:{"Content-Type":"application/json"},
