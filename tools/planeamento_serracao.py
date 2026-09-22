@@ -843,36 +843,6 @@ def _acrescentar_numero_notas(basecamp_card_id: int, notas_atuais: str) -> bool:
     basecamp.atualizar_notas_card(basecamp_card_id, notas_novas, projeto=PROJETO)
     return True
 
-def sincronizar_numeros_curtos_notas() -> dict:
-    """Acrescenta o número curto às notas de todos os cards ATIVOS neste
-    quadro (fila + já agendados) que ainda não o tenham — pedido
-    explícito do Rui (2026-09-30), depois de o quadro passar a mostrar só
-    os últimos 4 dígitos do id em cada card em vez do id completo. Só
-    toca nos cards que aparecem mesmo aqui (mesma regra de bolsa/agendadas
-    que estado_planeamento_serracao) — nunca no resto do histórico da
-    conta. Cards criados/duplicados a partir de agora já saem com isto
-    tratado (ver criar_encomenda/duplicar_encomenda) — esta função é só
-    para pôr em dia os que já existiam no quadro antes disto."""
-    cards_ativos = _cards_of_ativos()
-    agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
-    atualizados = ja_tinham = 0
-    erros = []
-    for c in cards_ativos:
-        agendamento = agendamentos.get(c["id"])
-        tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
-        if not tem_agendamento and _normalizar(c.get("estado")) != "triagem":
-            continue
-        try:
-            if _acrescentar_numero_notas(c["id"], c.get("notas")):
-                atualizados += 1
-            else:
-                ja_tinham += 1
-        except Exception as e:
-            erros.append({"basecamp_card_id": c["id"], "erro": str(e)})
-    if atualizados:
-        _invalidar_cache_cards_ativos()
-    return {"atualizados": atualizados, "ja_tinham": ja_tinham, "erros": erros}
-
 def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tipo_madeira: str = None,
                     notas: str = "", linha: str = None, dia_inicio: str = None) -> dict:
     """Cria uma encomenda nova: um card real na coluna Triagem do Basecamp

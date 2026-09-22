@@ -721,16 +721,6 @@ def planeamento_ecos_largos_duplicar(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
-@app.post("/planeamento-ecos-largos/_sincronizar_numeros_notas")
-def planeamento_ecos_largos_sincronizar_numeros_notas():
-    """TEMPORÁRIO (remover depois de correr uma vez, 2026-09-30): acrescenta
-    o número curto às notas de todos os cards já ativos no quadro (bolsa +
-    agendadas) que ainda não o tenham — ver
-    tools/planeamento_serracao.sincronizar_numeros_curtos_notas. Cards
-    criados/duplicados a partir de agora já saem com isto tratado."""
-    resultado = planeamento_serracao.sincronizar_numeros_curtos_notas()
-    return JSONResponse(resultado)
-
 @app.post("/planeamento-ecos-largos/renomear")
 def planeamento_ecos_largos_renomear(corpo: dict = Body(...)):
     """Muda o título (nome) do card real no Basecamp — pedido explícito do
