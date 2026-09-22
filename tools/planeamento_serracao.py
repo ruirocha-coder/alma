@@ -618,6 +618,35 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     return {"guardado": True, "basecamp_card_id": basecamp_card_id,
             "duracao_dias": duracao_dias, "volume_m3": volume_m3}
 
+def sincronizar_due_on_agendadas() -> dict:
+    """Alinha o "Due on" no Basecamp com o dia de início de produção de
+    todas as OFs já agendadas cujo Due on ainda não bata certo — pedido
+    explícito do Rui (2026-09-30): os dois campos têm de estar sempre
+    interligados. agendar() já trata disto sozinho a partir de agora
+    (ver ali) sempre que o dia de início muda; isto põe em dia as OFs que
+    já estavam agendadas antes dessa funcionalidade existir (medido ao
+    vivo: 34 OFs sem Due on nenhum, de um total de ~60 agendadas)."""
+    cards_por_id = {c["id"]: c for c in _cards_of_ativos()}
+    atualizados = ja_tinham = 0
+    erros = []
+    for a in db.agendamentos_producao_ecos_largos():
+        if not a["linha"] or not a["dia_inicio"]:
+            continue
+        card = cards_por_id.get(a["basecamp_card_id"])
+        if not card:
+            continue
+        if card.get("prazo") == a["dia_inicio"]:
+            ja_tinham += 1
+            continue
+        try:
+            basecamp.atualizar_prazo_card(a["basecamp_card_id"], a["dia_inicio"], projeto=PROJETO)
+            atualizados += 1
+        except Exception as e:
+            erros.append({"basecamp_card_id": a["basecamp_card_id"], "erro": str(e)})
+    if atualizados:
+        _invalidar_cache_cards_ativos()
+    return {"atualizados": atualizados, "ja_tinham": ja_tinham, "erros": erros}
+
 def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
     """Define à mão o dia de fim de produção de uma OF já agendada,
     sobrepondo-se ao cálculo automático a partir do volume (pedido
@@ -1998,8 +2027,8 @@ function openSheet(id){
     <div class="frow"><label>Linha</label><select id="fLinha">
       <option value="-1" selected>— Por agendar (fila) —</option>
       ${LINHAS.map((n,i)=>`<option value="${i}">${n}</option>`).join("")}</select></div>
-    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${hojeISO}"></div>
-    <div class="owner">Escolhe uma linha e um dia de início para agendar esta encomenda — ao guardar, aparece logo nesse dia no quadro. O card no Basecamp continua em Triagem até seres tu a movê-lo lá.</div>`;
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${c.prazo||hojeISO}"></div>
+    <div class="owner">Escolhe uma linha e um dia de início para agendar esta encomenda — ao guardar, aparece logo nesse dia no quadro, e esse dia substitui o "Due on" no Basecamp (ver Prazo abaixo). O card no Basecamp continua em Triagem até seres tu a movê-lo lá.</div>`;
   if(agendado){
     const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
     corpo = `
