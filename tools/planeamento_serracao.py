@@ -1266,7 +1266,21 @@ let modoEdicao=false;
 const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
 const cardLog=id=>cardsLog.find(c=>c.id===id);
-const atrasado=c=>c.prazo && c.prazo<hojeISO;
+/* pedido explícito do Rui (2026-09-30): a borda vermelha ("atrasado") não
+   é sobre o prazo do Basecamp (um campo qualquer, sem relação nenhuma
+   com o plano de produção) — é sobre a PRODUÇÃO em si estar atrasada:
+   já passou do dia em que devia ter acabado de produzir (dia_inicio +
+   duração, calculado aqui) e o card ainda não chegou a "Produzido" nem
+   a "Vendido" no Basecamp. Uma OF ainda na fila (sem linha/dia) não tem
+   plano de produção nenhum para estar atrasada contra, por isso nunca
+   fica vermelha. */
+const CONCLUIDO_PRODUCAO=new Set(["Produzido","Vendido"]);
+const atrasado=c=>{
+  if(c.linha===null||c.gs===null) return false;
+  if(CONCLUIDO_PRODUCAO.has(c.coluna)) return false;
+  const fimIdx=clamp(c.gs+c.dur-1,0,MASTER.length-1);
+  return MASTER[fimIdx].iso<hojeISO;
+};
 /* pedido explícito do Rui (2026-09-30): o id completo do card do
    Basecamp (ex: 10285829501) é comprido demais para caber no espaço do
    card — mostra-se só os últimos 4 dígitos (ex: 9501), que já bastam
