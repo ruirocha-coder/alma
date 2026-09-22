@@ -11,6 +11,12 @@
 # já existente nunca escreve nada de volta no Basecamp, e mudanças feitas
 # no Basecamp nunca "empurram" sozinhas para aqui — a página relê o
 # Basecamp sempre que é aberta ou atualizada manualmente.
+#
+# Única exceção (pedido explícito do Rui, 2026-09-30): sempre que o dia de
+# início da produção é definido/alterado (ver agendar), esse dia é também
+# escrito no campo "Due on" do card real no Basecamp — para quem só olha
+# para lá, sem abrir este quadro, também ver quando a OF deve começar a
+# ser produzida.
 import math
 import time
 import unicodedata
@@ -546,8 +552,10 @@ def _recalcular_linha(linha: str, excluir_id: int = None, ids_ativos: set = None
         _talvez_duplicar_logistica(a["basecamp_card_id"], a["dia_inicio"], nova_duracao, a["tipo_madeira"])
 
 def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float = None) -> dict:
-    """Agenda (ou reagenda) uma OF numa linha/dia — só na base local, nunca
-    escreve nada no Basecamp (ver nota no topo do módulo). A duração é
+    """Agenda (ou reagenda) uma OF numa linha/dia — quase tudo fica só na
+    base local (ver nota no topo do módulo), à exceção do próprio dia de
+    início, que é também escrito no "Due on" do card real no Basecamp
+    (pedido explícito do Rui, 2026-09-30) sempre que muda. A duração é
     sempre calculada aqui a partir do volume e da capacidade da linha (ver
     _duracao_por_volume), nunca escolhida à mão. Se `volume_m3` não for
     indicado, mantém o volume já guardado anteriormente para esta OF (não
@@ -591,6 +599,16 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     if erro:
         return {"erro": erro}
     db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+    if not existente or existente["dia_inicio"] != dia_inicio:
+        # melhor esforço: uma falha aqui (ex: Basecamp em baixo) não pode
+        # impedir o agendamento local, que é a fonte de verdade real do
+        # plano — só o "Due on" no Basecamp fica por atualizar.
+        try:
+            basecamp.atualizar_prazo_card(basecamp_card_id, dia_inicio, projeto=PROJETO)
+            _invalidar_cache_cards_ativos()
+        except Exception as e:
+            print(f"[planeamento_serracao] falhou a escrever o dia de início no \"Due on\" "
+                  f"do Basecamp (card {basecamp_card_id}): {e}")
     tipo_madeira = existente["tipo_madeira"] if existente else None
     _talvez_duplicar_logistica(basecamp_card_id, dia_inicio, duracao_dias, tipo_madeira)
     linha_antiga = existente["linha"] if existente else None

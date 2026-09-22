@@ -406,6 +406,21 @@ def atualizar_notas_card(card_id: int, notas: str, projeto: str) -> dict:
     r.raise_for_status()
     return _formatar_item(r.json())
 
+def atualizar_prazo_card(card_id: int, due_on: str, projeto: str) -> dict:
+    """Muda o prazo ('Due on') de um card já existente — mesmo padrão de
+    atualizar_titulo_card/atualizar_notas_card, mas para o campo de prazo.
+    Usado para o dia de início da produção ficar também visível no
+    Basecamp (ver tools/planeamento_serracao.agendar), pedido explícito
+    do Rui (2026-09-30). `due_on` é uma data "AAAA-MM-DD", ou None para
+    limpar o prazo."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    r = httpx.put(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
+                  headers=_headers(), json={"due_on": due_on}, timeout=30)
+    r.raise_for_status()
+    return _formatar_item(r.json())
+
 def apagar_card(card_id: int, projeto: str) -> None:
     """Manda um card para o lixo do Basecamp (reversível lá durante algum
     tempo, tal como apagar manualmente na interface) — usado pelo quadro
