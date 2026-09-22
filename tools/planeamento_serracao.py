@@ -1284,6 +1284,18 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const hojeISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`})();
 const HOJE=MASTER.findIndex(d=>d.iso===hojeISO);
 const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
+/* pedido explícito do Rui (2026-09-30): agendar uma OF para um dia fora
+   da semana/período visível gravava bem (confirmado nos dados), mas
+   parecia "não aparecer no calendário" — a vista simplesmente não
+   estava naquele período. Sempre que a ficha agenda algo para uma data
+   nova, a vista salta sozinha para lá, tal como a pesquisa já fazia
+   para o primeiro resultado (ver corresponde/buscaClasse). */
+function garantirNaVista(gs){
+  if(gs===null||gs===undefined||gs<0) return;
+  if(gs<view.start||gs>=view.start+view.len){
+    view.start=clamp(gs-Math.floor(view.len/2),0,Math.max(MASTER.length-view.len,0));
+  }
+}
 /* índice da segunda-feira da semana (calendário, não a de hoje) que
    contém o índice dado — pedido explícito do Rui (2026-09): a vista
    "semana" tem de mostrar a semana inteira (seg-dom, como o Google
@@ -2154,7 +2166,7 @@ function openSheet(id){
               dia_inicio:iso||MASTER[c.gs].iso,volume_m3:vol>0?vol:(c.volume||null)})});
           const d=await r.json();
           if(d.erro) erros.push(`linha/início/volume: ${d.erro}`);
-          else{ c.linha=linhaIdx; c.gs=idxOf(iso||MASTER[c.gs].iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false; }
+          else{ c.linha=linhaIdx; c.gs=idxOf(iso||MASTER[c.gs].iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; c.duracaoManual=false; garantirNaVista(c.gs); }
         }catch(e){ erros.push(`linha/início/volume: ${e}`); }
       }
       const fimVal=$("#fFim").value, fimOriginal=$("#fFim").dataset.original;
@@ -2195,7 +2207,7 @@ function openSheet(id){
                 dia_inicio:iso,volume_m3:vol>0?vol:(c.volume||null)})});
             const d=await r.json();
             if(d.erro) erros.push(`linha/início: ${d.erro}`);
-            else{ c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; }
+            else{ c.linha=linhaIdx; c.gs=idxOf(iso); c.dur=d.duracao_dias; c.volume=d.volume_m3; garantirNaVista(c.gs); }
           }catch(e){ erros.push(`linha/início: ${e}`); }
         }
       }else if(vol>0){
@@ -2384,7 +2396,7 @@ function openSheetLogistica(id){
           body:JSON.stringify({basecamp_card_id:c.id,dia_carregamento:iso})});
         const dd=await r.json();
         if(dd.erro) erros.push(`dia de carregamento: ${dd.erro}`);
-        else c.gs=idxOf(iso);
+        else{ c.gs=idxOf(iso); garantirNaVista(c.gs); }
       }catch(e){ erros.push(`dia de carregamento: ${e}`); }
     }
     const quem_carrega=$("#logQuem").value.trim();
