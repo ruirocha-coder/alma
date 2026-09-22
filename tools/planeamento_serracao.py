@@ -553,7 +553,12 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     indicado, mantém o volume já guardado anteriormente para esta OF (não
     o apaga só por não vir neste pedido). Recusa o agendamento (ver
     _validar_capacidade) se ultrapassar a capacidade da linha nalgum dos
-    dias ocupados. Se já tiver tipo de madeira definido, duplica para a
+    dias ocupados, ou se `dia_inicio` cair num sábado ou domingo — pedido
+    explícito do Rui (2026-09-30): a linha nunca produz ao fim de semana
+    (ver _repartir_greedy), por isso não faz sentido nenhuma OF começar
+    nesse dia; ao recusar, o arrastar no quadro reverte sozinho para onde
+    a OF estava antes (fila ou linha anterior, ver guardarAgendamento no
+    template). Se já tiver tipo de madeira definido, duplica para a
     logística (ver _talvez_duplicar_logistica).
 
     Depois de guardar, recalcula as outras OFs da(s) linha(s) afetada(s)
@@ -565,6 +570,11 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
         return {"erro": "falta indicar o dia de início"}
+    try:
+        if date.fromisoformat(dia_inicio).weekday() >= 5:
+            return {"erro": "não é possível começar a produção num fim de semana — escolhe um dia útil"}
+    except (TypeError, ValueError):
+        return {"erro": f"dia de início inválido: {dia_inicio!r}"}
     existente = db.agendamento_producao(basecamp_card_id)
     if volume_m3 is not None:
         try:
