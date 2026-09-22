@@ -1879,9 +1879,7 @@ function openSheet(id){
     <div class="frow"><label>Linha</label><select id="fLinha">${LINHAS.map((n,i)=>
       `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}</select></div>
     <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}" data-original="${s.iso}"></div>
-    <div class="acts"><button class="btn" id="guardarLinha">Guardar linha/início</button></div>
     <div class="frow"><label>Fim</label><input id="fFim" type="date" value="${f.iso}" data-original="${f.iso}"></div>
-    <div class="acts"><button class="btn" id="guardarFim">Guardar fim</button></div>
     <div class="owner">${c.duracaoManual
       ? "O fim desta OF foi definido à mão — deixou de ser recalculado automaticamente. Muda a linha, o início ou o volume para voltar ao cálculo automático."
       : `Duração calculada: ${c.dur} dias. Mudar o fim aqui passa a ser uma escolha manual — deixa de ser recalculado automaticamente.`}</div>`;
@@ -1889,18 +1887,15 @@ function openSheet(id){
   $("#sheet").innerHTML=`
     <div class="of mono">card ${c.id}</div>
     <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
-    <div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
     <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30"></div>
-    <div class="acts"><button class="btn" id="guardarVol">Guardar volume</button></div>
     <div class="frow"><label>Madeira</label><select id="fMad">
       <option value="">Não especificado</option>
       <option value="seca"${c.madeira==="seca"?" selected":""}>Seca</option>
       <option value="verde"${c.madeira==="verde"?" selected":""}>Verde</option>
     </select></div>
-    <div class="acts"><button class="btn" id="guardarMad">Guardar madeira</button></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral (tipo de produto)</label>
     <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
@@ -1911,10 +1906,6 @@ function openSheet(id){
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. A barra lateral é a cor do tipo de produto; o fundo é automático por estado (amarelo em Produzido, laranja em Em Produção, roxo em Vendido) a não ser que escolhas uma cor de fundo aqui — nesse caso essa cor sobrepõe-se à automática. Mudar isto aqui não altera nada no Basecamp.</div>
     <div class="acts">
-      ${agendado?'<button class="btn" id="cima">Mover para cima</button><button class="btn" id="baixo">Mover para baixo</button>':""}
-    </div>
-    <div class="acts">
-      ${agendado?'<button class="btn" id="toFila">Devolver à fila</button>':""}
       <button class="btn" id="duplicar">Duplicar</button>
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagar">Apagar encomenda</button>
@@ -1925,23 +1916,6 @@ function openSheet(id){
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
-  $("#guardarTitulo").onclick=async()=>{
-    const titulo=$("#fTitulo").value.trim();
-    if(!titulo){ alert("O nome não pode ficar vazio."); return; }
-    $("#guardarTitulo").textContent="A guardar…"; $("#guardarTitulo").disabled=true;
-    try{
-      const r=await fetch("/planeamento-ecos-largos/renomear",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:c.id,titulo})});
-      const d=await r.json();
-      if(d.erro){ alert(d.erro); return; }
-      c.titulo=titulo;
-      const gemeo=cardsLog.find(x=>x.id===c.id); if(gemeo) gemeo.titulo=titulo;
-      log("local",`nome atualizado para "${titulo}"`);
-      render();
-    }catch(e){ alert("Falhou a guardar: "+e); }
-    finally{ $("#guardarTitulo").textContent="Guardar nome"; $("#guardarTitulo").disabled=false; }
-  };
   $("#coresBarra").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
@@ -1978,103 +1952,6 @@ function openSheet(id){
       }catch(e){ alert("Falhou a guardar: "+e); }
     };
   });
-  if(agendado){
-    $("#guardarLinha").onclick=async()=>{
-      const linhaIdx=+$("#fLinha").value;
-      const iso=$("#fInicio").value;
-      if(!iso){ alert("Escolhe uma data de início."); return; }
-      $("#guardarLinha").textContent="A guardar…"; $("#guardarLinha").disabled=true;
-      try{
-        const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[linhaIdx],dia_inicio:iso,volume_m3:c.volume||null})});
-        const d=await r.json();
-        if(d.erro){ alert(d.erro); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; return; }
-        log("local",`"${c.titulo}" movido para ${LINHAS[linhaIdx]}, ${iso}`);
-        /* recarrega tudo, não só esta OF: mudar de linha/dia recalcula a
-           duração de outras OFs já na mesma linha (ver _recalcular_linha)
-           — sem isto ficavam com a duração antiga no ecrã até ao próximo
-           refresh, bug real do Rui (2026-09-29). */
-        await carregar(); closeSheet();
-      }catch(e){ alert("Falhou a guardar: "+e); $("#guardarLinha").textContent="Guardar linha/início"; $("#guardarLinha").disabled=false; }
-    };
-    $("#toFila").onclick=()=>{
-      undoStack.push({id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume});
-      c.linha=null; c.gs=null;
-      renderFila(); renderLanes(); sync(c); closeSheet();
-    };
-    $("#guardarFim").onclick=async()=>{
-      const dia_fim=$("#fFim").value;
-      if(!dia_fim){ alert("Escolhe uma data de fim."); return; }
-      $("#guardarFim").textContent="A guardar…"; $("#guardarFim").disabled=true;
-      try{
-        const r=await fetch("/planeamento-ecos-largos/fim",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({basecamp_card_id:c.id,dia_fim})});
-        const d=await r.json();
-        if(d.erro){ alert(d.erro); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; return; }
-        log("local",`fim de "${c.titulo}" definido à mão: ${dia_fim}`);
-        await carregar(); closeSheet();
-      }catch(e){ alert("Falhou a guardar: "+e); $("#guardarFim").textContent="Guardar fim"; $("#guardarFim").disabled=false; }
-    };
-    const moverOrdem=direcao=>async()=>{
-      try{
-        const r=await fetch("/planeamento-ecos-largos/reordenar",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({basecamp_card_id:c.id,direcao})});
-        const d=await r.json();
-        if(d.erro){ alert(d.erro); return; }
-        log("local",`"${c.titulo}" movido para ${direcao}`);
-        await carregar(); closeSheet();
-      }catch(e){ alert("Falhou a reordenar: "+e); }
-    };
-    $("#cima").onclick=moverOrdem("cima");
-    $("#baixo").onclick=moverOrdem("baixo");
-  }
-  $("#guardarVol").onclick=async()=>{
-    const vol=+$("#fVol").value;
-    if(!vol||vol<=0){ alert("Indica um volume maior que 0."); return; }
-    $("#guardarVol").textContent="A guardar…"; $("#guardarVol").disabled=true;
-    try{
-      if(agendado){
-        const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({basecamp_card_id:c.id,linha:LINHAS[c.linha],
-            dia_inicio:MASTER[c.gs].iso,volume_m3:vol})});
-        const d=await r.json();
-        if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
-        log("local",`volume de "${c.titulo}" atualizado: ${d.volume_m3} m³`);
-        /* recarrega tudo: mudar o volume de uma OF já agendada recalcula
-           a duração das outras na mesma linha (ver _recalcular_linha). */
-        await carregar(); closeSheet();
-      }else{
-        const r=await fetch("/planeamento-ecos-largos/volume",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({basecamp_card_id:c.id,volume_m3:vol})});
-        const d=await r.json();
-        if(d.erro){ alert(d.erro); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; return; }
-        c.volume=d.volume_m3;
-        log("local",`volume de "${c.titulo}" atualizado: ${c.volume} m³`);
-        render(); closeSheet();
-      }
-    }catch(e){ alert("Falhou a guardar: "+e); $("#guardarVol").textContent="Guardar volume"; $("#guardarVol").disabled=false; }
-  };
-  $("#guardarMad").onclick=async()=>{
-    const tipo=$("#fMad").value;
-    if(!tipo){ alert("Escolhe Seca ou Verde."); return; }
-    $("#guardarMad").textContent="A guardar…"; $("#guardarMad").disabled=true;
-    try{
-      const r=await fetch("/planeamento-ecos-largos/madeira",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:c.id,tipo_madeira:tipo})});
-      const d=await r.json();
-      if(d.erro){ alert(d.erro); $("#guardarMad").textContent="Guardar madeira"; $("#guardarMad").disabled=false; return; }
-      c.madeira=tipo;
-      log("local",`madeira de "${c.titulo}" atualizada: ${tipo}`);
-      await atualizarLogistica();
-      render(); closeSheet();
-    }catch(e){ alert("Falhou a guardar: "+e); $("#guardarMad").textContent="Guardar madeira"; $("#guardarMad").disabled=false; }
-  };
   $("#apagar").onclick=async()=>{
     if(!confirm(`Apagar definitivamente "${c.titulo}"?\n\nIsto manda o card para o lixo no Basecamp (fica lá recuperável durante algum tempo, tal como apagar manualmente).`)) return;
     $("#apagar").textContent="A apagar…"; $("#apagar").disabled=true;
