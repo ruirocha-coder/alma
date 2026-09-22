@@ -721,16 +721,6 @@ def planeamento_ecos_largos_duplicar(corpo: dict = Body(...)):
     _notificar_planeamento_ecos_largos()
     return JSONResponse(resultado)
 
-@app.post("/planeamento-ecos-largos/_sincronizar_due_on")
-def planeamento_ecos_largos_sincronizar_due_on():
-    """TEMPORÁRIO (remover depois de correr uma vez, 2026-09-30): alinha o
-    "Due on" no Basecamp com o dia de início de todas as OFs já agendadas
-    — ver tools/planeamento_serracao.sincronizar_due_on_agendadas.
-    Agendamentos novos/alterados a partir de agora já saem sincronizados
-    sozinhos (ver agendar())."""
-    resultado = planeamento_serracao.sincronizar_due_on_agendadas()
-    return JSONResponse(resultado)
-
 @app.post("/planeamento-ecos-largos/renomear")
 def planeamento_ecos_largos_renomear(corpo: dict = Body(...)):
     """Muda o título (nome) do card real no Basecamp — pedido explícito do
