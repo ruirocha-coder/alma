@@ -1012,6 +1012,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
     width:32px;height:32px;color:var(--dim);font-size:17px;line-height:1}
   .step:hover{color:var(--ink);border-color:var(--dim)}
   .range{font-size:16px;font-weight:700;min-width:150px}
+  .search{margin-left:auto;position:relative;display:flex;align-items:center}
+  .search input{border:1px solid var(--edge);background:var(--paper);border-radius:8px;
+    padding:6px 12px 6px 30px;font-size:14px;width:220px;color:var(--ink)}
+  .search input:focus{outline:2px solid var(--blue);outline-offset:0;border-color:var(--blue)}
+  .search::before{content:"";position:absolute;left:10px;top:50%;width:13px;height:13px;
+    transform:translateY(-50%);border:2px solid var(--dim);border-radius:50%;pointer-events:none}
+  .search::after{content:"";position:absolute;left:20px;top:50%;width:7px;height:2px;
+    transform:translateY(6px) rotate(45deg);background:var(--dim);pointer-events:none}
+  .busca-dim{opacity:.22}
+  .busca-match{box-shadow:0 0 0 2px var(--blue),0 4px 14px rgba(25,118,210,.35);z-index:15}
 
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 16px}
   .pill{display:inline-flex;align-items:center;gap:6px;background:var(--paper);
@@ -1180,6 +1190,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <button class="step" id="next" aria-label="Período seguinte">›</button>
     <div class="range" id="range"></div>
     <button class="btn" id="hoje">Hoje</button>
+    <div class="search">
+      <input type="search" id="busca" placeholder="Pesquisar encomendas…" autocomplete="off">
+    </div>
   </div>
 
   <div class="bar">
@@ -1298,6 +1311,18 @@ const atrasado=c=>{
    completo continua a viver no Basecamp e no URL do card (ver
    bcOpen) — isto é só de apresentação. */
 const numCurto=id=>String(id).slice(-4);
+
+/* pesquisar cards (pedido explícito do Rui, 2026-09-30): "tal como no
+   Google Calendar" — uma caixa de texto que destaca os cards cujo
+   título ou número (curto ou completo) batem certo com o que se
+   escreve, esbate os restantes, e o Enter salta para a data do primeiro
+   resultado agendado, mesmo que esteja fora do período visível. Nunca
+   filtra de vez os cards (continuam todos lá, só visualmente
+   esbatidos) — sair da pesquisa (caixa vazia) devolve tudo ao normal. */
+let buscaQuery="";
+const normalizarTexto=s=>(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+const corresponde=(c,q)=>normalizarTexto(c.titulo).includes(q) || numCurto(c.id).includes(q) || String(c.id).includes(q);
+const buscaClasse=c=>!buscaQuery ? "" : (corresponde(c,buscaQuery) ? " busca-match" : " busca-dim");
 
 /* clicar num card (fila, produção ou logística) destaca-o a ele e ao seu
    par na outra tabela (mesma OF, mesmo basecamp_card_id) — em vez de abrir
@@ -1671,7 +1696,7 @@ function renderLanes(){
       const l=Math.max(a,0), r=Math.min(b,view.len);
       const clipL=a<0||i>0, clipR=b>view.len||i<segmentos.length-1;
       const el=document.createElement("div");
-      el.className="blk"+(clipL?" clipL":"")+(clipR?" clipR":"")+(atrasado(c)?" atrasado":"");
+      el.className="blk"+(clipL?" clipL":"")+(clipR?" clipR":"")+(atrasado(c)?" atrasado":"")+buscaClasse(c);
       el.tabIndex=0; el.dataset.id=c.id;
       el.style.borderLeftColor=corProduto(c);
       const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
@@ -1692,7 +1717,7 @@ function renderFila(){
   const q=cards.filter(c=>c.linha===null);
   $("#fila").innerHTML = q.length ? q.map(c=>{
     const fundo=fundoCard(c);
-    return `<div class="qcard${atrasado(c)?" atrasado":""}" data-id="${c.id}"
+    return `<div class="qcard${atrasado(c)?" atrasado":""}${buscaClasse(c)}" data-id="${c.id}"
        style="border-left-color:${corProduto(c)}${fundo?(";background:"+fundo):""}">
      <div class="editBtn" data-edit="${c.id}" title="Editar">✎</div>
      <div class="tt">${c.titulo}</div>
@@ -1730,7 +1755,7 @@ function renderLogistica(){
   Object.entries(porDia).forEach(([a,lista])=>{
     lista.forEach((c,i)=>{
       const el=document.createElement("div");
-      el.className="blk";
+      el.className="blk"+buscaClasse(c);
       el.tabIndex=0; el.dataset.id=c.id;
       el.style.borderLeftColor=corProduto(c);
       const fundo=fundoCard(c); if(fundo) el.style.background=fundo;
@@ -2366,6 +2391,27 @@ $("#seg").onclick=e=>{ const b=e.target.closest("button"); if(b) setMode(b.datas
 $("#prev").onclick=()=>step(-1);
 $("#next").onclick=()=>step(1);
 $("#hoje").onclick=()=>{ view.start=Math.max(HOJE,0); setMode(view.mode); };
+/* pesquisar (ver buscaClasse/corresponde): destaca ao escrever (título
+   ou número, curto ou completo), esbate o resto. Enter salta para a
+   data do primeiro resultado agendado que não esteja já visível, tal
+   como no Google Calendar — se já estiver visível, só o seleciona. */
+$("#busca").addEventListener("input",()=>{
+  buscaQuery=normalizarTexto($("#busca").value.trim());
+  render();
+});
+$("#busca").addEventListener("keydown",e=>{
+  if(e.key!=="Enter") return;
+  e.preventDefault();
+  if(!buscaQuery) return;
+  const candidatos=[...cards,...cardsLog].filter(c=>c.gs!==null && corresponde(c,buscaQuery));
+  if(!candidatos.length) return;
+  candidatos.sort((a,b)=>a.gs-b.gs);
+  const naVista=candidatos.find(c=>c.gs>=view.start && c.gs<view.start+view.len);
+  const alvo=naVista||candidatos[0];
+  if(!naVista) view.start=clamp(alvo.gs-Math.floor(view.len/2),0,Math.max(MASTER.length-view.len,0));
+  selecionadoId=alvo.id;
+  render();
+});
 $("#atualizar").onclick=()=>carregar();
 $("#undo").onclick=()=>{
   if(!modoEdicao||!undoStack.length)return;
@@ -2387,8 +2433,8 @@ $("#modoEdicaoBtn").onclick=()=>{ modoEdicao=!modoEdicao; aplicarModoEdicao(); }
 aplicarModoEdicao();
 document.addEventListener("keydown",e=>{
   if((e.metaKey||e.ctrlKey)&&e.key==="z"){e.preventDefault();$("#undo").click();}
-  if(e.key==="ArrowLeft"&&!e.target.closest("select"))step(-1);
-  if(e.key==="ArrowRight"&&!e.target.closest("select"))step(1);
+  if(e.key==="ArrowLeft"&&!e.target.closest("select,input,textarea"))step(-1);
+  if(e.key==="ArrowRight"&&!e.target.closest("select,input,textarea"))step(1);
 });
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 
