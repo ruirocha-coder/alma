@@ -393,6 +393,19 @@ def atualizar_titulo_card(card_id: int, titulo: str, projeto: str) -> dict:
     r.raise_for_status()
     return _formatar_item(r.json())
 
+def atualizar_notas_card(card_id: int, notas: str, projeto: str) -> dict:
+    """Muda as notas (conteúdo) de um card já existente — mesmo padrão de
+    atualizar_titulo_card, mas para o campo de notas em vez do título
+    (usado por tools/planeamento_serracao para acrescentar o número curto
+    do card às notas, pedido explícito do Rui, 2026-09-30)."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        raise ValueError(f"nenhum projeto encontrado para {projeto!r}")
+    r = httpx.put(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
+                  headers=_headers(), json={"content": _markdown_para_basecamp(notas) if notas else ""}, timeout=30)
+    r.raise_for_status()
+    return _formatar_item(r.json())
+
 def apagar_card(card_id: int, projeto: str) -> None:
     """Manda um card para o lixo do Basecamp (reversível lá durante algum
     tempo, tal como apagar manualmente na interface) — usado pelo quadro

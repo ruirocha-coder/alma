@@ -820,6 +820,59 @@ def apagar_logistica(basecamp_card_id: int) -> dict:
 
 TIPOS_MADEIRA = {"seca": "Seca", "verde": "Verde"}
 
+def _numero_curto(basecamp_card_id) -> str:
+    """Últimos 4 dígitos do id do card — pedido explícito do Rui
+    (2026-09-30): o id completo (ex: 10285829501) é comprido demais para
+    mostrar em cada card do quadro; os últimos 4 dígitos (ex: 9501) já
+    bastam para diferenciar as OFs visíveis ao mesmo tempo (ver numCurto
+    no template). Usado também para o mesmo número aparecer nas notas do
+    card real no Basecamp (ver _acrescentar_numero_notas), para dar para
+    cruzar os dois."""
+    return str(basecamp_card_id)[-4:]
+
+def _acrescentar_numero_notas(basecamp_card_id: int, notas_atuais: str) -> bool:
+    """Acrescenta 'Nº: <últimos 4 dígitos>' no topo das notas de um card
+    no Basecamp, se ainda lá não estiver (idempotente — nunca duplica a
+    linha se já lá estiver, por isso é seguro chamar outra vez sobre o
+    mesmo card). Devolve True se escreveu mesmo algo no Basecamp, False
+    se já estava lá e nada mudou."""
+    marcador = f"Nº: {_numero_curto(basecamp_card_id)}"
+    if marcador in (notas_atuais or ""):
+        return False
+    notas_novas = f"{marcador}\n\n{notas_atuais}" if notas_atuais else marcador
+    basecamp.atualizar_notas_card(basecamp_card_id, notas_novas, projeto=PROJETO)
+    return True
+
+def sincronizar_numeros_curtos_notas() -> dict:
+    """Acrescenta o número curto às notas de todos os cards ATIVOS neste
+    quadro (fila + já agendados) que ainda não o tenham — pedido
+    explícito do Rui (2026-09-30), depois de o quadro passar a mostrar só
+    os últimos 4 dígitos do id em cada card em vez do id completo. Só
+    toca nos cards que aparecem mesmo aqui (mesma regra de bolsa/agendadas
+    que estado_planeamento_serracao) — nunca no resto do histórico da
+    conta. Cards criados/duplicados a partir de agora já saem com isto
+    tratado (ver criar_encomenda/duplicar_encomenda) — esta função é só
+    para pôr em dia os que já existiam no quadro antes disto."""
+    cards_ativos = _cards_of_ativos()
+    agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
+    atualizados = ja_tinham = 0
+    erros = []
+    for c in cards_ativos:
+        agendamento = agendamentos.get(c["id"])
+        tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
+        if not tem_agendamento and _normalizar(c.get("estado")) != "triagem":
+            continue
+        try:
+            if _acrescentar_numero_notas(c["id"], c.get("notas")):
+                atualizados += 1
+            else:
+                ja_tinham += 1
+        except Exception as e:
+            erros.append({"basecamp_card_id": c["id"], "erro": str(e)})
+    if atualizados:
+        _invalidar_cache_cards_ativos()
+    return {"atualizados": atualizados, "ja_tinham": ja_tinham, "erros": erros}
+
 def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tipo_madeira: str = None,
                     notas: str = "", linha: str = None, dia_inicio: str = None) -> dict:
     """Cria uma encomenda nova: um card real na coluna Triagem do Basecamp
@@ -862,7 +915,9 @@ def criar_encomenda(titulo: str, cliente: str = "", volume_m3: float = None, tip
         partes_notas.append(f"Madeira: {TIPOS_MADEIRA[tipo_madeira]}")
     if notas:
         partes_notas.append(notas)
-    card = basecamp.criar_card("Triagem", titulo_basecamp, "\n".join(partes_notas), projeto=PROJETO)
+    notas_iniciais = "\n".join(partes_notas)
+    card = basecamp.criar_card("Triagem", titulo_basecamp, notas_iniciais, projeto=PROJETO)
+    _acrescentar_numero_notas(card["id"], notas_iniciais)
     _invalidar_cache_cards_ativos()
     if tipo_madeira:
         db.guardar_tipo_madeira_producao(card["id"], tipo_madeira)
@@ -908,6 +963,7 @@ def duplicar_encomenda(basecamp_card_id: int) -> dict:
     cor = existente["cor"] if existente else None
     cor_fundo = existente["cor_fundo"] if existente else None
     card = basecamp.criar_card("Triagem", f"{original['titulo']} (cópia)", "", projeto=PROJETO)
+    _acrescentar_numero_notas(card["id"], "")
     _invalidar_cache_cards_ativos()
     if volume_m3:
         db.guardar_volume_producao(card["id"], volume_m3)
@@ -1241,6 +1297,13 @@ const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
 const cardLog=id=>cardsLog.find(c=>c.id===id);
 const atrasado=c=>c.prazo && c.prazo<hojeISO;
+/* pedido explícito do Rui (2026-09-30): o id completo do card do
+   Basecamp (ex: 10285829501) é comprido demais para caber no espaço do
+   card — mostra-se só os últimos 4 dígitos (ex: 9501), que já bastam
+   para diferenciar as OFs visíveis ao mesmo tempo no quadro. O id
+   completo continua a viver no Basecamp e no URL do card (ver
+   bcOpen) — isto é só de apresentação. */
+const numCurto=id=>String(id).slice(-4);
 
 /* clicar num card (fila, produção ou logística) destaca-o a ele e ao seu
    par na outra tabela (mesma OF, mesmo basecamp_card_id) — em vez de abrir
@@ -1624,7 +1687,7 @@ function renderLanes(){
       el.style.height=ITEM_PROD_H+"px";
       el.innerHTML = i===0
         ? `<div class="editBtn" data-edit="${c.id}" title="Editar">✎</div><div class="tt">${c.titulo}</div>
-           <div class="of">${c.volume?(c.volume+" m³ · "):""}#${c.id}</div>`
+           <div class="of">${c.volume?(c.volume+" m³ · "):""}#${numCurto(c.id)}</div>`
         : `<div class="tt">${c.titulo}</div>`;
       bl.appendChild(el);
     });
@@ -1895,7 +1958,7 @@ function openSheet(id){
       : `Duração calculada: ${c.dur} dias. Mudar o fim aqui passa a ser uma escolha manual — deixa de ser recalculado automaticamente.`}</div>`;
   }
   $("#sheet").innerHTML=`
-    <div class="of mono">card ${c.id}</div>
+    <div class="of mono">card #${numCurto(c.id)}</div>
     <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
@@ -2095,7 +2158,7 @@ function openSheetLogistica(id){
   const c=cardLog(id);
   const d=MASTER[c.gs];
   $("#sheet").innerHTML=`
-    <div class="of mono">card ${c.id} · logística</div>
+    <div class="of mono">card #${numCurto(c.id)} · logística</div>
     <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
     <div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
