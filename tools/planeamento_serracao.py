@@ -600,10 +600,14 @@ def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
     voltarem a ser alterados pelo fluxo normal (agendar), que limpa esta
     marca de novo.
 
-    Continua a validar a capacidade da linha (nunca ultrapassa, mesmo
-    definida à mão) — repartindo o volume em partes iguais pelos dias
-    úteis do intervalo escolhido (fim de semana nunca produz, mesmo numa
-    duração manual, ver _ocupacao_diaria)."""
+    Avisa se isto ultrapassar a capacidade da linha (repartindo o volume
+    em partes iguais pelos dias úteis do intervalo escolhido — fim de
+    semana nunca produz, mesmo numa duração manual, ver _ocupacao_diaria)
+    mas guarda sempre na mesma (pedido explícito do Rui, 2026-09-29): ao
+    contrário do agendamento automático, aqui a equipa está deliberadamente
+    a corrigir o modelo com a realidade da produção — se souberem que cabe
+    na mesma (ex: um turno extra), não faz sentido o aviso bloquear a
+    gravação. O aviso vem no campo `aviso` da resposta, não em `erro`."""
     existente = db.agendamento_producao(basecamp_card_id)
     if not existente or not existente["linha"] or not existente["dia_inicio"]:
         return {"erro": "esta OF ainda não está agendada numa linha/dia"}
@@ -618,27 +622,33 @@ def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
     linha = existente["linha"]
     volume_m3 = existente["volume_m3"]
     ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    aviso = None
     if volume_m3:
         capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
         if capacidade > 0:
             dias_uteis = [inicio + timedelta(days=i) for i in range(duracao_dias)
                          if (inicio + timedelta(days=i)).weekday() < 5]
             if not dias_uteis:
-                return {"erro": "este intervalo não tem nenhum dia útil — fim de semana nunca produz"}
-            ritmo = volume_m3 / len(dias_uteis)
-            ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(existente["dia_inicio"], basecamp_card_id),
-                                        excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
-            for dia_data in dias_uteis:
-                usado = ocupacao.get(dia_data.isoformat(), 0)
-                if usado == float("inf") or usado + ritmo > capacidade + 1e-9:
-                    return {"erro": (f"não cabe na linha {linha!r}: em {dia_data.isoformat()} já estaria(m) "
-                                     f"ocupado(s) {('a linha toda' if usado == float('inf') else f'{usado:.1f} m³ de {capacidade:.1f}')}"
-                                     f" — com este fim precisarias de mais {ritmo:.1f} m³ nesse dia")}
+                aviso = "este intervalo não tem nenhum dia útil — fim de semana nunca produz, ficaria sem nenhum m³ atribuído"
+            else:
+                ritmo = volume_m3 / len(dias_uteis)
+                ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(existente["dia_inicio"], basecamp_card_id),
+                                            excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
+                for dia_data in dias_uteis:
+                    usado = ocupacao.get(dia_data.isoformat(), 0)
+                    if usado == float("inf") or usado + ritmo > capacidade + 1e-9:
+                        aviso = (f"não cabe na linha {linha!r}: em {dia_data.isoformat()} já estaria(m) "
+                                 f"ocupado(s) {('a linha toda' if usado == float('inf') else f'{usado:.1f} m³ de {capacidade:.1f}')}"
+                                 f" — com este fim precisarias de mais {ritmo:.1f} m³ nesse dia")
+                        break
     db.guardar_agendamento_producao(basecamp_card_id, linha, existente["dia_inicio"], duracao_dias,
                                     volume_m3, duracao_manual=True)
     _talvez_duplicar_logistica(basecamp_card_id, existente["dia_inicio"], duracao_dias, existente["tipo_madeira"])
     _recalcular_linha(linha, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
-    return {"guardado": True, "basecamp_card_id": basecamp_card_id, "duracao_dias": duracao_dias}
+    resultado = {"guardado": True, "basecamp_card_id": basecamp_card_id, "duracao_dias": duracao_dias}
+    if aviso:
+        resultado["aviso"] = aviso
+    return resultado
 
 def atualizar_capacidade_linha(linha: str, capacidade_m3_dia: float) -> dict:
     """Atualiza a capacidade (m³/dia) de uma linha — editável pela equipa
@@ -1995,7 +2005,7 @@ function openSheet(id){
        que reenviar o mesmo valor é inofensivo (endpoints idempotentes). */
     const btn=$("#guardarTudo");
     btn.textContent="A guardar…"; btn.disabled=true;
-    const erros=[];
+    const erros=[], avisos=[];
     const titulo=$("#fTitulo").value.trim();
     if(titulo){
       try{
@@ -2032,7 +2042,14 @@ function openSheet(id){
             body:JSON.stringify({basecamp_card_id:c.id,dia_fim:fimVal})});
           const d=await r.json();
           if(d.erro) erros.push(`fim: ${d.erro}`);
-          else{ c.dur=d.duracao_dias; c.duracaoManual=true; }
+          else{
+            c.dur=d.duracao_dias; c.duracaoManual=true;
+            /* pedido explícito do Rui (2026-09-30): o aviso de capacidade
+               continua a aparecer, mas já não bloqueia a gravação — quem
+               está a corrigir o fim à mão sabe melhor do que o modelo se
+               cabe mesmo ou não (ver redefinir_fim). */
+            if(d.aviso) avisos.push(`fim: ${d.aviso}`);
+          }
         }catch(e){ erros.push(`fim: ${e}`); }
       }
     }else{
@@ -2066,6 +2083,7 @@ function openSheet(id){
        ecrã até ao próximo refresh. */
     await carregar();
     btn.textContent="Guardar tudo"; btn.disabled=false;
+    if(avisos.length) alert("Guardado, mas atenção:\n"+avisos.join("\n"));
     if(erros.length) alert("Alguns campos falharam:\n"+erros.join("\n"));
     else closeSheet();
   };
