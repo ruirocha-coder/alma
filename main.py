@@ -440,16 +440,6 @@ def portais_projeto_lista():
     tools/portal_projeto.pagina_lista."""
     return HTMLResponse(portal_projeto.pagina_lista(listar_portais_projeto()))
 
-@app.post("/portais-projeto/_regenerar_todos")
-def portais_projeto_regenerar_todos():
-    """TEMPORÁRIO (remover depois de correr uma vez, 2026-09-30): volta a
-    renderizar todos os portais já gerados com o template atual (sem
-    tocar em nenhum dado do projeto) — ver
-    tools/portal_projeto.regenerar_todos_portais_projeto. Usado depois de
-    mudar a cor dos blocos de resumo, para essa alteração aparecer também
-    nos portais já enviados às clientes."""
-    return JSONResponse(portal_projeto.regenerar_todos_portais_projeto())
-
 @app.delete("/documentos-gerados/{id}")
 def documento_gerado_eliminar(id: int):
     """Elimina definitivamente um documento gerado (usado pelo botão
