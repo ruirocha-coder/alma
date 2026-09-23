@@ -377,7 +377,8 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          valor_produto: float = None, valor_produto_com_iva: bool = False,
                          conceito_pdf_download_url: str = None, conceito_materiais: str = None,
                          conceito_leitura: str = None, documento_apresentacao_download_url: str = None,
-                         documento_orcamento_download_url: str = None) -> dict:
+                         documento_orcamento_download_url: str = None,
+                         documento_honorarios_download_url: str = None) -> dict:
     """Gera o portal de acompanhamento de um projeto Interior Guider (página
     HTML autónoma, o link que o cliente abre) a partir dos dados já lidos
     do card do Basecamp, e devolve um url para partilhares no comentário de
@@ -494,13 +495,14 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     aqui (a aritmética de crédito/pagamentos é feita em JS, no browser do
     cliente).
 
-    `documento_apresentacao_download_url` e `documento_orcamento_download_url`
-    são os "download_url" desses PDFs, tal como vêm de
-    listar_pdfs_anexados_por_data (nunca um download_url obtido de outro
-    lado — ver a mesma nota em `conceito_pdf_download_url`). São
-    descarregados e embutidos aqui dentro, tal como o PDF do conceito —
-    a cliente não tem acesso ao Basecamp, por isso um download_url
-    original nunca lhe serviria diretamente.
+    `documento_apresentacao_download_url`, `documento_orcamento_download_url`
+    e `documento_honorarios_download_url` são os "download_url" desses
+    PDFs, tal como vêm de listar_pdfs_anexados_por_data (nunca um
+    download_url obtido de outro lado — ver a mesma nota em
+    `conceito_pdf_download_url`). São descarregados e embutidos aqui
+    dentro, tal como o PDF do conceito — a cliente não tem acesso ao
+    Basecamp, por isso um download_url original nunca lhe serviria
+    diretamente.
 
     Tal como a fase "conceito" precisa do PDF do conceito, a fase
     "projeto" precisa de `documento_apresentacao_download_url` (o PDF de
@@ -509,7 +511,15 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     para poderem estar "aguarda" ou "validada" — sem o respetivo PDF
     anexado ao card, mantém essa fase como "prevista" (fica visível à
     cliente a cinzento, em modo demonstrativo, em vez de aberta sem
-    conteúdo real). Do PDF de apresentação extrai-se automaticamente,
+    conteúdo real). `documento_honorarios_download_url` é diferente:
+    a fase "honorarios" está sempre visível (é sempre a primeira, nunca
+    "prevista"), por isso este PDF é sempre opcional — passa-o sempre
+    que o encontrares (é o mesmo PDF que já usas para confirmar
+    `honorarios_total`, ver acima, "Fee"/"honorário" no nome do
+    ficheiro — usa o mesmo `download_url`, nunca um extraído ou
+    reescrito por ti), mas a ausência dele nunca impede gerar o portal;
+    fica simplesmente sem o link de download nessa secção. Do PDF de
+    apresentação extrai-se automaticamente,
     aqui dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
     planta técnica) para servir de capa da fase "projeto" — tal como a
     imagem de conceito serve de capa da fase "conceito"; nunca precisas
@@ -622,17 +632,24 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
             return {"erro": f"não consegui obter o documento de orçamento: {resultado['erro']}"}
         documento_orcamento = resultado["pdf_base64"]
 
+    documento_honorarios = None
+    if documento_honorarios_download_url is not None:
+        resultado = _baixar_pdf_base64(documento_honorarios_download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de honorários: {resultado['erro']}"}
+        documento_honorarios = resultado["pdf_base64"]
+
     return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
                                conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento,
-                               documento_conceito, projeto_imagem)
+                               documento_conceito, projeto_imagem, documento_honorarios)
 
 
 def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
                         honorarios_linhas: list, ambientes: list, fases_estado: dict, valor_produto: float,
                         conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
                         documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None,
-                        projeto_imagem: str = None) -> dict:
+                        projeto_imagem: str = None, documento_honorarios: str = None) -> dict:
     """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
     por gerar_portal_projeto (extração a partir do PDF) e
     atualizar_portal_projeto_edicao (valores já editados à mão pela
@@ -657,7 +674,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
         ]},
         "conceito": {"imagem": conceito_imagem, "leitura": conceito_leitura, "materiais": conceito_materiais},
         "documentos": {"apresentacao": documento_apresentacao, "orcamento": documento_orcamento,
-                      "conceito": documento_conceito},
+                      "conceito": documento_conceito, "honorarios": documento_honorarios},
         "ambientes": ambientes,
         "projetoImagem": projeto_imagem,
         "valorProduto": valor_produto,
@@ -684,7 +701,8 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
 
 
 def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
-                           fases_estado: dict, conceito_imagem, documento_apresentacao, documento_orcamento) -> str:
+                           fases_estado: dict, conceito_imagem, documento_apresentacao, documento_orcamento,
+                           documento_honorarios=None) -> str:
     """As mesmas regras de gerar_portal_projeto, reaproveitadas por
     atualizar_portal_projeto_edicao — nunca duplicadas à parte, para as
     duas nunca poderem divergir sobre o que é seguro publicar."""
@@ -725,7 +743,7 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
     erro = _validar_campos_edicao(campos["honorarios_total_com_iva"], campos.get("valor_produto"),
                                   campos.get("valor_produto_com_iva", False), campos["fases_estado"],
                                   campos["conceito"].get("imagem"), campos.get("documento_apresentacao"),
-                                  campos.get("documento_orcamento"))
+                                  campos.get("documento_orcamento"), campos.get("documento_honorarios"))
     if erro:
         return {"erro": erro}
 
@@ -735,7 +753,7 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
                                campos.get("documento_orcamento"), campos["conceito"].get("documento"),
-                               campos.get("projeto_imagem"))
+                               campos.get("projeto_imagem"), campos.get("documento_honorarios"))
 
 
 def validar_fase_portal(card_id: int, fase: str) -> dict:
@@ -773,6 +791,7 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
     conceito_imagem = projeto["conceito"].get("imagem")
     documento_apresentacao = projeto["documentos"].get("apresentacao")
     documento_orcamento = projeto["documentos"].get("orcamento")
+    documento_honorarios = projeto["documentos"].get("honorarios")
 
     aviso = None
     if seguinte and fases_estado[seguinte]["estado"] == "prevista":
@@ -782,7 +801,7 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         # portal foi gerado — esta chamada só verifica se a fase seguinte
         # já tem o conteúdo (imagem/valor/documento) obrigatório para abrir agora.
         if not _validar_campos_edicao(True, valor_produto, True, tentativa, conceito_imagem,
-                                      documento_apresentacao, documento_orcamento):
+                                      documento_apresentacao, documento_orcamento, documento_honorarios):
             fases_estado = tentativa
         else:
             aviso = (f"a fase \"{titulo_fase}\" foi validada, mas a fase seguinte ainda não abriu — "
@@ -793,7 +812,7 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
         projeto["honorarios"]["total"], honorarios_linhas, projeto["ambientes"], fases_estado,
         valor_produto, conceito_imagem, projeto["conceito"].get("materiais"), projeto["conceito"].get("leitura"),
         documento_apresentacao, documento_orcamento,
-        projeto["documentos"].get("conceito"), projeto.get("projetoImagem"))
+        projeto["documentos"].get("conceito"), projeto.get("projetoImagem"), documento_honorarios)
 
     comentario = (f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
                   f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
@@ -897,6 +916,7 @@ TOOLS_PORTAL_PROJETO = [
                 },
                 "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. Tem sempre a palavra \"Projeto\" no nome do ficheiro (ex: \"IG Apresentação PROJETO [Nome cliente]\") — nunca confundir com o PDF do conceito, que também costuma começar por \"Apresentação\" mas nunca tem \"Projeto\" no nome. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF do orçamento detalhado, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_honorarios_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF da proposta de honorários (o mesmo ficheiro, com \"Fee\"/\"honorário\" no nome, que já usas para confirmar honorarios_total) — opcional, mas passa-o sempre que o encontrares, para a cliente poder descarregar a proposta. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "fases_estado": {
                     "type": "object",
                     "description": "estado de cada uma das 4 fases fixas — chaves obrigatórias: honorarios, conceito, projeto, orcamento",
@@ -1185,6 +1205,10 @@ $('tiles').innerHTML = projeto.fases.map((f,i)=>`
 
 const conteudo = {
   honorarios: () => `
+    <div class="docs">
+      <a class="doc ${projeto.documentos.honorarios?'':'off'}" href="#" ${projeto.documentos.honorarios?`onclick="return abrirDocumento(projeto.documentos.honorarios, 'Proposta de honorários - ${projeto.cliente}.pdf')"`:'onclick="return false"'}>
+        <span class="doc-txt">Proposta de honorários <span class="ext">. PDF</span></span></a>
+    </div>
     <div class="linhas-caixa">
       <div class="linhas">
         ${projeto.honorarios.linhas.map(l=>`
@@ -1486,6 +1510,11 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
     <input type="file" accept="image/*" id="f-projeto-imagem-ficheiro">
   </div>
   <div class="campo">
+    <label>Proposta de honorários (PDF)</label>
+    <div id="preview-doc-honorarios"></div>
+    <input type="file" accept="application/pdf" id="f-doc-honorarios-ficheiro">
+  </div>
+  <div class="campo">
     <label>Apresentação do projeto (PDF)</label>
     <div id="preview-doc-apresentacao"></div>
     <input type="file" accept="application/pdf" id="f-doc-apresentacao-ficheiro">
@@ -1590,6 +1619,7 @@ function configurarUploadPdf(idPreview, idFicheiro, valorInicial) {
 const conceitoDocumento = configurarUploadPdf('preview-conceito-doc', 'f-conceito-doc-ficheiro', projeto.documentos.conceito);
 const docApresentacao = configurarUploadPdf('preview-doc-apresentacao', 'f-doc-apresentacao-ficheiro', projeto.documentos.apresentacao);
 const docOrcamento = configurarUploadPdf('preview-doc-orcamento', 'f-doc-orcamento-ficheiro', projeto.documentos.orcamento);
+const docHonorarios = configurarUploadPdf('preview-doc-honorarios', 'f-doc-honorarios-ficheiro', projeto.documentos.honorarios);
 
 function addLinhaHonorario(dados) {
   dados = dados || {t:'', d:'', v:''};
@@ -1701,6 +1731,7 @@ function guardar() {
     },
     documento_apresentacao: docApresentacao.valor,
     documento_orcamento: docOrcamento.valor,
+    documento_honorarios: docHonorarios.valor,
     projeto_imagem: projetoImagemAtual,
     ambientes,
     valor_produto: valorProdutoTexto === '' ? null : parseFloat(valorProdutoTexto),
