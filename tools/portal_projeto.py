@@ -681,6 +681,31 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
     return {"titulo": titulo, "url": url, "url_edicao": url_edicao, "ref": ref}
 
 
+def regenerar_todos_portais_projeto() -> dict:
+    """Volta a renderizar TODOS os portais de projeto já gerados a partir
+    do JSON já guardado (`conteudo_markdown`), sem tocar em nenhum
+    PDF/imagem nem em nenhum valor do projeto — só troca o HTML/CSS pelo
+    de _TEMPLATE tal como está agora. Usado depois de uma alteração só ao
+    template, para essa alteração aparecer também nos portais já enviados
+    às clientes, sem precisar de os gerar de novo um a um (pedido
+    explícito do Rui)."""
+    atualizados = 0
+    erros = []
+    for p in db.listar_portais_projeto():
+        try:
+            registo = db.obter_documento_gerado(p["id"])
+            projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+            projeto_json = json.dumps(projeto, ensure_ascii=False).replace("</", "<\\/")
+            html = _TEMPLATE.replace("__PROJETO_JSON__", projeto_json)
+            db.guardar_ou_atualizar_documento_gerado(
+                "sistema (regenerar template)", registo["titulo"], html.encode("utf-8"),
+                registo["conteudo_markdown"], registo["card_id"], formato="html")
+            atualizados += 1
+        except Exception as e:
+            erros.append({"id": p["id"], "erro": str(e)})
+    return {"atualizados": atualizados, "erros": erros}
+
+
 def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
                            fases_estado: dict, conceito_imagem, documento_apresentacao, documento_orcamento) -> str:
     """As mesmas regras de gerar_portal_projeto, reaproveitadas por
@@ -946,7 +971,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .boas-vindas{padding:48px 0 26px}
   .boas-vindas h1{font-weight:400;font-size:34px;line-height:1.3}
-  .boas-vindas h1 .destaque{color:#F8B681}
+  .boas-vindas h1 .destaque{color:var(--ink)}
   .boas-vindas p{margin-top:24px;color:var(--stone);font-size:15px}
 
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:64px}
@@ -1002,10 +1027,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .hero-valor+.linhas-caixa{margin-top:18px}
   .hero-valor{background:#91A4A7;border-radius:6px;padding:28px 24px;display:flex;justify-content:space-between;
        align-items:center;gap:24px;flex-wrap:wrap}
-  .hero-valor-label{color:rgba(255,255,255,.75);font-size:11px;font-weight:500;
+  .hero-valor-label{color:rgba(28,26,23,.75);font-size:11px;font-weight:500;
        text-transform:uppercase;letter-spacing:.05em}
-  .hero-valor-numero{color:#fff;font-size:34px;font-weight:400;margin-top:6px}
-  .hero-valor-nota{color:rgba(255,255,255,.85);font-size:13px;max-width:280px}
+  .hero-valor-numero{color:var(--ink);font-size:34px;font-weight:400;margin-top:6px}
+  .hero-valor-nota{color:rgba(28,26,23,.85);font-size:13px;max-width:280px}
   .linhas-caixa .l.destaque{margin:4px -16px 0;padding:16px 16px 14px;background:rgba(164,58,35,.08)}
   .linhas-caixa .l.destaque .v{font-size:19px;font-weight:500}
 
@@ -1027,9 +1052,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .credito-bloco h3 em{font-style:normal;color:var(--clay)}
   .credito-bloco p{margin-top:10px;font-size:12.5px;color:var(--stone)}
   .credito-escuro{background:#91A4A7;border-radius:6px;padding:22px 24px}
-  .credito-escuro h3{color:#fff}
+  .credito-escuro h3{color:var(--ink)}
   .credito-escuro h3 em{color:#F8B681}
-  .credito-escuro p{color:rgba(255,255,255,.78)}
+  .credito-escuro p{color:rgba(28,26,23,.78)}
 
   .nota{margin-top:40px;font-size:13px;color:var(--stone);padding:0 10px}
   .nota b{font-weight:500;color:var(--ink)}
@@ -1052,20 +1077,20 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .validar{margin-top:34px;padding-top:26px;text-align:right}
   .validar .conv{font-size:13px;color:var(--stone);margin-top:14px}
-  .btn{display:inline-block;margin-top:14px;background:#91A4A7;border:1px solid #91A4A7;color:#fff;
+  .btn{display:inline-block;margin-top:14px;background:#A55646;border:1px solid #A55646;color:var(--paper);
        text-decoration:none;font-size:13px;font-weight:400;padding:6.9px 32px;transition:.15s;
        font-family:inherit;cursor:pointer}
   .btn:hover{background:transparent;color:var(--ink)}
   .btn:focus-visible{outline:2px solid var(--clay);outline-offset:3px}
   .btn:disabled{opacity:.5;cursor:default}
-  .btn:disabled:hover{background:#91A4A7;color:#fff}
+  .btn:disabled:hover{background:#A55646;color:var(--paper)}
   .validar-msg{margin-top:10px;font-size:12.5px;color:var(--err)}
   .validar-caixa{margin-top:34px;padding:26px 24px;background:#91A4A7;border-radius:6px;display:flex;
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
   .validar-texto{flex:1;min-width:220px}
-  .validar-texto h3{color:#fff;font-weight:400;font-size:20px;line-height:1.3}
-  .validar-texto p{color:rgba(255,255,255,.85);font-size:13.5px;margin-top:8px;max-width:420px}
-  .btn-adjudicar{display:inline-block;background:#fff;color:var(--ink);border:none;padding:16px 28px;
+  .validar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
+  .validar-texto p{color:rgba(28,26,23,.85);font-size:13.5px;margin-top:8px;max-width:420px}
+  .btn-adjudicar{display:inline-block;background:var(--paper);color:var(--ink);border:none;padding:16px 28px;
        font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
        white-space:nowrap;transition:.15s}
   .btn-adjudicar:hover{background:#F5F2EC}
@@ -1107,7 +1132,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <main id="fases"></main>
 
-  <p class="fecho">Obrigado.<br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
+  <p class="fecho">Obrigado.<br><br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
