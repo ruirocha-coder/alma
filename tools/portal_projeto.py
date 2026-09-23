@@ -681,30 +681,6 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
     return {"titulo": titulo, "url": url, "url_edicao": url_edicao, "ref": ref}
 
 
-def regenerar_todos_portais_projeto() -> dict:
-    """Volta a renderizar TODOS os portais de projeto já gerados a partir
-    do JSON já guardado (`conteudo_markdown`), sem tocar em nenhum
-    PDF/imagem nem em nenhum valor do projeto — só troca o HTML/CSS pelo
-    de _TEMPLATE tal como está agora. Usado depois de uma alteração só ao
-    template, para essa alteração aparecer também nos portais já enviados
-    às clientes, sem precisar de os gerar de novo um a um (pedido
-    explícito do Rui)."""
-    atualizados = 0
-    erros = []
-    for p in db.listar_portais_projeto():
-        try:
-            registo = db.obter_documento_gerado(p["id"])
-            projeto = json.loads(registo["conteudo_markdown"])["projeto"]
-            projeto_json = json.dumps(projeto, ensure_ascii=False).replace("</", "<\\/")
-            html = _TEMPLATE.replace("__PROJETO_JSON__", projeto_json)
-            db.guardar_ou_atualizar_documento_gerado(
-                "sistema (regenerar template)", registo["titulo"], html.encode("utf-8"),
-                registo["conteudo_markdown"], registo["card_id"], formato="html")
-            atualizados += 1
-        except Exception as e:
-            erros.append({"id": p["id"], "erro": str(e)})
-    return {"atualizados": atualizados, "erros": erros}
-
 
 
 def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
