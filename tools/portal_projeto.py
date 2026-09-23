@@ -1279,7 +1279,7 @@ const conteudo = {
     <div class="exemplo">
       <span class="exemplo-selo">Exemplo ilustrativo — com ${eur(DEMO_VALOR)}, um valor fictício só para mostrar como esta fase funciona</span>
       <div class="linhas" style="margin-top:16px">
-        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(DEMO_VALOR)}</span></div>
+        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega e instalação</span></span><span class="v">${eur(DEMO_VALOR)}</span></div>
         <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(demoCredito)}</span></div>
         <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(demoAPagar)}</span></div>
       </div>
@@ -1314,7 +1314,7 @@ const conteudo = {
     </div>
     <div class="linhas-caixa">
       <div class="linhas">
-        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega, montagem e garantia única</span></span><span class="v">${eur(totalProduto)}</span></div>
+        <div class="l"><span>Ambiente completo<span class="d">100% da especificação · inclui entrega e instalação</span></span><span class="v">${eur(totalProduto)}</span></div>
         <div class="l credito"><span>Crédito na compra Interior Guider<span class="d">1€ por cada 10€ do conjunto</span></span><span class="v">− ${eur(credito)}</span></div>
         <div class="l destaque"><span>Valor a pagar</span><span class="v">${eur(totalAPagar)}</span></div>
       </div>
