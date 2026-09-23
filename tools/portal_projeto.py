@@ -698,6 +698,31 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
     return {"titulo": titulo, "url": url, "url_edicao": url_edicao, "ref": ref}
 
 
+def regenerar_todos_portais_projeto() -> dict:
+    """Volta a renderizar TODOS os portais de projeto já gerados a partir
+    do JSON já guardado (`conteudo_markdown`), sem tocar em nenhum
+    PDF/imagem nem em nenhum valor do projeto — só troca o HTML/CSS pelo
+    de _TEMPLATE tal como está agora. Usado depois de uma alteração só ao
+    template, para essa alteração aparecer também nos portais já enviados
+    às clientes, sem precisar de os gerar de novo um a um (pedido
+    explícito do Rui)."""
+    atualizados = 0
+    erros = []
+    for p in db.listar_portais_projeto():
+        try:
+            registo = db.obter_documento_gerado(p["id"])
+            projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+            projeto_json = json.dumps(projeto, ensure_ascii=False).replace("</", "<\\/")
+            html = _TEMPLATE.replace("__PROJETO_JSON__", projeto_json)
+            db.guardar_ou_atualizar_documento_gerado(
+                "sistema (regenerar template)", registo["titulo"], html.encode("utf-8"),
+                registo["conteudo_markdown"], registo["card_id"], formato="html")
+            atualizados += 1
+        except Exception as e:
+            erros.append({"id": p["id"], "erro": str(e)})
+    return {"atualizados": atualizados, "erros": erros}
+
+
 
 
 
@@ -1219,7 +1244,7 @@ const conteudo = {
     </div>
     <div class="credito-bloco credito-escuro">
       <h3>Crédito na compra Interior Guider</h3>
-      <p>Os honorários cobrem o diagnóstico, o desenho e a especificação. Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto, que abate diretamente ao orçamento. O valor consta da fase de orçamento.</p>
+      <p>Ao adquirir a totalidade dos produtos propostos pelo Studio Interior Guider, beneficia de 10% de crédito, aplicado diretamente na mesma compra. Em cada 10€ em produto oferecemos 1€ de crédito.</p>
     </div>`,
 
   conceito: () => `
