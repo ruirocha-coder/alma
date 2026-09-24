@@ -393,9 +393,9 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     respostas inconsistentes entre tentativas, porque a ordenação por
     data ficava a cargo da leitura de texto em vez de código). Dessa
     lista já ordenada, usa o PRIMEIRO ficheiro cujo nome corresponda ao
-    que procuras (ex: contém "Fee"/"honorário" para honorários, "Product"/
-    "orçamento" para o orçamento de produto) — nunca uma versão anterior
-    na lista, mesmo que a encontres primeiro na tua leitura do card. Bug
+    que procuras — ver mais abaixo "NOMES PADRONIZADOS dos PDFs" para o
+    nome exato de cada documento — nunca uma versão anterior na lista,
+    mesmo que a encontres primeiro na tua leitura do card. Bug
     real, 2026-08-05: usar um PDF de uma proposta antiga deu um valor de
     honorários errado, quando havia uma versão mais recente anexada
     depois. As Notas do card podem também ter um link para uma Google
@@ -418,11 +418,10 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     nunca publicar um valor ambíguo ou incorreto ao cliente.
 
     `conceito_pdf_download_url`, `conceito_leitura` e `conceito_materiais`
-    só podem vir do PDF "Conceito Psicoestético [Nome cliente]" anexado
-    ao card
-    (procura-o com listar_pdfs_anexados_por_data, filtrando pelo nome
-    conter "Conceito Psicoestético" — usa o mais recente se houver mais
-    do que um). NUNCA escrevas tu mesma um texto descritivo/poético sobre
+    só podem vir do PDF "Conceito Psicoestético IG_[Nome cliente]" anexado
+    ao card (procura-o com listar_pdfs_anexados_por_data, filtrando pelo
+    nome conter "Conceito Psicoestético" — usa o mais recente se houver
+    mais do que um). NUNCA escrevas tu mesma um texto descritivo/poético sobre
     o conceito a partir de notas informais ou da conversa com a cliente
     — isso já aconteceu (2026-08-06) e é exatamente o tipo de invenção
     que esta ferramenta não pode ter: o texto mostrado à cliente tem de
@@ -515,24 +514,32 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     a fase "honorarios" está sempre visível (é sempre a primeira, nunca
     "prevista"), por isso este PDF é sempre opcional — passa-o sempre
     que o encontrares (é o mesmo PDF que já usas para confirmar
-    `honorarios_total`, ver acima, "Fee"/"honorário" no nome do
-    ficheiro — usa o mesmo `download_url`, nunca um extraído ou
-    reescrito por ti), mas a ausência dele nunca impede gerar o portal;
-    fica simplesmente sem o link de download nessa secção. Do PDF de
-    apresentação extrai-se automaticamente,
-    aqui dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
+    `honorarios_total`, ver acima) — usa o mesmo `download_url`, nunca um
+    extraído ou reescrito por ti —, mas a ausência dele nunca impede
+    gerar o portal; fica simplesmente sem o link de download nessa
+    secção. Do PDF de apresentação extrai-se automaticamente, aqui
+    dentro, a primeira imagem de ambiente (nunca o moodboard nem uma
     planta técnica) para servir de capa da fase "projeto" — tal como a
     imagem de conceito serve de capa da fase "conceito"; nunca precisas
     de indicar tu mesma essa imagem.
 
-    NORMA para encontrar o PDF certo com listar_pdfs_anexados_por_data:
-    o PDF de apresentação do projeto (para `documento_apresentacao_download_url`)
-    tem sempre a palavra "Projeto" no nome (ex: "IG Apresentação PROJETO
-    [Nome cliente]") — nunca confundas com o PDF do conceito, que também
-    costuma começar por "Apresentação" mas nunca tem "Projeto" no nome
-    (ex: "IG Apresentação IMAGEM GUIA [Nome cliente]", ver
-    `conceito_pdf_download_url`). Se houver mais do que um com "Projeto"
-    no nome, usa o mais recente.
+    NOMES PADRONIZADOS dos PDFs (pedido explícito do Rui, 2026-09-24 —
+    todos os PDFs novos seguem sempre este formato; usa a palavra-chave
+    indicada para encontrar cada um com listar_pdfs_anexados_por_data,
+    e usa sempre o mais recente se houver mais do que um a corresponder):
+    - Honorários: "Honorários Projeto IG_[Nome cliente]" — palavra-chave
+      "Honorários".
+    - Conceito: "Conceito Psicoestético IG_[Nome cliente]" — palavra-chave
+      "Conceito Psicoestético".
+    - Projeto (apresentação): "Apresentação Projeto IG_[Nome cliente]" —
+      palavra-chave "Apresentação" (nunca confundir com o PDF do
+      conceito, que nunca tem "Apresentação" no nome).
+    - Orçamento: "Orçamento Projeto IG_[Nome cliente]" — palavra-chave
+      "Orçamento".
+    Cards mais antigos podem ainda ter PDFs anexados com nomes de antes
+    desta normalização — se não encontrares um ficheiro com o nome
+    padronizado, procura pela palavra-chave sozinha (sem o resto do
+    nome) antes de assumir que o PDF não existe.
 
     REGRA ESPECIAL E ABSOLUTA sobre fases já validadas: se este card já
     tiver um portal gerado antes, e alguma fase já lá estiver "validada"
@@ -589,7 +596,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         return {"erro": ("documento_orcamento_download_url é obrigatório quando a fase \"orcamento\" não é "
                          "\"prevista\" — o cliente vai ver essa secção e precisa do PDF do orçamento "
                          "discriminado (usa listar_pdfs_anexados_por_data para encontrar o download_url, "
-                         "procurando por \"Orçamento\"/\"ORÇ\"). Se esse PDF ainda não está anexado ao card, "
+                         "procurando por \"Orçamento\"). Se esse PDF ainda não está anexado ao card, "
                          "mantém a fase \"orcamento\" como \"prevista\" em vez disso.")}
 
     conceito_imagem = None
@@ -903,7 +910,7 @@ TOOLS_PORTAL_PROJETO = [
                 },
                 "conceito_leitura": {"type": "string", "description": "texto real e literal (do PDF \"Conceito Psicoestético\" ou de um comentário da designer) a descrever o conceito por escrito — nunca uma composição tua. Omite/deixa nulo se não existir esse texto; não inventes um parágrafo"},
                 "conceito_materiais": {"type": "string", "description": "a linha curta de estilo tal como está escrita no PDF, copiada literalmente (ex: \"Natural | Eclético | Introvertido\") — opcional; omite/deixa nulo se o PDF não tiver essa linha nesse formato, nunca compões uma tu mesma"},
-                "conceito_pdf_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Conceito Psicoestético [Nome cliente]\" anexado ao card (usa o mais recente, se houver mais do que um) — a função extrai a imagem do moodboard internamente, nunca passes uma imagem já extraída. Obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
+                "conceito_pdf_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Conceito Psicoestético IG_[Nome cliente]\" anexado ao card (procura pela palavra-chave \"Conceito Psicoestético\"; usa o mais recente, se houver mais do que um) — a função extrai a imagem do moodboard internamente, nunca passes uma imagem já extraída. Obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
                 "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado. Omite (ou não passes) se ainda não existir nenhum orçamento de produto para este projeto — nunca passes 0 como substituto disso; só podes omitir se a fase \"orcamento\" em fases_estado for \"prevista\""},
                 "valor_produto_com_iva": {"type": "boolean", "description": "True só se `valor_produto` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
                 "ambientes": {
@@ -918,9 +925,9 @@ TOOLS_PORTAL_PROJETO = [
                         "required": ["nome", "nota"]
                     }
                 },
-                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF de apresentação do projeto, se houver anexado no card — opcional. Tem sempre a palavra \"Projeto\" no nome do ficheiro (ex: \"IG Apresentação PROJETO [Nome cliente]\") — nunca confundir com o PDF do conceito, que também costuma começar por \"Apresentação\" mas nunca tem \"Projeto\" no nome. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
-                "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF do orçamento detalhado, se houver anexado no card — opcional. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
-                "documento_honorarios_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF da proposta de honorários (o mesmo ficheiro, com \"Fee\"/\"honorário\" no nome, que já usas para confirmar honorarios_total) — opcional, mas passa-o sempre que o encontrares, para a cliente poder descarregar a proposta. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_apresentacao_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Apresentação Projeto IG_[Nome cliente]\", se houver anexado no card — opcional, mas obrigatório sempre que a fase \"projeto\" não for \"prevista\". Procura pela palavra-chave \"Apresentação\" (nunca confundir com o PDF do conceito, que nunca tem \"Apresentação\" no nome). O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_orcamento_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Orçamento Projeto IG_[Nome cliente]\", se houver anexado no card — opcional, mas obrigatório sempre que a fase \"orcamento\" não for \"prevista\". Procura pela palavra-chave \"Orçamento\". O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
+                "documento_honorarios_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Honorários Projeto IG_[Nome cliente]\" (o mesmo ficheiro que já usas para confirmar honorarios_total; procura pela palavra-chave \"Honorários\") — opcional, mas passa-o sempre que o encontrares, para a cliente poder descarregar a proposta. O PDF é descarregado e embutido no portal aqui dentro; nunca passes um url que a cliente não conseguiria abrir sozinha"},
                 "fases_estado": {
                     "type": "object",
                     "description": "estado de cada uma das 4 fases fixas — chaves obrigatórias: honorarios, conceito, projeto, orcamento",
