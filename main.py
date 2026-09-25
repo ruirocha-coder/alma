@@ -478,6 +478,16 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
+@app.get("/planeamento-ecos-largos/_debug-eventos/{card_id}")
+def planeamento_ecos_largos_debug_eventos(card_id: int):
+    """TEMPORÁRIO (Rui, 2026-09-25): dump dos eventos "moved" em bruto de um
+    card, para confirmar contra a API real o formato de
+    basecamp.data_entrada_em_coluna antes de confiar cegamente na deteção
+    de atraso pós-avanço (ver AVISO no docstring dessa função). Remover
+    assim que confirmado."""
+    eventos = basecamp._get_paginado(f"{basecamp._base_url()}/recordings/{card_id}/events.json")
+    return [e for e in eventos if (e.get("action") or "") == "moved"]
+
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
 # precisar de refresh. Um único processo uvicorn (sem --workers, ver
