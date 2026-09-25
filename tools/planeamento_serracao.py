@@ -279,6 +279,18 @@ def estado_planeamento_serracao() -> dict:
             # aparecer sozinho se for agendada outra vez (pedido explícito
             # do Rui, 2026-09).
             continue
+        if _normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO:
+            # a OF voltou para Triagem/Programação no Basecamp (standby),
+            # mesmo continuando "agendada" aqui (linha/dia guardados de
+            # antes) — pedido explícito do Rui (2026-10-01): esconder da
+            # logística enquanto estiver em standby, tal como já acontece
+            # quando é devolvida à fila. Nada é apagado: o duplicado de
+            # logística (e o agendamento) continuam guardados, por isso
+            # assim que a OF for reagendada outra vez (agendar(), que já
+            # recalcula o dia de carregamento a partir do novo dia de
+            # início — ver _talvez_duplicar_logistica) volta a aparecer
+            # aqui com o dia certo, sem precisar de mais nenhuma ação.
+            continue
         logistica.append({
             "basecamp_card_id": lg["basecamp_card_id"],
             "titulo": c["titulo"],
