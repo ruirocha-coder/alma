@@ -84,6 +84,11 @@ CORES_VALIDAS = {
 # -> título exato da coluna no Basecamp.
 ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido", "secagem": "Secagem"}
 
+# colunas (normalizadas, ver _normalizar) que significam que a produção já
+# terminou — usadas para decidir quando confirmar em definitivo o atraso
+# de uma OF (ver estado_planeamento_serracao/db.marcar_atrasado_confirmado).
+COLUNAS_PRODUCAO_CONCLUIDA = {"produzido", "secagem", "vendido"}
+
 def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
     return sem_acentos.lower().strip()
@@ -191,6 +196,19 @@ def estado_planeamento_serracao() -> dict:
             info["duracao_dias"] = agendamento["duracao_dias"]
             info["duracao_manual"] = agendamento["duracao_manual"]
             info["ordem"] = agendamento["ordem"]
+            # a borda vermelha de atraso não pode desaparecer quando a OF
+            # avança para uma coluna de produção concluída — confirma-se
+            # (e grava-se para sempre) na primeira leitura em que isso é
+            # visto, comparando o fim previsto local com hoje (pedido
+            # explícito do Rui, 2026-09-25).
+            atrasado_confirmado = agendamento["atrasado_confirmado"]
+            if not atrasado_confirmado and _normalizar(c.get("estado")) in COLUNAS_PRODUCAO_CONCLUIDA:
+                fim_previsto = (date.fromisoformat(agendamento["dia_inicio"])
+                                + timedelta(days=agendamento["duracao_dias"] - 1))
+                if fim_previsto < date.today():
+                    db.marcar_atrasado_confirmado(c["id"])
+                    atrasado_confirmado = True
+            info["atrasado_confirmado"] = atrasado_confirmado
             agendadas.append(info)
         else:
             bolsa.append(info)
@@ -1048,6 +1066,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .pill{display:inline-flex;align-items:center;gap:6px;background:var(--paper);
     border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13.5px;color:var(--dim)}
   .pill b{color:var(--ink);font-weight:700}
+  .legenda{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 14px;font-size:13px;color:var(--dim)}
+  .legendaItem{display:inline-flex;align-items:center;gap:6px}
+  .legendaSwatch{width:13px;height:13px;border-radius:3px;flex-shrink:0}
+  .legendaBorda{background:#fff;box-shadow:0 0 0 2px var(--red) inset}
   .dot{width:8px;height:8px;border-radius:50%;background:#4E9A51}
   .dot.busy{background:var(--gold);animation:blink .7s infinite alternate}
   @keyframes blink{to{opacity:.25}}
@@ -1237,6 +1259,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="filaRow" id="fila"></div>
   </section>
 
+  <div class="legenda" id="legenda"></div>
+
   <div class="board" id="board">
     <div class="labels" id="labels"><div class="head"></div></div>
     <div class="scroll" id="scroll">
@@ -1333,9 +1357,18 @@ const cardLog=id=>cardsLog.find(c=>c.id===id);
    duração, calculado aqui) e o card ainda não chegou a "Produzido" nem
    a "Vendido" no Basecamp. Uma OF ainda na fila (sem linha/dia) não tem
    plano de produção nenhum para estar atrasada contra, por isso nunca
-   fica vermelha. */
+   fica vermelha.
+   Pedido explícito do Rui (2026-09-25): assim que a borda vermelha
+   aparece, tem de ficar para sempre — mesmo depois da OF avançar para
+   "Produzido"/"Secagem"/"Vendido" — para se saber sempre que aquela OF
+   foi produzida com atraso. `atrasadoConfirmado` é gravado no servidor
+   (ver estado_planeamento_serracao/db.marcar_atrasado_confirmado) na
+   primeira leitura em que isso é detetado; a partir daí é essa marca
+   (não o cálculo de datas em baixo, que só serve para o atraso "ao
+   vivo" de uma OF ainda em curso) que decide a borda. */
 const CONCLUIDO_PRODUCAO=new Set(["Produzido","Vendido","Secagem"]);
 const atrasado=c=>{
+  if(c.atrasadoConfirmado) return true;
   if(c.linha===null||c.gs===null) return false;
   if(CONCLUIDO_PRODUCAO.has(c.coluna)) return false;
   const fimIdx=clamp(c.gs+c.dur-1,0,MASTER.length-1);
@@ -1467,12 +1500,13 @@ async function carregar(){
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
-        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,duracaoManual:!!c.duracao_manual,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
+        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,duracaoManual:!!c.duracao_manual,ordem:c.ordem||0,
+        atrasadoConfirmado:!!c.atrasado_confirmado})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
       url:c.url,cor:c.cor,corFundo:c.cor_fundo,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
-    render(); renderCoresEstado();
+    render(); renderCoresEstado(); renderLegenda();
     log("local",`lido do Basecamp: ${d.bolsa.length} por agendar, ${d.agendadas.length} agendadas, ${cardsLog.length} na logística`);
   }catch(e){
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Falhou a ligação ao Basecamp";
@@ -1514,6 +1548,25 @@ async function editarCapacidade(linha){
   }catch(e){ alert("Falhou a guardar: "+e); }
 }
 
+/* legenda das cores, sempre visível (mesmo em modo só consulta) por cima
+   do quadro de produção — pedido explícito do Rui (2026-09-25): algo
+   direto e simples a lembrar o que cada cor de fundo/borda significa,
+   sem precisar de abrir o painel "Cores por estado" (esse é só para
+   editar, este é só para consultar). Gerada a partir dos mesmos dados
+   (ESTADOS_COR/CORES_ESTADO) para nunca ficar desatualizada se a equipa
+   mudar uma cor no painel. */
+const ROTULOS_ESTADO={"Em Produção":"Em produção","Secagem":"No secador","Produzido":"Produzido","Vendido":"Vendido"};
+function renderLegenda(){
+  const ordem=["Em Produção","Secagem","Produzido","Vendido"];
+  $("#legenda").innerHTML=
+    ordem.filter(coluna=>ESTADOS_COR[coluna]!==undefined).map(coluna=>{
+      const corNome=CORES_ESTADO[ESTADOS_COR[coluna]];
+      const hex=(corNome&&CORES[corNome])?CORES[corNome].hex:CORES.cinza.hex;
+      return `<span class="legendaItem"><span class="legendaSwatch" style="background:${tintRgba(hex,.35)};box-shadow:0 0 0 1px ${hex} inset"></span>${ROTULOS_ESTADO[coluna]}</span>`;
+    }).join("")
+    + `<span class="legendaItem"><span class="legendaSwatch legendaBorda"></span>Borda vermelha: foi produzido com atraso</span>`;
+}
+
 /* painel "Cores por estado" — pedido explícito do Rui (2026-09): tal como
    a cor manual de cada OF já era editável, a cor automática de cada
    estado/coluna do Basecamp também passa a ser, com a mesma paleta. */
@@ -1535,7 +1588,7 @@ function renderCoresEstado(){
         const d=await r.json();
         if(d.erro){ alert(d.erro); return; }
         CORES_ESTADO[estado]=cor;
-        renderCoresEstado();
+        renderCoresEstado(); renderLegenda();
         renderLanes(); renderFila(); renderLogistica();
         log("local",`cor de "${sw.dataset.estado}" atualizada`);
       }catch(e){ alert("Falhou a guardar: "+e); }
