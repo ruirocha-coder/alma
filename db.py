@@ -390,14 +390,21 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS duracao_ma
 -- para a borda vermelha nunca mais desaparecer. Revertido no mesmo dia —
 -- marcava quase todas as OFs já concluídas como atrasadas (o fim previsto
 -- de qualquer encomenda já terminada fica sempre no passado, atrasada ou
--- não). A coluna chegou a ser criada em produção; a linha a seguir
--- remove-a, e a última recria-a com o critério certo (ver
+-- não). Recriada a seguir com o critério certo (ver
 -- tools.planeamento_serracao.estado_planeamento_serracao): não é sobre o
 -- fim previsto, é sobre a OF ainda não ter chegado a "Em Produção" já
 -- depois do dia de início estipulado — nesse caso fica sempre atrasada,
 -- mesmo que "Em Produção" chegue no dia seguinte, porque já não foi
 -- produzida no dia certo (pedido explícito do Rui, 2026-09-25).
-ALTER TABLE planeamento_producao_ecos_largos DROP COLUMN IF EXISTS atrasado_confirmado;
+-- BUG REAL (Rui, 2026-09-25): o DROP+ADD que aqui esteve (para recriar a
+-- coluna com o critério novo) corria em CADA arranque da aplicação —
+-- inicializar_schema() é chamado sempre que o processo reinicia (todos os
+-- deploys), e um DROP COLUMN, ao contrário de um ADD COLUMN IF NOT
+-- EXISTS, NÃO é idempotente: apagava e recriava a coluna do zero a cada
+-- deploy, perdendo TODOS os atrasados já confirmados (incluindo os do
+-- "Girona" mal tinham sido detetados). Já não é preciso recriar nada —
+-- a coluna já existe com o schema certo desde então; o ADD COLUMN IF NOT
+-- EXISTS abaixo chega, e nunca mais destrói dados existentes.
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS atrasado_confirmado BOOLEAN NOT NULL DEFAULT FALSE;
 -- pedido explícito do Rui (2026-09-25), exemplo real: "Girona" já tinha
 -- avançado para "Em Produção" (e mais além) fora do dia estipulado, mas
