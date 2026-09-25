@@ -486,7 +486,7 @@ def planeamento_ecos_largos_debug_eventos(card_id: int):
     de atraso pós-avanço (ver AVISO no docstring dessa função). Remover
     assim que confirmado."""
     eventos = basecamp._get_paginado(f"{basecamp._base_url()}/recordings/{card_id}/events.json")
-    return [e for e in eventos if (e.get("action") or "") == "moved"]
+    return eventos
 
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
