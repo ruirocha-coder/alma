@@ -143,10 +143,8 @@ def _cards_of_ativos(forcar: bool = False) -> list[dict]:
     ids_agendados = {a["basecamp_card_id"] for a in db.agendamentos_producao_ecos_largos()
                      if a["linha"] and a["dia_inicio"]}
     faltam = ids_agendados - ids_no_fluxo
-    encontrados = basecamp.obter_cards(faltam, projeto=PROJETO)
-    ids_encontrados = set()
+    encontrados, confirmados_inexistentes = basecamp.obter_cards(faltam, projeto=PROJETO)
     for card in encontrados:
-        ids_encontrados.add(card["id"])
         if _normalizar(card.get("estado")) in COLUNAS_OF:
             itens.append(card)
     # uma OF agendada aqui cujo card já não existe mesmo no Basecamp
@@ -155,9 +153,17 @@ def _cards_of_ativos(forcar: bool = False) -> list[dict]:
     # acontece ao apagar por aqui (ver _remover_agendamento_local; pedido
     # explícito do Rui, 2026-09-25): antes ficava "preso" no quadro para
     # sempre, mesmo já não existindo do outro lado.
-    if faltam - ids_encontrados:
+    #
+    # BUG REAL (Rui, 2026-10-01): isto costumava disparar para qualquer id
+    # que `obter_cards` não devolvesse, incluindo os que só falharam a
+    # confirmar por um erro transitório do Basecamp (rede, limite de
+    # pedidos, 5xx) — apagava para sempre o agendamento de uma OF bem viva
+    # só por causa de UMA falha pontual. `confirmados_inexistentes` já vem
+    # filtrado por basecamp.obter_cards: só ids com 404/arquivado
+    # confirmados, nunca por falha de rede (ver docstring de obter_card).
+    if confirmados_inexistentes:
         ids_ativos_atual = {c["id"] for c in itens}
-        for card_id in (faltam - ids_encontrados):
+        for card_id in confirmados_inexistentes:
             _remover_agendamento_local(card_id, ids_ativos=ids_ativos_atual)
     _CACHE_CARDS_ATIVOS["itens"] = (time.time(), itens)
     return itens

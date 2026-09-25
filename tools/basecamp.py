@@ -456,32 +456,72 @@ def obter_card(card_id: int, projeto: str) -> dict:
     "status": "trashed"/"archived" no JSON, e _formatar_item nunca olhava
     para esse campo, só para a coluna onde o card estava antes de ser
     apagado. Por isso é preciso verificar aqui, explicitamente, antes de
-    tratar o card como ainda existente."""
+    tratar o card como ainda existente.
+
+    BUG REAL (Rui, 2026-10-01): esta função tratava QUALQUER erro HTTP
+    (incluindo 429 "too many requests", 500, timeouts) exatamente como um
+    404 — "o card já não existe". Isso é falso: um card que continua bem
+    vivo no Basecamp, mas cuja consulta falhou por um motivo transitório
+    (limite de pedidos, Basecamp lento/em baixo por instantes), ficava
+    indistinguível de um card genuinamente apagado. Como
+    tools.planeamento_serracao._cards_of_ativos usa exatamente este sinal
+    para decidir quando apagar em definitivo o agendamento local e o
+    duplicado de logística de uma OF (ver _remover_agendamento_local),
+    isto podia apagar para sempre o planeamento de uma OF só porque UM
+    pedido individual falhou uma vez — sem qualquer culpa da OF em si.
+    Confirmado como a explicação mais provável de OFs (sobretudo já em
+    "Vendido", que só são confirmadas por aqui, uma a uma — ver
+    _cards_of_ativos) a desaparecerem sozinhas do quadro e da logística.
+
+    Agora só devolve None quando o Basecamp CONFIRMA que o card já não
+    existe (404) ou que foi arquivado/mandado para o lixo (status !=
+    "active" numa resposta 200) — qualquer outro erro propaga a exceção,
+    para quem chama (ver obter_cards) nunca confundir "não consegui
+    confirmar agora" com "confirmado que já não existe"."""
     p = _encontrar_projeto(projeto)
     if not p:
         return None
-    try:
-        r = httpx.get(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
-                      headers=_headers(), timeout=30)
-        r.raise_for_status()
-    except httpx.HTTPStatusError:
+    r = httpx.get(f"{_base_url()}/buckets/{p['id']}/card_tables/cards/{card_id}.json",
+                  headers=_headers(), timeout=30)
+    if r.status_code == 404:
         return None
+    r.raise_for_status()  # qualquer outro erro (429, 5xx, ...) propaga — nunca confirma "apagado"
     dados = r.json()
     if dados.get("status") != "active":
         return None
     return _formatar_item(dados)
 
-def obter_cards(card_ids, projeto: str) -> list[dict]:
+_ERRO_TRANSITORIO = object()  # sentinela: falhou a confirmar, não se sabe se o card existe ou não
+
+def obter_cards(card_ids, projeto: str) -> tuple:
     """Vai buscar vários cards pelo id, em paralelo (ver obter_card) —
     para o mesmo caso de uso mas com vários ids de uma vez (ver
-    tools/planeamento_serracao._cards_of_ativos). Cards que já não
-    existirem ficam simplesmente de fora do resultado, sem erro."""
+    tools/planeamento_serracao._cards_of_ativos).
+
+    Devolve (cards_encontrados, ids_confirmados_inexistentes) — os dois
+    separados de propósito (bug real, Rui, 2026-10-01 — ver obter_card):
+    um id cuja consulta falhou por um erro transitório (rede, 429, 5xx)
+    não entra em NENHum dos dois grupos — fica simplesmente de fora desta
+    leitura (o card não aparece agora, tenta-se de novo na próxima), mas
+    nunca é tratado como "apagado". Só os ids realmente confirmados como
+    inexistentes (404/arquivado) vão para o segundo grupo, que é o único
+    que tools.planeamento_serracao._cards_of_ativos usa para decidir
+    apagar em definitivo um agendamento local."""
     card_ids = list(card_ids)
     if not card_ids:
-        return []
+        return [], set()
+    def _buscar(cid):
+        try:
+            return cid, obter_card(cid, projeto)
+        except httpx.HTTPError as e:
+            print(f"[basecamp] falha transitória a confirmar o card {cid} "
+                  f"(não tratado como apagado): {e!r}")
+            return cid, _ERRO_TRANSITORIO
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(card_ids)) as executor:
-        resultados = executor.map(lambda cid: obter_card(cid, projeto), card_ids)
-    return [c for c in resultados if c]
+        resultados = list(executor.map(_buscar, card_ids))
+    encontrados = [r for _, r in resultados if r is not None and r is not _ERRO_TRANSITORIO]
+    confirmados_inexistentes = {cid for cid, r in resultados if r is None}
+    return encontrados, confirmados_inexistentes
 
 def procurar_cards_basecamp(termo: str, projeto: str = None) -> list[dict]:
     """Procura tarefas, cards ou card tables (de todos os projetos, ou só
