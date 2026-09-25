@@ -478,6 +478,28 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
+@app.post("/planeamento-ecos-largos/_corrigir-inicio-verificado")
+def planeamento_ecos_largos_corrigir_inicio_verificado():
+    """TEMPORÁRIO (Rui, 2026-09-25), 2ª vez: o bug da migração (ver
+    commit sobre atrasado_confirmado num DROP+ADD que corria em cada
+    deploy) apagou o atrasado_confirmado das OFs entretanto já verificadas
+    corretamente, mas manteve inicio_verificado=TRUE nessas mesmas linhas
+    — sem este reset elas nunca mais seriam reavaliadas (a condição em
+    estado_planeamento_serracao exclui quem já tem inicio_verificado).
+    Reabre para nova verificação todas as OFs marcadas inicio_verificado
+    mas não atrasado_confirmado. Remover assim que corrido uma vez."""
+    from db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE planeamento_producao_ecos_largos
+                   SET inicio_verificado = FALSE
+                   WHERE inicio_verificado = TRUE AND atrasado_confirmado = FALSE"""
+            )
+            n = cur.rowcount
+        conn.commit()
+    return {"linhas_reabertas": n}
+
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
 # precisar de refresh. Um único processo uvicorn (sem --workers, ver
