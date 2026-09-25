@@ -564,7 +564,7 @@ def planeamento_ecos_largos_capacidade(corpo: dict = Body(...)):
 @app.post("/planeamento-ecos-largos/cor-estado")
 def planeamento_ecos_largos_cor_estado(corpo: dict = Body(...)):
     """Atualiza a cor automática de fundo de um estado/coluna do Basecamp
-    (produzido/em_producao/vendido) — ver
+    (produzido/em_producao/vendido/secagem) — ver
     tools/planeamento_serracao.atualizar_cor_estado."""
     resultado = planeamento_serracao.atualizar_cor_estado(corpo.get("estado"), corpo.get("cor"))
     if "erro" in resultado:

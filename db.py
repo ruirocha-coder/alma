@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS linhas_producao_ecos_largos (
 );
 
 -- cor automática de fundo de cada estado/coluna do Basecamp no quadro de
--- planeamento (produzido/em_producao/vendido) — editável pela equipa (ver
+-- planeamento (produzido/em_producao/vendido/secagem) — editável pela equipa (ver
 -- tools/planeamento_serracao.py), tal como a cor manual (tipo de produto)
 -- de cada OF já é. `cor` é sempre uma das chaves de CORES_VALIDAS.
 CREATE TABLE IF NOT EXISTS cores_estado_ecos_largos (
@@ -327,7 +327,8 @@ SEED_CORES_ESTADO_ECOS_LARGOS = """
 INSERT INTO cores_estado_ecos_largos (estado, cor) VALUES
     ('produzido', 'amarelo'),
     ('em_producao', 'laranja'),
-    ('vendido', 'roxo')
+    ('vendido', 'roxo'),
+    ('secagem', 'roxo_claro')
 ON CONFLICT (estado) DO NOTHING;
 """
 
@@ -1108,8 +1109,9 @@ def atualizar_capacidade_linha_producao(linha: str, capacidade_m3_dia: float) ->
 
 def cores_estado_producao() -> dict:
     """Cor automática de fundo de cada estado/coluna do Basecamp
-    (produzido/em_producao/vendido) no quadro de planeamento — editável
-    pela equipa (ver tools/planeamento_serracao.atualizar_cor_estado)."""
+    (produzido/em_producao/vendido/secagem) no quadro de planeamento —
+    editável pela equipa (ver
+    tools/planeamento_serracao.atualizar_cor_estado)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT estado, cor FROM cores_estado_ecos_largos")

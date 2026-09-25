@@ -27,11 +27,13 @@ from tools import basecamp
 PROJETO = "Ecos Largos"
 
 # colunas do card table real do Ecos Largos que representam OFs em fluxo de
-# fabrico (confirmado ao vivo, 2026-09, contra a API real). As colunas
-# "Linha 1" a "Linha 6" / Charriots / Empilhadores do mesmo quadro guardam
-# cards de ALOCAÇÃO DE PESSOAL, não OFs — ficam de fora deste quadro, por
-# pedido explícito do Rui.
-COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido"}
+# fabrico (confirmado ao vivo, 2026-09, contra a API real; "secagem"
+# acrescentada a pedido explícito do Rui, 2026-09-25 — coluna real do
+# Basecamp, entra na cor automática de fundo tal como Produzido/Em
+# Produção/Vendido). As colunas "Linha 1" a "Linha 6" / Charriots /
+# Empilhadores do mesmo quadro guardam cards de ALOCAÇÃO DE PESSOAL, não
+# OFs — ficam de fora deste quadro, por pedido explícito do Rui.
+COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido", "secagem"}
 # "Vendido" inclui-se para uma OF já agendada não desaparecer do quadro
 # quando a venda fecha no Basecamp — fica visível (cor automática roxa, ver
 # template) em vez de desaparecer; nunca entra na fila (só cards em Triagem
@@ -80,7 +82,7 @@ CORES_VALIDAS = {
 # estados/colunas do Basecamp que têm uma cor automática de fundo no
 # quadro, editável pela equipa (ver atualizar_cor_estado) — chave interna
 # -> título exato da coluna no Basecamp.
-ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido"}
+ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido", "secagem": "Secagem"}
 
 def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
@@ -1332,7 +1334,7 @@ const cardLog=id=>cardsLog.find(c=>c.id===id);
    a "Vendido" no Basecamp. Uma OF ainda na fila (sem linha/dia) não tem
    plano de produção nenhum para estar atrasada contra, por isso nunca
    fica vermelha. */
-const CONCLUIDO_PRODUCAO=new Set(["Produzido","Vendido"]);
+const CONCLUIDO_PRODUCAO=new Set(["Produzido","Vendido","Secagem"]);
 const atrasado=c=>{
   if(c.linha===null||c.gs===null) return false;
   if(CONCLUIDO_PRODUCAO.has(c.coluna)) return false;
@@ -1432,7 +1434,7 @@ const CORES={
   cinza:{hex:"#9AA0A6",label:"Automática"},
 };
 // estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
-const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido"};
+const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido","Secagem":"secagem"};
 let CORES_ESTADO={}; // chave interna -> chave de CORES, carregado em carregar()
 function tintRgba(hex,alpha){
   const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
@@ -2046,7 +2048,7 @@ function openSheet(id,somenteLeitura){
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
-    <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. A barra lateral é a cor do tipo de produto; o fundo é automático por estado (amarelo em Produzido, laranja em Em Produção, roxo em Vendido) a não ser que escolhas uma cor de fundo aqui — nesse caso essa cor sobrepõe-se à automática. Mudar isto aqui não altera nada no Basecamp.</div>
+    <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. A barra lateral é a cor do tipo de produto; o fundo é automático por estado (amarelo em Produzido, laranja em Em Produção, roxo em Vendido, lilás em Secagem) a não ser que escolhas uma cor de fundo aqui — nesse caso essa cor sobrepõe-se à automática. Mudar isto aqui não altera nada no Basecamp.</div>
     ${somenteLeitura?"":`
     <div class="acts">
       <button class="btn" id="duplicar">Duplicar</button>
