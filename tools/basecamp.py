@@ -448,7 +448,15 @@ def obter_card(card_id: int, projeto: str) -> dict:
     inteira só para confirmar um punhado de OFs já conhecidas era
     desperdício puro, medido ao vivo em vários segundos). Devolve None se
     o card já não existir (apagado/arquivado diretamente no Basecamp) ou
-    se o projeto não for encontrado."""
+    se o projeto não for encontrado.
+
+    Bug real (Rui, 2026-09-25): um card apagado (para o lixo) diretamente
+    no Basecamp continuava a aparecer no quadro de planeamento — a API
+    não devolve 404 para um card na lixeira, devolve 200 na mesma com
+    "status": "trashed"/"archived" no JSON, e _formatar_item nunca olhava
+    para esse campo, só para a coluna onde o card estava antes de ser
+    apagado. Por isso é preciso verificar aqui, explicitamente, antes de
+    tratar o card como ainda existente."""
     p = _encontrar_projeto(projeto)
     if not p:
         return None
@@ -458,7 +466,10 @@ def obter_card(card_id: int, projeto: str) -> dict:
         r.raise_for_status()
     except httpx.HTTPStatusError:
         return None
-    return _formatar_item(r.json())
+    dados = r.json()
+    if dados.get("status") != "active":
+        return None
+    return _formatar_item(dados)
 
 def obter_cards(card_ids, projeto: str) -> list[dict]:
     """Vai buscar vários cards pelo id, em paralelo (ver obter_card) —
