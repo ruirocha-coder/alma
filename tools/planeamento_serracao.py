@@ -1266,8 +1266,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="filaRow" id="fila"></div>
   </section>
 
-  <div class="legenda" id="legenda"></div>
-
   <div class="board" id="board">
     <div class="labels" id="labels"><div class="head"></div></div>
     <div class="scroll" id="scroll">
@@ -1277,6 +1275,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <div class="legenda" id="legenda"></div>
 
   <h2 class="secTit">Logística — dia de carregamento</h2>
   <div class="board boardLog" id="boardLog">
@@ -1546,14 +1546,15 @@ async function editarCapacidade(linha){
 }
 
 /* legenda das cores, pequena e sempre visível (mesmo em modo só consulta),
-   por baixo do quadro de produção — pedido explícito do Rui (2026-09-25):
+   depois do quadro de produção — pedido explícito do Rui (2026-09-25):
    algo direto e simples a lembrar o que cada cor de fundo/borda
    significa, sem precisar de abrir o painel "Cores por estado" (esse é
    só para editar, este é só para consultar); as cores dos quadradinhos
-   são as cores reais (sólidas), não o tom já diluído que aparece no
-   fundo dos cards, para se distinguirem bem umas das outras. Gerada a
-   partir dos mesmos dados (ESTADOS_COR/CORES_ESTADO) para nunca ficar
-   desatualizada se a equipa mudar uma cor no painel. */
+   são tal e qual as que aparecem no fundo dos cards (mesmo tom diluído,
+   ver corEstadoFundo/tintRgba), para a legenda corresponder exatamente
+   ao que se vê no quadro. Gerada a partir dos mesmos dados
+   (ESTADOS_COR/CORES_ESTADO) para nunca ficar desatualizada se a equipa
+   mudar uma cor no painel. */
 const ROTULOS_ESTADO={"Em Produção":"Em produção","Secagem":"No secador","Produzido":"Produzido","Vendido":"Vendido"};
 function renderLegenda(){
   const ordem=["Em Produção","Secagem","Produzido","Vendido"];
@@ -1561,7 +1562,7 @@ function renderLegenda(){
     ordem.filter(coluna=>ESTADOS_COR[coluna]!==undefined).map(coluna=>{
       const corNome=CORES_ESTADO[ESTADOS_COR[coluna]];
       const hex=(corNome&&CORES[corNome])?CORES[corNome].hex:CORES.cinza.hex;
-      return `<span class="legendaItem"><span class="legendaSwatch" style="background:${hex}"></span>${ROTULOS_ESTADO[coluna]}</span>`;
+      return `<span class="legendaItem"><span class="legendaSwatch" style="background:${tintRgba(hex,.22)};box-shadow:0 0 0 1px ${hex} inset"></span>${ROTULOS_ESTADO[coluna]}</span>`;
     }).join("")
     + `<span class="legendaItem"><span class="legendaSwatch legendaBorda"></span>Borda vermelha: atrasado</span>`;
 }
