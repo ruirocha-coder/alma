@@ -390,8 +390,15 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS duracao_ma
 -- para a borda vermelha nunca mais desaparecer. Revertido no mesmo dia —
 -- marcava quase todas as OFs já concluídas como atrasadas (o fim previsto
 -- de qualquer encomenda já terminada fica sempre no passado, atrasada ou
--- não). A coluna chegou a ser criada em produção; esta remove-a.
+-- não). A coluna chegou a ser criada em produção; a linha a seguir
+-- remove-a, e a última recria-a com o critério certo (ver
+-- tools.planeamento_serracao.estado_planeamento_serracao): não é sobre o
+-- fim previsto, é sobre a OF ainda não ter chegado a "Em Produção" já
+-- depois do dia de início estipulado — nesse caso fica sempre atrasada,
+-- mesmo que "Em Produção" chegue no dia seguinte, porque já não foi
+-- produzida no dia certo (pedido explícito do Rui, 2026-09-25).
 ALTER TABLE planeamento_producao_ecos_largos DROP COLUMN IF EXISTS atrasado_confirmado;
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS atrasado_confirmado BOOLEAN NOT NULL DEFAULT FALSE;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -845,7 +852,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual, atrasado_confirmado
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -859,6 +866,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "cor_fundo": l["cor_fundo"],
                 "tipo_madeira": l["tipo_madeira"],
                 "duracao_manual": l["duracao_manual"],
+                "atrasado_confirmado": l["atrasado_confirmado"],
             } for l in cur.fetchall()]
 
 def agendamento_producao(basecamp_card_id: int) -> dict:
@@ -1137,6 +1145,26 @@ def atualizar_cor_estado_producao(estado: str, cor: str) -> dict:
             )
         conn.commit()
     return {"estado": estado, "cor": cor}
+
+def marcar_atrasado_confirmado(basecamp_card_id: int) -> None:
+    """Marca uma OF como tendo começado a ser produzida fora do dia
+    estipulado — chamado uma única vez, na primeira leitura em que a OF
+    ainda está em Triagem/Programação já depois do dia de início local
+    (ver tools.planeamento_serracao.estado_planeamento_serracao). Fica
+    gravado para sempre (nunca é revertido daqui): mesmo que a OF entre
+    em "Em Produção" no dia seguinte, já não foi produzida no dia certo
+    — pedido explícito do Rui, 2026-09-25. Ao contrário da primeira
+    tentativa (revertida no mesmo dia), isto NUNCA dispara para uma OF
+    já concluída no dia certo — só dispara enquanto ainda nem começou."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE planeamento_producao_ecos_largos
+                   SET atrasado_confirmado = TRUE, atualizado_em = now()
+                   WHERE basecamp_card_id = %s""",
+                (basecamp_card_id,)
+            )
+        conn.commit()
 
 def desagendar_producao(basecamp_card_id: int) -> dict:
     """Volta a pôr uma OF na bolsa por agendar (linha/dia a NULL), sem

@@ -84,6 +84,13 @@ CORES_VALIDAS = {
 # -> título exato da coluna no Basecamp.
 ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido", "secagem": "Secagem"}
 
+# colunas (normalizadas, ver _normalizar) anteriores ao início da
+# produção em si — usadas só para confirmar em definitivo o atraso de
+# início de uma OF (ver estado_planeamento_serracao/
+# db.marcar_atrasado_confirmado): se a OF ainda estiver numa destas
+# colunas já depois do dia de início local, começou atrasada.
+COLUNAS_ANTES_DA_PRODUCAO = {"triagem", "programacao"}
+
 def _normalizar(texto: str) -> str:
     sem_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
     return sem_acentos.lower().strip()
@@ -204,6 +211,21 @@ def estado_planeamento_serracao() -> dict:
             info["duracao_dias"] = agendamento["duracao_dias"]
             info["duracao_manual"] = agendamento["duracao_manual"]
             info["ordem"] = agendamento["ordem"]
+            # borda vermelha de atraso (pedido explícito do Rui,
+            # 2026-09-25): é só sobre o INÍCIO — se a OF ainda está em
+            # Triagem/Programação já depois do dia de início local, ficou
+            # atrasada, e fica assim para sempre (mesmo que "Em Produção"
+            # chegue no dia seguinte, já não foi no dia certo). Uma OF que
+            # chegue a "Em Produção" (ou mais além) antes disso alguma vez
+            # ser detetado nunca fica marcada — não é sobre o fim previsto
+            # nem sobre quanto tempo a produção em si está a demorar.
+            atrasado_confirmado = agendamento["atrasado_confirmado"]
+            if (not atrasado_confirmado
+                    and _normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO
+                    and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
+                db.marcar_atrasado_confirmado(c["id"])
+                atrasado_confirmado = True
+            info["atrasado_confirmado"] = atrasado_confirmado
             agendadas.append(info)
         else:
             bolsa.append(info)
@@ -1357,21 +1379,16 @@ let modoEdicao=false;
 const $=s=>document.querySelector(s);
 const card=id=>cards.find(c=>c.id===id);
 const cardLog=id=>cardsLog.find(c=>c.id===id);
-/* pedido explícito do Rui (2026-09-30): a borda vermelha ("atrasado") não
-   é sobre o prazo do Basecamp (um campo qualquer, sem relação nenhuma
-   com o plano de produção) — é sobre a PRODUÇÃO em si estar atrasada:
-   já passou do dia em que devia ter acabado de produzir (dia_inicio +
-   duração, calculado aqui) e o card ainda não chegou a "Produzido" nem
-   a "Vendido" no Basecamp. Uma OF ainda na fila (sem linha/dia) não tem
-   plano de produção nenhum para estar atrasada contra, por isso nunca
-   fica vermelha. */
-const CONCLUIDO_PRODUCAO=new Set(["Produzido","Vendido","Secagem"]);
-const atrasado=c=>{
-  if(c.linha===null||c.gs===null) return false;
-  if(CONCLUIDO_PRODUCAO.has(c.coluna)) return false;
-  const fimIdx=clamp(c.gs+c.dur-1,0,MASTER.length-1);
-  return MASTER[fimIdx].iso<hojeISO;
-};
+/* pedido explícito do Rui (2026-09-25): a borda vermelha ("atrasado") não
+   é sobre o prazo do Basecamp, nem sobre quanto tempo a produção em si
+   está a demorar — é só sobre o INÍCIO: se a OF ainda estava em
+   Triagem/Programação já depois do dia de início local, começou
+   atrasada, e fica assim marcada para sempre (mesmo que "Em Produção"
+   chegue no dia seguinte). Calculado e gravado no servidor (ver
+   estado_planeamento_serracao/db.marcar_atrasado_confirmado) — aqui só
+   se lê a marca (`atrasadoConfirmado`), nunca se recalcula nada a partir
+   de datas. */
+const atrasado=c=>!!c.atrasadoConfirmado;
 /* pedido explícito do Rui (2026-09-30): o id completo do card do
    Basecamp (ex: 10285829501) é comprido demais para caber no espaço do
    card — mostra-se só os últimos 4 dígitos (ex: 9501), que já bastam
@@ -1498,7 +1515,8 @@ async function carregar(){
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:null,gs:null,dur:1,ordem:0})),
       ...d.agendadas.map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
         prazo:c.prazo,url:c.url,volume:c.volume_m3,cor:c.cor,corFundo:c.cor_fundo,madeira:c.tipo_madeira,linha:LINHAS.indexOf(c.linha),
-        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,duracaoManual:!!c.duracao_manual,ordem:c.ordem||0})).filter(c=>c.linha>=0&&c.gs>=0)
+        gs:idxOf(c.dia_inicio),dur:c.duracao_dias,duracaoManual:!!c.duracao_manual,ordem:c.ordem||0,
+        atrasadoConfirmado:!!c.atrasado_confirmado})).filter(c=>c.linha>=0&&c.gs>=0)
     ];
     cardsLog=(d.logistica||[]).map(c=>({id:c.basecamp_card_id,titulo:c.titulo,coluna:c.coluna_basecamp,
       url:c.url,cor:c.cor,corFundo:c.cor_fundo,quemCarrega:c.quem_carrega,gs:idxOf(c.dia_carregamento)})).filter(c=>c.gs>=0);
