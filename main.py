@@ -13,9 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado,
-                guardar_agendamento_producao, guardar_cor_producao,
-                guardar_cor_fundo_producao, guardar_tipo_madeira_producao)
+                eliminar_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -479,35 +477,6 @@ def planeamento_ecos_largos_dados():
     cruzadas com o agendamento local — ver
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
-
-_RESTAURO_29_OFS = [{'id': 10282428673, 'titulo': 'Miguel OF500 — Regua 1200x82x16', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-07', 'duracao_dias': 1, 'volume_m3': 10.0, 'cor': None, 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285809411, 'titulo': 'Fepal — Quadradilho MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-15', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285419781, 'titulo': 'Intrepall of.426 — Regua -2245x70x15', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-11', 'duracao_dias': 1, 'volume_m3': 26.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10332427153, 'titulo': 'Intrepall of. 526 — Regua 1460x125x17', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-29', 'duracao_dias': 1, 'volume_m3': 26.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10310044052, 'titulo': 'Interpall - OF 546 — Regua 800x145x22', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-17', 'duracao_dias': 1, 'volume_m3': 30.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282391832, 'titulo': 'Miguel — Tabua 1000/2640x82x21  - OF 511', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-07', 'duracao_dias': 1, 'volume_m3': 6.0, 'cor': None, 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285424039, 'titulo': 'Intrepall of.466 — Regua -1460x100x16', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-15', 'duracao_dias': 1, 'volume_m3': 26.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282664108, 'titulo': 'Testex — 2600 IN', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-11', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_escuro', 'cor_fundo': 'verde_medio', 'tipo_madeira': 'seca'}, {'id': 10285813932, 'titulo': 'Serraenvas — Quadradilho IN', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-16', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_escuro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285822257, 'titulo': 'Green Box IN of.539— Barra', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-21', 'duracao_dias': 1, 'volume_m3': 30.0, 'cor': 'azul_escuro', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10285801143, 'titulo': 'Green Box IN of.528— Barra', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-14', 'duracao_dias': 1, 'volume_m3': 30.0, 'cor': 'azul_escuro', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10285811515, 'titulo': 'Madervilla of 507 — Tabua 2240/720x70x15', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-15', 'duracao_dias': 1, 'volume_m3': 28.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282435772, 'titulo': 'Miguel OF497 — Regua 1200x82x21', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-07', 'duracao_dias': 1, 'volume_m3': 26.0, 'cor': None, 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10313349184, 'titulo': 'Interpall OF 512 — Regua 800x100x16', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-21', 'duracao_dias': 1, 'volume_m3': 28.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282659648, 'titulo': 'Serraenvas — Quadradilho MT', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-10', 'duracao_dias': 2, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285819207, 'titulo': 'Maderas Sol OF 496 — Tabua 910/870x90x18', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-17', 'duracao_dias': 1, 'volume_m3': 29.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282515019, 'titulo': 'Fepal — Quadradilho MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-09', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285410381, 'titulo': 'Intrepall of.469 — Regua -745x125x17', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-09', 'duracao_dias': 1, 'volume_m3': 26.0, 'cor': 'vermelho_medio', 'cor_fundo': 'verde_escuro', 'tipo_madeira': 'verde'}, {'id': 10282591694, 'titulo': 'Maderas Sol OF 495 — Regua 1300x80x14', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-10', 'duracao_dias': 1, 'volume_m3': 29.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282365266, 'titulo': 'Montemayor — 2600 MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-07', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285824596, 'titulo': 'Palcax OF 509 — Regua 1400/1100x84x15', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-10-01', 'duracao_dias': 1, 'volume_m3': 42.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10285641701, 'titulo': 'Moreira of 521 — Barrote-2500x90x90', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-17', 'duracao_dias': 1, 'volume_m3': 10.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282584937, 'titulo': 'Girona — 2600 MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-08', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10282475371, 'titulo': 'Girona — 2600 MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-10', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285457913, 'titulo': 'Interpall Of-515 — Regua -1460x125x17', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-23', 'duracao_dias': 2, 'volume_m3': 26.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}, {'id': 10282500590, 'titulo': 'Evertis — wip', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-08', 'duracao_dias': 1, 'volume_m3': 35.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285815919, 'titulo': 'Fenollosa OF 529 — Regua 3000x70x36', 'linha': 'Linha 2 Reguas/Barrotes', 'dia_inicio': '2026-09-16', 'duracao_dias': 1, 'volume_m3': 37.0, 'cor': None, 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10282668405, 'titulo': 'Girona — 2600 MT', 'linha': 'Linha 1 - Quad', 'dia_inicio': '2026-09-14', 'duracao_dias': 1, 'volume_m3': 43.0, 'cor': 'azul_claro', 'cor_fundo': None, 'tipo_madeira': 'seca'}, {'id': 10285632377, 'titulo': 'Moreira of 520 — Regua-2500x145x23//33', 'linha': 'Linha 3 Bartly', 'dia_inicio': '2026-09-16', 'duracao_dias': 1, 'volume_m3': 33.0, 'cor': 'vermelho_medio', 'cor_fundo': None, 'tipo_madeira': 'verde'}]
-
-@app.post("/planeamento-ecos-largos/_restaurar-apagados")
-def planeamento_ecos_largos_restaurar_apagados():
-    """TEMPORÁRIO (Rui, 2026-10-01): repõe as 29 OFs confirmadas como
-    apagadas pelo bug crítico do commit anterior (obter_card a tratar uma
-    falha transitória do Basecamp como "card apagado"). Os valores exatos
-    (linha, dia de início, duração, volume, cor, cor de fundo, tipo de
-    madeira) vêm de uma leitura real de /dados feita hoje às 14:46, ANTES
-    do bug ter apagado estas linhas — a última confirmação conhecida de
-    como estavam. Recria também o duplicado de logística de cada uma
-    (mesmo cálculo de sempre, a partir dos dados repostos). Remover assim
-    que corrido uma vez."""
-    repostos = []
-    for of in _RESTAURO_29_OFS:
-        guardar_agendamento_producao(of["id"], of["linha"], of["dia_inicio"],
-                                     of["duracao_dias"], of["volume_m3"], duracao_manual=True)
-        if of["cor"]:
-            guardar_cor_producao(of["id"], of["cor"])
-        if of["cor_fundo"]:
-            guardar_cor_fundo_producao(of["id"], of["cor_fundo"])
-        if of["tipo_madeira"]:
-            guardar_tipo_madeira_producao(of["id"], of["tipo_madeira"])
-            planeamento_serracao._talvez_duplicar_logistica(
-                of["id"], of["dia_inicio"], of["duracao_dias"], of["tipo_madeira"])
-        repostos.append({"id": of["id"], "titulo": of["titulo"]})
-    planeamento_serracao._invalidar_cache_cards_ativos()
-    return {"repostos": len(repostos), "ofs": repostos}
 
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
