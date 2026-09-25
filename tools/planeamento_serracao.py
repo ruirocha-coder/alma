@@ -1134,13 +1134,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   /* modo só consulta (pedido explícito do Rui, 2026-09-29): a página abre
      sempre assim, sem nenhum controlo de edição visível — só o botão
-     "Editar" liga tudo isto de novo. Esconder por CSS não basta sozinho
-     (ver os "if(!modoEdicao)return" nos handlers de arrastar e de abrir a
-     ficha) mas garante que nada disto aparece clicável por engano. */
+     "Editar" liga tudo isto de novo. Continua a ser possível clicar num
+     card para abrir a ficha e ver a informação (pedido explícito do Rui,
+     2026-09-25) — só que aí todos os campos ficam desativados e os
+     botões de guardar/apagar/duplicar não aparecem (ver o parâmetro
+     "somenteLeitura" de openSheet/openSheetLogistica). Esconder por CSS
+     não basta sozinho (ver os "if(!modoEdicao)return" nos handlers de
+     arrastar) mas garante que nada disto aparece clicável por engano. */
   body.viewonly .editBtn,body.viewonly #novo,body.viewonly #undo,
   body.viewonly #painelCoresEstado{display:none}
   body.viewonly .lbl{pointer-events:none}
-  body.viewonly .blk,body.viewonly .qcard{cursor:default}
+  body.viewonly .blk,body.viewonly .qcard{cursor:pointer}
 
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
@@ -1977,74 +1981,85 @@ async function moverLogisticaServidor(c){
 }
 
 /* ---------- ficha ---------- */
-/* um clique simples num card (fila, produção ou logística) só destaca-o a
-   ele e ao seu par na outra tabela — a edição fica no botão "✎" de cada
-   card (pedido explícito do Rui, 2026-09). */
+/* em modo de edição, um clique simples num card (fila, produção ou
+   logística) só destaca-o a ele e ao seu par na outra tabela — a edição
+   fica no botão "✎" de cada card (pedido explícito do Rui, 2026-09). Em
+   modo só consulta, onde o "✎" nem aparece, o mesmo clique simples abre
+   a ficha na mesma (para ver a informação), mas em somenteLeitura — sem
+   nenhum campo editável nem botão de guardar/apagar/duplicar (pedido
+   explícito do Rui, 2026-09-25). */
 $("#lanes").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
-  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"producao");
+  const b=e.target.closest(".blk"); if(!b) return;
+  if(modoEdicao) selecionar(+b.dataset.id,"producao"); else openSheet(+b.dataset.id,true);
 });
 $("#fila").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
-  const q=e.target.closest(".qcard"); if(q) selecionar(+q.dataset.id,"fila");
+  const q=e.target.closest(".qcard"); if(!q) return;
+  if(modoEdicao) selecionar(+q.dataset.id,"fila"); else openSheet(+q.dataset.id,true);
 });
 $("#lanesLog").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
-  const b=e.target.closest(".blk"); if(b) selecionar(+b.dataset.id,"logistica");
+  const b=e.target.closest(".blk"); if(!b) return;
+  if(modoEdicao) selecionar(+b.dataset.id,"logistica"); else openSheetLogistica(+b.dataset.id,true);
 });
-function openSheet(id){
+function openSheet(id,somenteLeitura){
+  somenteLeitura=!!somenteLeitura;
+  const dis=somenteLeitura?"disabled":"";
   const c=card(id);
   const agendado = c.linha!==null && c.gs!==null;
   let corpo = `
-    <div class="frow"><label>Linha</label><select id="fLinha">
+    <div class="frow"><label>Linha</label><select id="fLinha" ${dis}>
       <option value="-1" selected>— Por agendar (fila) —</option>
       ${LINHAS.map((n,i)=>`<option value="${i}">${n}</option>`).join("")}</select></div>
-    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${c.prazo||hojeISO}"></div>
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${c.prazo||hojeISO}" ${dis}></div>
     <div class="owner">Escolhe uma linha e um dia de início para agendar esta encomenda — ao guardar, aparece logo nesse dia no quadro, e esse dia substitui o "Due on" no Basecamp (ver Prazo abaixo). O card no Basecamp continua em Triagem até seres tu a movê-lo lá.</div>`;
   if(agendado){
     const s=MASTER[c.gs], f=MASTER[clamp(c.gs+c.dur-1,0,MASTER.length-1)];
     corpo = `
-    <div class="frow"><label>Linha</label><select id="fLinha">${LINHAS.map((n,i)=>
+    <div class="frow"><label>Linha</label><select id="fLinha" ${dis}>${LINHAS.map((n,i)=>
       `<option value="${i}"${i===c.linha?" selected":""}>${n}</option>`).join("")}
       <option value="-1">— Devolver à fila (Triagem) —</option></select></div>
-    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}" data-original="${s.iso}"></div>
-    <div class="frow"><label>Fim</label><input id="fFim" type="date" value="${f.iso}" data-original="${f.iso}"></div>
+    <div class="frow"><label>Início</label><input id="fInicio" type="date" value="${s.iso}" data-original="${s.iso}" ${dis}></div>
+    <div class="frow"><label>Fim</label><input id="fFim" type="date" value="${f.iso}" data-original="${f.iso}" ${dis}></div>
     <div class="owner">${c.duracaoManual
       ? "O fim desta OF foi definido à mão — deixou de ser recalculado automaticamente. Muda a linha, o início ou o volume para voltar ao cálculo automático."
       : `Duração calculada: ${c.dur} dias. Mudar o fim aqui passa a ser uma escolha manual — deixa de ser recalculado automaticamente.`}</div>`;
   }
   $("#sheet").innerHTML=`
     <div class="of mono">card #${numCurto(c.id)}</div>
-    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
+    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}" ${dis}></div>
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
-    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30"></div>
-    <div class="frow"><label>Madeira</label><select id="fMad">
+    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30" ${dis}></div>
+    <div class="frow"><label>Madeira</label><select id="fMad" ${dis}>
       <option value="">Não especificado</option>
       <option value="seca"${c.madeira==="seca"?" selected":""}>Seca</option>
       <option value="verde"${c.madeira==="verde"?" selected":""}>Verde</option>
     </select></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral (tipo de produto)</label>
     <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
-      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
-      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <div class="owner">A linha, o início, a duração, o volume e a madeira vivem só aqui — o Basecamp não tem onde os guardar. A duração é sempre calculada a partir do volume e da capacidade da linha. A barra lateral é a cor do tipo de produto; o fundo é automático por estado (amarelo em Produzido, laranja em Em Produção, roxo em Vendido) a não ser que escolhas uma cor de fundo aqui — nesse caso essa cor sobrepõe-se à automática. Mudar isto aqui não altera nada no Basecamp.</div>
+    ${somenteLeitura?"":`
     <div class="acts">
       <button class="btn" id="duplicar">Duplicar</button>
-      ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
       <button class="btn warn" id="apagar">Apagar encomenda</button>
-    </div>
+    </div>`}
     <div class="acts">
-      <button class="btn primary" id="guardarTudo">Guardar tudo</button>
+      ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
+      ${somenteLeitura?"":`<button class="btn primary" id="guardarTudo">Guardar tudo</button>`}
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  if(somenteLeitura) return;
   $("#coresBarra").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
       const cor=sw.dataset.cor;
@@ -2248,37 +2263,41 @@ function openSheet(id){
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
 
 /* ---------- ficha de logística ---------- */
-function openSheetLogistica(id){
+function openSheetLogistica(id,somenteLeitura){
+  somenteLeitura=!!somenteLeitura;
+  const dis=somenteLeitura?"disabled":"";
   const c=cardLog(id);
   const d=MASTER[c.gs];
   $("#sheet").innerHTML=`
     <div class="of mono">card #${numCurto(c.id)} · logística</div>
-    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}"></div>
-    <div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>
+    <div class="frow"><label>Nome</label><input id="fTitulo" type="text" value="${String(c.titulo).replace(/"/g,"&quot;")}" ${dis}></div>
+    ${somenteLeitura?"":`<div class="acts"><button class="btn" id="guardarTitulo">Guardar nome</button></div>`}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Dia de carregamento</label>
-    <div class="frow"><input id="logDia" type="date" value="${d.iso}"><button class="btn" id="guardarDia">Guardar</button></div>
+    <div class="frow"><input id="logDia" type="date" value="${d.iso}" ${dis}>${somenteLeitura?"":`<button class="btn" id="guardarDia">Guardar</button>`}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Quem carrega</label>
-    <div class="frow"><input id="logQuem" placeholder="Ex: João" value="${c.quemCarrega?String(c.quemCarrega).replace(/"/g,"&quot;"):""}"><button class="btn" id="guardarQuem">Guardar</button></div>
+    <div class="frow"><input id="logQuem" placeholder="Ex: João" value="${c.quemCarrega?String(c.quemCarrega).replace(/"/g,"&quot;"):""}" ${dis}>${somenteLeitura?"":`<button class="btn" id="guardarQuem">Guardar</button>`}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral</label>
     <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
-      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+      `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
-      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}"
+      `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
         style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp. As duas cores são exceção: são da OF, uma só, por isso mudam também no card de produção.</div>
+    ${somenteLeitura?"":`
+    <div class="acts">
+      <button class="btn warn" id="apagarLog">Apagar duplicado</button>
+    </div>`}
     <div class="acts">
       ${c.url?`<a class="btn" id="bcOpen" target="_blank" rel="noopener" href="${c.url}">Abrir card no Basecamp</a>`:""}
-      <button class="btn warn" id="apagarLog">Apagar duplicado</button>
-    </div>
-    <div class="acts">
-      <button class="btn primary" id="guardarTudoLog">Guardar tudo</button>
+      ${somenteLeitura?"":`<button class="btn primary" id="guardarTudoLog">Guardar tudo</button>`}
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  if(somenteLeitura) return;
   $("#guardarTitulo").onclick=async()=>{
     const titulo=$("#fTitulo").value.trim();
     if(!titulo){ alert("O nome não pode ficar vazio."); return; }
