@@ -2085,56 +2085,51 @@ async function moverLogisticaServidor(c){
 }
 
 /* ---------- ficha ---------- */
-/* em modo de edição, um clique simples num card (fila, produção ou
-   logística) só destaca-o a ele e ao seu par na outra tabela — a edição
-   fica no botão "✎" de cada card (pedido explícito do Rui, 2026-09). Em
-   modo só consulta, onde o "✎" nem aparece, o mesmo clique simples abre
-   a ficha na mesma (para ver a informação), mas em somenteLeitura — sem
-   nenhum campo editável nem botão de guardar/apagar/duplicar (pedido
-   explícito do Rui, 2026-09-25).
+/* um clique simples num card (fila, produção ou logística) só destaca-o
+   a ele e ao seu par na outra tabela (ver selecionar) — isto vale nos
+   dois modos (pedido explícito do Rui, 2026-10-01: repor exatamente o
+   comportamento de antes, também no modo só consulta). Para ver a
+   informação: em modo de edição continua a ser o botão "✎" de cada card;
+   em modo só consulta, onde o "✎" nem aparece, é um DUPLO clique (ou
+   duplo toque, em telemóvel/tablet — evento nativo "dblclick", que os
+   browsers já sabem gerar a partir de dois toques rápidos) que abre a
+   ficha, em somenteLeitura — sem nenhum campo editável nem botão de
+   guardar/apagar/duplicar.
 
-   Isto tirou ao modo só consulta o alinhamento com a tabela de logística
-   (ver selecionar), que antes acontecia com o próprio clique simples —
-   pedido explícito do Rui (2026-10-01): repor esse alinhamento em modo só
-   consulta, mas a exigir um DUPLO clique (o clique simples continua a
-   abrir a ficha). Não se usa o evento nativo "dblclick" porque em
-   telemóvel/tablet um duplo toque nem sempre o dispara de forma fiável
-   (em muitos browsers móveis um duplo toque rápido só gera dois "click"
-   seguidos) — deteta-se manualmente pelo intervalo entre dois cliques no
-   mesmo card, o que funciona igual com rato ou toque. O clique simples só
-   corre depois de um pequeno atraso, para dar tempo a saber se vem um
-   segundo clique a seguir (senão o duplo clique abriria sempre a ficha
-   duas vezes antes de alinhar). */
-let ultimoCliqueChave=null, temporizadorClique=null;
-function cliqueSimplesOuDuplo(chave, acaoSimples, acaoDupla){
-  if(temporizadorClique && ultimoCliqueChave===chave){
-    clearTimeout(temporizadorClique); temporizadorClique=null; ultimoCliqueChave=null;
-    acaoDupla();
-    return;
-  }
-  ultimoCliqueChave=chave;
-  temporizadorClique=setTimeout(()=>{ temporizadorClique=null; ultimoCliqueChave=null; acaoSimples(); }, 300);
-}
+   (Tentativas anteriores neste mesmo pedido — trocar o simples/duplo
+   clique entre si, ou usar pressão longa — foram abandonadas a pedido do
+   Rui: o simples clique tem de continuar a alinhar, tal como sempre foi,
+   e o duplo clique passa a ser só um extra para abrir a ficha em modo só
+   consulta, sem interferir nem atrasar o alinhamento.) */
 $("#lanes").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const b=e.target.closest(".blk"); if(!b) return;
-  const id=+b.dataset.id;
-  if(modoEdicao) selecionar(id,"producao");
-  else cliqueSimplesOuDuplo(`producao:${id}`, ()=>openSheet(id,true), ()=>selecionar(id,"producao"));
+  selecionar(+b.dataset.id,"producao");
+});
+$("#lanes").addEventListener("dblclick",e=>{
+  if(modoEdicao) return; // em edição a ficha abre-se pelo botão "✎"
+  const b=e.target.closest(".blk"); if(!b) return;
+  openSheet(+b.dataset.id,true);
 });
 $("#fila").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const q=e.target.closest(".qcard"); if(!q) return;
-  const id=+q.dataset.id;
-  if(modoEdicao) selecionar(id,"fila");
-  else cliqueSimplesOuDuplo(`fila:${id}`, ()=>openSheet(id,true), ()=>selecionar(id,"fila"));
+  selecionar(+q.dataset.id,"fila");
+});
+$("#fila").addEventListener("dblclick",e=>{
+  if(modoEdicao) return;
+  const q=e.target.closest(".qcard"); if(!q) return;
+  openSheet(+q.dataset.id,true);
 });
 $("#lanesLog").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
   const b=e.target.closest(".blk"); if(!b) return;
-  const id=+b.dataset.id;
-  if(modoEdicao) selecionar(id,"logistica");
-  else cliqueSimplesOuDuplo(`logistica:${id}`, ()=>openSheetLogistica(id,true), ()=>selecionar(id,"logistica"));
+  selecionar(+b.dataset.id,"logistica");
+});
+$("#lanesLog").addEventListener("dblclick",e=>{
+  if(modoEdicao) return;
+  const b=e.target.closest(".blk"); if(!b) return;
+  openSheetLogistica(+b.dataset.id,true);
 });
 function openSheet(id,somenteLeitura){
   somenteLeitura=!!somenteLeitura;
