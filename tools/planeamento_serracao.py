@@ -245,7 +245,7 @@ def estado_planeamento_serracao() -> dict:
             bolsa.append(info)
     if pendentes_verificacao:
         datas_entrada = basecamp.datas_entrada_em_coluna(
-            [card_id for card_id, _ in pendentes_verificacao], "Em Produção"
+            [card_id for card_id, _ in pendentes_verificacao], "Em Produção", projeto=PROJETO
         )
         info_por_id = {info["basecamp_card_id"]: info for info in agendadas}
         for card_id, dia_inicio in pendentes_verificacao:

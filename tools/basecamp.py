@@ -675,61 +675,82 @@ def ler_eventos(item_id: int) -> list[dict]:
         })
     return resultado
 
-def data_entrada_em_coluna(item_id: int, coluna: str) -> str:
+TTL_MAPA_COLUNAS = 900  # mesmo TTL de _card_tables_ativos — as colunas de um quadro mudam tão pouco quanto o quadro em si
+
+def mapa_colunas_card_table(projeto: str) -> dict:
+    """{id da lista: título da coluna} de TODOS os card tables ativos de um
+    projeto (ex: "Ecos Largos", que tem dois: o das OFs e o de alocação de
+    pessoal) — para traduzir o new_parent_id/parent_id_was de um evento
+    "adopted" (ver data_entrada_em_coluna) num nome de coluna real.
+    Confirmado ao vivo (Rui, 2026-09-25): cada `lista` de detalhe.get("lists")
+    tem "id" e "title" diretos."""
+    chave = f"mapa_colunas:{_normalizar(projeto)}"
+    if chave in _cache:
+        ts, mapa = _cache[chave]
+        if time.time() - ts < TTL_MAPA_COLUNAS:
+            return mapa
+    projeto_normalizado = _normalizar(projeto)
+    tabelas = [t for t in _card_tables_ativos()
+               if _normalizar((t.get("bucket") or {}).get("name") or "") == projeto_normalizado]
+    mapa = {}
+    for tabela in tabelas:
+        r = httpx.get(tabela["url"], headers=_headers(), timeout=30)
+        r.raise_for_status()
+        for lista in r.json().get("lists", []):
+            if lista.get("id"):
+                mapa[lista["id"]] = lista.get("title")
+    _cache[chave] = (time.time(), mapa)
+    return mapa
+
+def data_entrada_em_coluna(item_id: int, coluna: str, projeto: str) -> str:
     """Data (YYYY-MM-DD) em que um card entrou pela ÚLTIMA vez numa
     coluna/lista específica (ex: "Em Produção"), lendo o histórico real
-    de eventos do Basecamp (mesmo endpoint de ler_eventos, mas sem
-    perder o detalhe de para onde o card foi — ler_eventos só guarda uma
-    etiqueta genérica). Usado para saber se uma OF começou a ser
+    de eventos do Basecamp. Usado para saber se uma OF começou a ser
     produzida no dia certo mesmo depois de já ter avançado para colunas
     seguintes, quando a coluna atual sozinha já não chega para saber
     isso (ver tools.planeamento_serracao.estado_planeamento_serracao —
-    pedido explícito do Rui, 2026-09-25, exemplo real: "Girona").
-    Devolve None se não encontrar nenhum evento de mudança para essa
-    coluna, ou se não conseguir ler os eventos.
+    pedido explícito do Rui, 2026-09-25, exemplo real: "Girona"). Devolve
+    None se não encontrar nenhum evento de entrada nessa coluna (inclui o
+    caso de a OF ter saltado essa coluna por completo, ex: Triagem direto
+    para Produzido), ou se não conseguir ler os eventos.
 
-    AVISO: o formato exato de como um evento "moved" identifica a coluna
-    de destino nunca foi confirmado ao vivo contra a API real — tenta
-    várias formas plausíveis (campos estruturados comuns da API do
-    Basecamp, e por último uma pesquisa do nome da coluna no resumo em
-    texto do evento, se existir) antes de desistir. Nunca inventa uma
-    data: se não conseguir identificar a coluna de destino com confiança
-    nalgum evento, esse evento é ignorado (mesmo que seja mesmo uma
-    mudança de coluna) — testar contra um card real (ex: o Girona, que
-    devia mostrar aqui a entrada em "Em Produção") antes de confiar
-    cegamente nisto."""
+    Confirmado ao vivo (Rui, 2026-09-25, contra o card table real do Ecos
+    Largos): ao contrário do que se assumiu inicialmente, mudar de coluna
+    num card table NÃO gera um evento "moved" — gera um evento "adopted",
+    com details.new_parent_id/details.parent_id_was a apontar para o id
+    da lista de destino/origem (não o título) — daí ser preciso
+    mapa_colunas_card_table para traduzir esse id."""
     try:
         eventos = _get_paginado(f"{_base_url()}/recordings/{item_id}/events.json")
     except httpx.HTTPError as e:
         print(f"[basecamp] não consegui ler eventos de {item_id} para achar entrada em {coluna!r}: {e!r}")
         return None
+    mapa = mapa_colunas_card_table(projeto)
     alvo = _normalizar(coluna)
     ultima_data = None
     for e in eventos:
-        if (e.get("action") or "") != "moved":
+        if (e.get("action") or "") != "adopted":
             continue
         detalhes = e.get("details") or {}
-        destino = (detalhes.get("card_table_column_title") or detalhes.get("column_title")
-                   or detalhes.get("to_title") or detalhes.get("title"))
-        if not destino:
-            texto = e.get("excerpt") or e.get("summary") or ""
-            if texto and alvo in _normalizar(texto):
-                destino = coluna
+        destino = mapa.get(detalhes.get("new_parent_id"))
         if destino and _normalizar(destino) == alvo and e.get("created_at"):
             ultima_data = e["created_at"]
     return ultima_data[:10] if ultima_data else None
 
-def datas_entrada_em_coluna(item_ids, coluna: str) -> dict:
+def datas_entrada_em_coluna(item_ids, coluna: str, projeto: str) -> dict:
     """Versão em paralelo de data_entrada_em_coluna para vários cards de
     uma vez (mesmo padrão de obter_cards) — usado para verificar em lote
     todas as OFs ainda por confirmar (ver
     tools.planeamento_serracao.estado_planeamento_serracao). Devolve
-    {item_id: "YYYY-MM-DD" | None}."""
+    {item_id: "YYYY-MM-DD" | None}. Chama mapa_colunas_card_table uma vez
+    antes de paralelizar, para todas as threads partilharem a mesma
+    consulta cacheada em vez de cada uma ir buscar o mapa de colunas."""
     item_ids = list(item_ids)
     if not item_ids:
         return {}
+    mapa_colunas_card_table(projeto)  # aquece a cache partilhada antes de paralelizar
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(item_ids)) as executor:
-        resultados = executor.map(lambda iid: data_entrada_em_coluna(iid, coluna), item_ids)
+        resultados = executor.map(lambda iid: data_entrada_em_coluna(iid, coluna, projeto), item_ids)
     return dict(zip(item_ids, resultados))
 
 def ordenar_por_data(*listas: list[dict]) -> list[dict]:

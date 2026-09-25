@@ -13,7 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado)
+                eliminar_documento_gerado, get_conn)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -478,37 +478,29 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
-@app.get("/planeamento-ecos-largos/_debug-eventos/{card_id}")
-def planeamento_ecos_largos_debug_eventos(card_id: int):
-    """TEMPORÁRIO (Rui, 2026-09-25): dump dos eventos "moved" em bruto de um
-    card, para confirmar contra a API real o formato de
-    basecamp.data_entrada_em_coluna antes de confiar cegamente na deteção
-    de atraso pós-avanço (ver AVISO no docstring dessa função). Remover
-    assim que confirmado."""
-    eventos = basecamp._get_paginado(f"{basecamp._base_url()}/recordings/{card_id}/events.json")
-    return eventos
-
-@app.get("/planeamento-ecos-largos/_debug-colunas")
-def planeamento_ecos_largos_debug_colunas():
-    """TEMPORÁRIO (Rui, 2026-09-25): id + title de cada coluna (lista) do
-    card table do Ecos Largos — para mapear new_parent_id/parent_id_was
-    dos eventos "adopted" (a forma real como o Basecamp regista mudança de
-    coluna, descoberta ao vivo — não é "moved" como se assumiu
-    inicialmente) ao nome da coluna de destino. Remover assim que
-    confirmado."""
-    import httpx as _httpx
-    tabelas = [t for t in basecamp._card_tables_ativos()
-               if basecamp._normalizar((t.get("bucket") or {}).get("name") or "") == basecamp._normalizar(planeamento_serracao.PROJETO)]
-    resultado = []
-    for tabela in tabelas:
-        r = _httpx.get(tabela["url"], headers=basecamp._headers(), timeout=30)
-        r.raise_for_status()
-        detalhe = r.json()
-        resultado.append({
-            "card_table_title": detalhe.get("title"),
-            "listas": [{"id": l.get("id"), "title": l.get("title")} for l in detalhe.get("lists", [])],
-        })
-    return resultado
+@app.post("/planeamento-ecos-largos/_corrigir-inicio-verificado")
+def planeamento_ecos_largos_corrigir_inicio_verificado():
+    """TEMPORÁRIO (Rui, 2026-09-25): a 1ª verificação de início-a-tempo
+    (ver estado_planeamento_serracao) correu com o parsing errado dos
+    eventos do Basecamp — assumia um evento "moved" com o título da
+    coluna, mas confirmado ao vivo que a API regista mudança de coluna
+    como "adopted" com o id da lista, não o título (ver
+    basecamp.data_entrada_em_coluna). Isso fechou várias OFs como
+    "inconclusivo → a tempo" sem prova nenhuma. Reabre para nova
+    verificação, já com o parsing corrigido, todas as OFs marcadas
+    inicio_verificado mas não atrasado_confirmado. Remover assim que
+    corrido uma vez (a próxima leitura de /dados já as reavalia
+    sozinha)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE planeamento_producao_ecos_largos
+                   SET inicio_verificado = FALSE
+                   WHERE inicio_verificado = TRUE AND atrasado_confirmado = FALSE"""
+            )
+            n = cur.rowcount
+        conn.commit()
+    return {"linhas_reabertas": n}
 
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
