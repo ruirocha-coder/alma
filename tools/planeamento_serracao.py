@@ -279,17 +279,27 @@ def estado_planeamento_serracao() -> dict:
             # aparecer sozinho se for agendada outra vez (pedido explícito
             # do Rui, 2026-09).
             continue
-        if _normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO:
-            # a OF voltou para Triagem/Programação no Basecamp (standby),
-            # mesmo continuando "agendada" aqui (linha/dia guardados de
-            # antes) — pedido explícito do Rui (2026-10-01): esconder da
-            # logística enquanto estiver em standby, tal como já acontece
-            # quando é devolvida à fila. Nada é apagado: o duplicado de
-            # logística (e o agendamento) continuam guardados, por isso
-            # assim que a OF for reagendada outra vez (agendar(), que já
-            # recalcula o dia de carregamento a partir do novo dia de
-            # início — ver _talvez_duplicar_logistica) volta a aparecer
-            # aqui com o dia certo, sem precisar de mais nenhuma ação.
+        if (_normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO
+                and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
+            # BUG (Rui, 2026-10-01): a 1ª versão desta regra escondia
+            # QUALQUER OF ainda em Triagem/Programação — mas isso é o
+            # estado normal de uma OF agendada para os próximos dias/
+            # semanas (só passa a "Em Produção" no Basecamp quando a
+            # produção arranca de facto, não no momento em que é
+            # agendada aqui) — escondia da logística o planeamento
+            # futuro normal, que é o objetivo principal da ferramenta.
+            #
+            # A OF só está mesmo "em standby" (o caso que motivou este
+            # pedido: voltou para trás depois de já ter avançado) quando
+            # já devia ter começado a produção (dia_inicio no passado) e
+            # continua sem lá chegar — o mesmo critério já usado para a
+            # marcar "atrasada" (ver COLUNAS_ANTES_DA_PRODUCAO acima).
+            # Nesse caso, o dia de carregamento calculado a partir do
+            # início antigo já não faz sentido nenhum (a produção nem
+            # começou) — esconde-se até ser reagendada com um novo dia de
+            # início (agendar(), que recalcula tudo via
+            # _talvez_duplicar_logistica). Uma OF agendada para o futuro,
+            # ainda dentro do prazo, continua visível como sempre.
             continue
         logistica.append({
             "basecamp_card_id": lg["basecamp_card_id"],
