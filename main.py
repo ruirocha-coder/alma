@@ -488,6 +488,28 @@ def planeamento_ecos_largos_debug_eventos(card_id: int):
     eventos = basecamp._get_paginado(f"{basecamp._base_url()}/recordings/{card_id}/events.json")
     return eventos
 
+@app.get("/planeamento-ecos-largos/_debug-colunas")
+def planeamento_ecos_largos_debug_colunas():
+    """TEMPORÁRIO (Rui, 2026-09-25): id + title de cada coluna (lista) do
+    card table do Ecos Largos — para mapear new_parent_id/parent_id_was
+    dos eventos "adopted" (a forma real como o Basecamp regista mudança de
+    coluna, descoberta ao vivo — não é "moved" como se assumiu
+    inicialmente) ao nome da coluna de destino. Remover assim que
+    confirmado."""
+    import httpx as _httpx
+    tabelas = [t for t in basecamp._card_tables_ativos()
+               if basecamp._normalizar((t.get("bucket") or {}).get("name") or "") == basecamp._normalizar(planeamento_serracao.PROJETO)]
+    resultado = []
+    for tabela in tabelas:
+        r = _httpx.get(tabela["url"], headers=basecamp._headers(), timeout=30)
+        r.raise_for_status()
+        detalhe = r.json()
+        resultado.append({
+            "card_table_title": detalhe.get("title"),
+            "listas": [{"id": l.get("id"), "title": l.get("title")} for l in detalhe.get("lists", [])],
+        })
+    return resultado
+
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
 # precisar de refresh. Um único processo uvicorn (sem --workers, ver
