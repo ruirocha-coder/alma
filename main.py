@@ -13,7 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado)
+                eliminar_documento_gerado, agendamentos_producao_ecos_largos)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -477,6 +477,26 @@ def planeamento_ecos_largos_dados():
     cruzadas com o agendamento local — ver
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
+
+@app.get("/planeamento-ecos-largos/_diagnostico-vendido")
+def planeamento_ecos_largos_diagnostico_vendido():
+    """TEMPORÁRIO (Rui, 2026-10-01): investigação do bug crítico corrigido
+    no commit anterior (obter_card a tratar falhas transitórias como
+    "apagado") — lista os cards da coluna "Vendido" do Ecos Largos que têm
+    um "Due on" definido no Basecamp (sinal de que passaram pelo nosso
+    agendamento, já que é isto que agendar() escreve lá) mas que já NÃO
+    têm nenhuma linha correspondente em planeamento_producao_ecos_largos
+    — candidatos a terem sido apagados por engano por esse bug. Ordenado
+    por "Due on" mais recente primeiro. Remover assim que investigado."""
+    cards_vendido = basecamp.cards_de_card_table("", projeto=planeamento_serracao.PROJETO, colunas={"vendido"})
+    agendados_ids = {a["basecamp_card_id"] for a in agendamentos_producao_ecos_largos()}
+    candidatos = [
+        {"id": c["id"], "titulo": c["titulo"], "due_on": c["prazo"], "url": c["url"], "criado_em": c["criado_em"]}
+        for c in cards_vendido
+        if c.get("prazo") and c["id"] not in agendados_ids
+    ]
+    candidatos.sort(key=lambda c: c["due_on"], reverse=True)
+    return {"total_vendido": len(cards_vendido), "candidatos_apagados": candidatos}
 
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
