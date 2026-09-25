@@ -399,6 +399,15 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS duracao_ma
 -- produzida no dia certo (pedido explícito do Rui, 2026-09-25).
 ALTER TABLE planeamento_producao_ecos_largos DROP COLUMN IF EXISTS atrasado_confirmado;
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS atrasado_confirmado BOOLEAN NOT NULL DEFAULT FALSE;
+-- pedido explícito do Rui (2026-09-25), exemplo real: "Girona" já tinha
+-- avançado para "Em Produção" (e mais além) fora do dia estipulado, mas
+-- a verificação acima só apanha isso enquanto a OF ainda está em
+-- Triagem/Programação — uma vez avançada, deixa de haver como saber pela
+-- coluna atual sozinha. inicio_verificado marca que já se confirmou em
+-- definitivo (por aqui, ou consultando o histórico real de eventos do
+-- Basecamp — ver basecamp.data_entrada_em_coluna) se uma OF começou a
+-- tempo ou não; nunca se volta a verificar depois disso, atrasada ou não.
+ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS inicio_verificado BOOLEAN NOT NULL DEFAULT FALSE;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -852,7 +861,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual, atrasado_confirmado
+                """SELECT basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3, ordem, cor, cor_fundo, tipo_madeira, duracao_manual, atrasado_confirmado, inicio_verificado
                    FROM planeamento_producao_ecos_largos"""
             )
             return [{
@@ -867,6 +876,7 @@ def agendamentos_producao_ecos_largos() -> list[dict]:
                 "tipo_madeira": l["tipo_madeira"],
                 "duracao_manual": l["duracao_manual"],
                 "atrasado_confirmado": l["atrasado_confirmado"],
+                "inicio_verificado": l["inicio_verificado"],
             } for l in cur.fetchall()]
 
 def agendamento_producao(basecamp_card_id: int) -> dict:
@@ -1155,12 +1165,34 @@ def marcar_atrasado_confirmado(basecamp_card_id: int) -> None:
     em "Em Produção" no dia seguinte, já não foi produzida no dia certo
     — pedido explícito do Rui, 2026-09-25. Ao contrário da primeira
     tentativa (revertida no mesmo dia), isto NUNCA dispara para uma OF
-    já concluída no dia certo — só dispara enquanto ainda nem começou."""
+    já concluída no dia certo — só dispara enquanto ainda nem começou.
+    Marca também inicio_verificado = TRUE: uma vez confirmado o atraso
+    (seja pela verificação em Triagem/Programação, seja pelo histórico
+    real de eventos do Basecamp — ver basecamp.data_entrada_em_coluna),
+    o caso fica resolvido em definitivo e nunca mais é reavaliado."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """UPDATE planeamento_producao_ecos_largos
-                   SET atrasado_confirmado = TRUE, atualizado_em = now()
+                   SET atrasado_confirmado = TRUE, inicio_verificado = TRUE, atualizado_em = now()
+                   WHERE basecamp_card_id = %s""",
+                (basecamp_card_id,)
+            )
+        conn.commit()
+
+def marcar_inicio_a_tempo(basecamp_card_id: int) -> None:
+    """Marca uma OF como tendo entrado em produção a tempo (ou como caso
+    inconclusivo, sem histórico de eventos que prove o contrário) — fecha
+    em definitivo a verificação sem marcar atraso (atrasado_confirmado
+    fica no valor que já tinha, tipicamente FALSE). Usado depois de
+    consultar basecamp.data_entrada_em_coluna para uma OF que já avançou
+    para lá de Triagem/Programação sem nunca ter sido verificada (ver
+    tools.planeamento_serracao.estado_planeamento_serracao)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE planeamento_producao_ecos_largos
+                   SET inicio_verificado = TRUE, atualizado_em = now()
                    WHERE basecamp_card_id = %s""",
                 (basecamp_card_id,)
             )

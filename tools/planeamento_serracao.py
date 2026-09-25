@@ -182,6 +182,15 @@ def estado_planeamento_serracao() -> dict:
     cards_por_id = {c["id"]: c for c in cards_ativos}
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     bolsa, agendadas = [], []
+    # OFs que já avançaram para lá de Triagem/Programação e ainda nunca
+    # foram verificadas (nem confirmadas atrasadas, nem confirmadas a
+    # tempo) — a verificação ao vivo (Triagem/Programação já depois do dia
+    # de início) só as apanha enquanto ainda lá estão; uma vez avançadas,
+    # só o histórico real de eventos do Basecamp sabe dizer se entraram em
+    # "Em Produção" no dia certo (pedido explícito do Rui, 2026-09-25,
+    # exemplo real: "Girona", que já tinha avançado sem nunca ter sido
+    # apanhado pela verificação ao vivo).
+    pendentes_verificacao = []
     for c in cards_ativos:
         agendamento = agendamentos.get(c["id"])
         tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
@@ -220,15 +229,37 @@ def estado_planeamento_serracao() -> dict:
             # ser detetado nunca fica marcada — não é sobre o fim previsto
             # nem sobre quanto tempo a produção em si está a demorar.
             atrasado_confirmado = agendamento["atrasado_confirmado"]
+            ainda_antes_da_producao = _normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO
             if (not atrasado_confirmado
-                    and _normalizar(c.get("estado")) in COLUNAS_ANTES_DA_PRODUCAO
+                    and ainda_antes_da_producao
                     and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
                 db.marcar_atrasado_confirmado(c["id"])
                 atrasado_confirmado = True
+            elif (not atrasado_confirmado
+                    and not agendamento.get("inicio_verificado")
+                    and not ainda_antes_da_producao):
+                pendentes_verificacao.append((c["id"], agendamento["dia_inicio"]))
             info["atrasado_confirmado"] = atrasado_confirmado
             agendadas.append(info)
         else:
             bolsa.append(info)
+    if pendentes_verificacao:
+        datas_entrada = basecamp.datas_entrada_em_coluna(
+            [card_id for card_id, _ in pendentes_verificacao], "Em Produção"
+        )
+        info_por_id = {info["basecamp_card_id"]: info for info in agendadas}
+        for card_id, dia_inicio in pendentes_verificacao:
+            data_entrada = datas_entrada.get(card_id)
+            if data_entrada and data_entrada > dia_inicio:
+                db.marcar_atrasado_confirmado(card_id)
+                info_por_id[card_id]["atrasado_confirmado"] = True
+            else:
+                # sem prova de atraso (entrou a tempo, ou o histórico de
+                # eventos não deu para confirmar nada com confiança) —
+                # fecha o caso sem marcar atraso, para não voltar a
+                # consultar o Basecamp para esta OF (pedido explícito do
+                # Rui, 2026-09-25).
+                db.marcar_inicio_a_tempo(card_id)
     # encomendas mais recentes primeiro (pedido explícito do Rui, 2026-09)
     # — não por prazo, para uma encomenda nova (normalmente ainda sem
     # prazo definido) não ficar escondida ao fundo da fila.

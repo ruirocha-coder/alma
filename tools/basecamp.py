@@ -675,6 +675,63 @@ def ler_eventos(item_id: int) -> list[dict]:
         })
     return resultado
 
+def data_entrada_em_coluna(item_id: int, coluna: str) -> str:
+    """Data (YYYY-MM-DD) em que um card entrou pela ÚLTIMA vez numa
+    coluna/lista específica (ex: "Em Produção"), lendo o histórico real
+    de eventos do Basecamp (mesmo endpoint de ler_eventos, mas sem
+    perder o detalhe de para onde o card foi — ler_eventos só guarda uma
+    etiqueta genérica). Usado para saber se uma OF começou a ser
+    produzida no dia certo mesmo depois de já ter avançado para colunas
+    seguintes, quando a coluna atual sozinha já não chega para saber
+    isso (ver tools.planeamento_serracao.estado_planeamento_serracao —
+    pedido explícito do Rui, 2026-09-25, exemplo real: "Girona").
+    Devolve None se não encontrar nenhum evento de mudança para essa
+    coluna, ou se não conseguir ler os eventos.
+
+    AVISO: o formato exato de como um evento "moved" identifica a coluna
+    de destino nunca foi confirmado ao vivo contra a API real — tenta
+    várias formas plausíveis (campos estruturados comuns da API do
+    Basecamp, e por último uma pesquisa do nome da coluna no resumo em
+    texto do evento, se existir) antes de desistir. Nunca inventa uma
+    data: se não conseguir identificar a coluna de destino com confiança
+    nalgum evento, esse evento é ignorado (mesmo que seja mesmo uma
+    mudança de coluna) — testar contra um card real (ex: o Girona, que
+    devia mostrar aqui a entrada em "Em Produção") antes de confiar
+    cegamente nisto."""
+    try:
+        eventos = _get_paginado(f"{_base_url()}/recordings/{item_id}/events.json")
+    except httpx.HTTPError as e:
+        print(f"[basecamp] não consegui ler eventos de {item_id} para achar entrada em {coluna!r}: {e!r}")
+        return None
+    alvo = _normalizar(coluna)
+    ultima_data = None
+    for e in eventos:
+        if (e.get("action") or "") != "moved":
+            continue
+        detalhes = e.get("details") or {}
+        destino = (detalhes.get("card_table_column_title") or detalhes.get("column_title")
+                   or detalhes.get("to_title") or detalhes.get("title"))
+        if not destino:
+            texto = e.get("excerpt") or e.get("summary") or ""
+            if texto and alvo in _normalizar(texto):
+                destino = coluna
+        if destino and _normalizar(destino) == alvo and e.get("created_at"):
+            ultima_data = e["created_at"]
+    return ultima_data[:10] if ultima_data else None
+
+def datas_entrada_em_coluna(item_ids, coluna: str) -> dict:
+    """Versão em paralelo de data_entrada_em_coluna para vários cards de
+    uma vez (mesmo padrão de obter_cards) — usado para verificar em lote
+    todas as OFs ainda por confirmar (ver
+    tools.planeamento_serracao.estado_planeamento_serracao). Devolve
+    {item_id: "YYYY-MM-DD" | None}."""
+    item_ids = list(item_ids)
+    if not item_ids:
+        return {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(item_ids)) as executor:
+        resultados = executor.map(lambda iid: data_entrada_em_coluna(iid, coluna), item_ids)
+    return dict(zip(item_ids, resultados))
+
 def ordenar_por_data(*listas: list[dict]) -> list[dict]:
     """Junta várias listas de itens com histórico (comentários, eventos, ...)
     numa só, ordenada cronologicamente por 'criado_em' — para a Alma ver a
