@@ -2091,21 +2091,50 @@ async function moverLogisticaServidor(c){
    modo só consulta, onde o "✎" nem aparece, o mesmo clique simples abre
    a ficha na mesma (para ver a informação), mas em somenteLeitura — sem
    nenhum campo editável nem botão de guardar/apagar/duplicar (pedido
-   explícito do Rui, 2026-09-25). */
+   explícito do Rui, 2026-09-25).
+
+   Isto tirou ao modo só consulta o alinhamento com a tabela de logística
+   (ver selecionar), que antes acontecia com o próprio clique simples —
+   pedido explícito do Rui (2026-10-01): repor esse alinhamento em modo só
+   consulta, mas a exigir um DUPLO clique (o clique simples continua a
+   abrir a ficha). Não se usa o evento nativo "dblclick" porque em
+   telemóvel/tablet um duplo toque nem sempre o dispara de forma fiável
+   (em muitos browsers móveis um duplo toque rápido só gera dois "click"
+   seguidos) — deteta-se manualmente pelo intervalo entre dois cliques no
+   mesmo card, o que funciona igual com rato ou toque. O clique simples só
+   corre depois de um pequeno atraso, para dar tempo a saber se vem um
+   segundo clique a seguir (senão o duplo clique abriria sempre a ficha
+   duas vezes antes de alinhar). */
+let ultimoCliqueChave=null, temporizadorClique=null;
+function cliqueSimplesOuDuplo(chave, acaoSimples, acaoDupla){
+  if(temporizadorClique && ultimoCliqueChave===chave){
+    clearTimeout(temporizadorClique); temporizadorClique=null; ultimoCliqueChave=null;
+    acaoDupla();
+    return;
+  }
+  ultimoCliqueChave=chave;
+  temporizadorClique=setTimeout(()=>{ temporizadorClique=null; ultimoCliqueChave=null; acaoSimples(); }, 300);
+}
 $("#lanes").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const b=e.target.closest(".blk"); if(!b) return;
-  if(modoEdicao) selecionar(+b.dataset.id,"producao"); else openSheet(+b.dataset.id,true);
+  const id=+b.dataset.id;
+  if(modoEdicao) selecionar(id,"producao");
+  else cliqueSimplesOuDuplo(`producao:${id}`, ()=>openSheet(id,true), ()=>selecionar(id,"producao"));
 });
 $("#fila").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheet(+e.target.closest(".editBtn").dataset.edit); return; }
   const q=e.target.closest(".qcard"); if(!q) return;
-  if(modoEdicao) selecionar(+q.dataset.id,"fila"); else openSheet(+q.dataset.id,true);
+  const id=+q.dataset.id;
+  if(modoEdicao) selecionar(id,"fila");
+  else cliqueSimplesOuDuplo(`fila:${id}`, ()=>openSheet(id,true), ()=>selecionar(id,"fila"));
 });
 $("#lanesLog").addEventListener("click",e=>{
   if(e.target.closest(".editBtn")){ if(modoEdicao) openSheetLogistica(+e.target.closest(".editBtn").dataset.editlog); return; }
   const b=e.target.closest(".blk"); if(!b) return;
-  if(modoEdicao) selecionar(+b.dataset.id,"logistica"); else openSheetLogistica(+b.dataset.id,true);
+  const id=+b.dataset.id;
+  if(modoEdicao) selecionar(id,"logistica");
+  else cliqueSimplesOuDuplo(`logistica:${id}`, ()=>openSheetLogistica(id,true), ()=>selecionar(id,"logistica"));
 });
 function openSheet(id,somenteLeitura){
   somenteLeitura=!!somenteLeitura;
