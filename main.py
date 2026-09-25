@@ -13,7 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado, get_conn)
+                eliminar_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -477,30 +477,6 @@ def planeamento_ecos_largos_dados():
     cruzadas com o agendamento local — ver
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
-
-@app.post("/planeamento-ecos-largos/_corrigir-inicio-verificado")
-def planeamento_ecos_largos_corrigir_inicio_verificado():
-    """TEMPORÁRIO (Rui, 2026-09-25): a 1ª verificação de início-a-tempo
-    (ver estado_planeamento_serracao) correu com o parsing errado dos
-    eventos do Basecamp — assumia um evento "moved" com o título da
-    coluna, mas confirmado ao vivo que a API regista mudança de coluna
-    como "adopted" com o id da lista, não o título (ver
-    basecamp.data_entrada_em_coluna). Isso fechou várias OFs como
-    "inconclusivo → a tempo" sem prova nenhuma. Reabre para nova
-    verificação, já com o parsing corrigido, todas as OFs marcadas
-    inicio_verificado mas não atrasado_confirmado. Remover assim que
-    corrido uma vez (a próxima leitura de /dados já as reavalia
-    sozinha)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """UPDATE planeamento_producao_ecos_largos
-                   SET inicio_verificado = FALSE
-                   WHERE inicio_verificado = TRUE AND atrasado_confirmado = FALSE"""
-            )
-            n = cur.rowcount
-        conn.commit()
-    return {"linhas_reabertas": n}
 
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
