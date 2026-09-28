@@ -1108,7 +1108,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Planeamento da serração — Ecos Largos</title>
+<title>Planeamento de linhas — Ecos Largos</title>
 <style>
   :root{
     --paper:#FFFFFF; --canvas:#F5F5F3; --raise:#FBFBF9;
@@ -1311,7 +1311,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="wrap">
   <header>
-    <h1>Planeamento da serração</h1>
+    <h1>Planeamento de linhas</h1>
     <div class="sub">Ecos Largos · fins de semana assinalados</div>
   </header>
 
