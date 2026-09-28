@@ -1473,19 +1473,34 @@ const buscaClasse=c=>!buscaQuery ? "" : (corresponde(c,buscaQuery) ? " busca-mat
    logo a ficha de edição (pedido explícito do Rui, 2026-09: um clique
    simples só alinha visualmente os dois; a edição passa a ter um botão
    próprio, "✎", em cada card). Quando a OF tem os dois lados (produção e
-   logística), a tabela de logística passa a mostrar os dias desviados
-   (ver desvioLog) até a coluna do seu dia ficar exatamente alinhada com a
-   da produção — cada tabela continua a mostrar as datas certas no
+   logística), UMA das duas tabelas passa a mostrar os dias desviados (ver
+   desvioLog/desvioProd) até a coluna do seu dia ficar exatamente alinhada
+   com a da outra — cada tabela continua a mostrar as datas certas no
    cabeçalho (só desviadas, não erradas); não se usa scroll para isto
    porque a largura real do conteúdo é insuficiente para desvios grandes
-   (o scroll fica sempre limitado pelo próprio tamanho da tabela). */
-function selecionar(id){
+   (o scroll fica sempre limitado pelo próprio tamanho da tabela).
+
+   Pedido explícito do Rui (2026-10-01): QUAL das duas tabelas se desvia
+   depende de onde se clicou — clicar num card de produção/fila desvia a
+   logística (como sempre foi); clicar num card de LOGÍSTICA passa a
+   desviar a PRODUÇÃO (a de cima), não a própria logística — a tabela em
+   que se clica fica sempre parada na vista atual, é a outra que salta
+   para se alinhar com ela. `tipo` diz de que tabela veio o clique
+   ("producao"/"fila" ou "logistica"). */
+function selecionar(id, tipo){
   selecionadoId = (selecionadoId===id) ? null : id;
-  if(selecionadoId===null){ desvioLog=0; renderDays(); renderLogistica(); return; }
+  if(selecionadoId===null){ desvioLog=0; desvioProd=0; renderDays(); renderLanes(); renderLogistica(); return; }
   const cP=card(id), cL=cardLog(id);
   const prodColocado = cP && cP.linha!==null && cP.gs!==null;
-  desvioLog = (prodColocado && cL) ? (cL.gs-cP.gs) : 0;
-  renderDays(); renderLogistica(); aplicarSelecao();
+  const parPronto = prodColocado && cL;
+  if(tipo==="logistica"){
+    desvioLog=0;
+    desvioProd = parPronto ? (cP.gs-cL.gs) : 0;
+  }else{
+    desvioProd=0;
+    desvioLog = parPronto ? (cL.gs-cP.gs) : 0;
+  }
+  renderDays(); renderLanes(); renderLogistica(); aplicarSelecao();
 }
 function aplicarSelecao(){
   document.querySelectorAll(".blk,.qcard").forEach(el=>{
@@ -1702,9 +1717,10 @@ function step(dir){
   limparAlinhamento(); render();
 }
 /* as duas tabelas mostram sempre as mesmas datas por omissão — ao mudar
-   de período (semana/mês, ‹ ›, Hoje) limpa a seleção e o desvio da
-   logística (ver selecionar/desvioLog), para nunca navegar já desalinhado. */
-function limparAlinhamento(){ selecionadoId=null; desvioLog=0; }
+   de período (semana/mês, ‹ ›, Hoje) limpa a seleção e qualquer desvio
+   (ver selecionar/desvioLog/desvioProd), para nunca navegar já
+   desalinhado. */
+function limparAlinhamento(){ selecionadoId=null; desvioLog=0; desvioProd=0; }
 function rangeLabel(){
   const a=MASTER[view.start], b=MASTER[Math.min(view.start+view.len-1,MASTER.length-1)];
   if(!a||!b) return "";
@@ -1724,14 +1740,16 @@ function metrics(){
   $("#board").classList.toggle("dense",DAY<70);
   $("#boardLog").classList.toggle("dense",DAY<70);
 }
-function days(){ return MASTER.slice(view.start,view.start+view.len); }
-/* desvio (em dias) só da tabela de logística, aplicado enquanto um par de
-   cards está destacado (ver selecionar) — em vez de scroll (limitado pela
-   largura real do conteúdo, insuficiente para desvios grandes), muda-se
-   literalmente que dias a tabela de logística mostra, para a coluna do
-   par ficar exatamente alinhada com a da produção. Repõe-se a 0 sempre
-   que a seleção é limpa ou o período muda. */
-let desvioLog=0;
+/* desvio (em dias) de cada tabela, aplicado enquanto um par de cards está
+   destacado (ver selecionar) — em vez de scroll (limitado pela largura
+   real do conteúdo, insuficiente para desvios grandes), muda-se
+   literalmente que dias a tabela mostra, para a coluna do par ficar
+   exatamente alinhada com a da outra tabela. Só uma das duas tem desvio
+   de cada vez (a que NÃO foi clicada — ver selecionar); a outra fica
+   sempre 0. Repõem-se ambos a 0 sempre que a seleção é limpa ou o período
+   muda (ver limparAlinhamento). */
+let desvioLog=0, desvioProd=0;
+function days(){ return MASTER.slice(view.start+desvioProd,view.start+desvioProd+view.len); }
 function daysLog(){ return MASTER.slice(view.start+desvioLog,view.start+desvioLog+view.len); }
 function renderLabels(){
   calcularAlturasLinhas();
@@ -1750,7 +1768,7 @@ function diaHtml(d,hoje){
 }
 function renderDays(){
   const D=days();
-  $("#days").innerHTML=D.map((d,i)=>diaHtml(d,view.start+i===HOJE)).join("");
+  $("#days").innerHTML=D.map((d,i)=>diaHtml(d,view.start+desvioProd+i===HOJE)).join("");
   $("#days").style.width=(D.length*DAY)+"px";
   const DL=daysLog();
   $("#daysLog").innerHTML=DL.map((d,i)=>diaHtml(d,view.start+desvioLog+i===HOJE)).join("");
@@ -1858,7 +1876,7 @@ function renderLanes(){
     // contínuo a cobrir dias em que não há produção (ver segmentosCard).
     const segmentos=segmentosCard(c);
     segmentos.forEach((seg,i)=>{
-      const a=seg.inicio-view.start, b=seg.fim-view.start+1;
+      const a=seg.inicio-(view.start+desvioProd), b=seg.fim-(view.start+desvioProd)+1;
       if(b<=0||a>=view.len) return;
       const l=Math.max(a,0), r=Math.min(b,view.len);
       const clipL=a<0||i>0, clipR=b>view.len||i<segmentos.length-1;
@@ -2069,7 +2087,7 @@ $("#fila").addEventListener("pointerup",e=>{
   const anterior={id:c.id,linha:c.linha,gs:c.gs,dur:c.dur,volume:c.volume};
   undoStack.push(anterior);
   c.linha=linhaDeY(y);
-  c.gs=view.start+clamp(Math.floor(x/DAY),0,view.len-c.dur);
+  c.gs=view.start+desvioProd+clamp(Math.floor(x/DAY),0,view.len-c.dur);
   renderFila(); renderLanes(); sync(c, anterior);
 });
 
