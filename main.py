@@ -20,7 +20,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas
 from db import inicializar_schema
 inicializar_schema()
 
@@ -751,6 +751,59 @@ def planeamento_ecos_largos_nova_encomenda(corpo: dict = Body(...)):
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
+
+@app.get("/planeamento-entradas", response_class=HTMLResponse)
+def planeamento_entradas_pagina():
+    """Página interna (sem login) do quadro "Planeamento de Entradas" da
+    Ecos Largos — o que entra nos charriots, ver
+    tools/planeamento_entradas.pagina_planeamento_entradas."""
+    return HTMLResponse(planeamento_entradas.pagina_planeamento_entradas())
+
+@app.get("/planeamento-entradas/dados")
+def planeamento_entradas_dados():
+    """Estado atual do quadro: OFs já agendadas na produção (mesma fonte da
+    outra página), com o charriot/WIP/Toro atribuídos aqui — ver
+    tools/planeamento_entradas.estado_planeamento_entradas."""
+    return planeamento_entradas.estado_planeamento_entradas()
+
+@app.post("/planeamento-entradas/atribuir")
+def planeamento_entradas_atribuir(corpo: dict = Body(...)):
+    """Atribui (ou remove) o charriot de uma OF — ver
+    tools/planeamento_entradas.atribuir_charriot."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.atribuir_charriot(basecamp_card_id, corpo.get("charriot"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-entradas/wip")
+def planeamento_entradas_wip(corpo: dict = Body(...)):
+    """Guarda os campos WIP (comprimento/largura/espessura) de uma OF —
+    ver tools/planeamento_entradas.guardar_wip."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.guardar_wip(
+        basecamp_card_id, corpo.get("cmp"), corpo.get("lar"), corpo.get("esp"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-entradas/toro")
+def planeamento_entradas_toro(corpo: dict = Body(...)):
+    """Guarda os campos Toro (comprimento/tipo) de uma OF — ver
+    tools/planeamento_entradas.guardar_toro."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.guardar_toro(
+        basecamp_card_id, corpo.get("cmp"), corpo.get("tipo"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
 

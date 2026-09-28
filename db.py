@@ -415,6 +415,28 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS atrasado_c
 -- Basecamp — ver basecamp.data_entrada_em_coluna) se uma OF começou a
 -- tempo ou não; nunca se volta a verificar depois disso, atrasada ou não.
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS inicio_verificado BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- página nova "Planeamento de Entradas" (pedido explícito do Rui,
+-- 2026-10-01): planear o que entra nos charriots, um dia antes do início
+-- da produção de cada OF (ver tools/planeamento_entradas.py). Ao
+-- contrário de planeamento_producao_ecos_largos, esta tabela NÃO duplica
+-- nome/linha/dia de início/volume/tipo de madeira — isso lê-se sempre em
+-- direto da OF de produção já agendada (ver estado_planeamento_entradas),
+-- exatamente como a lógica já usada para a logística. Só guarda o que é
+-- específico desta página: a que charriot foi atribuída (NULL = ainda por
+-- atribuir) e os campos WIP/Toro preenchidos à mão pela equipa.
+CREATE TABLE IF NOT EXISTS entradas_charriot_ecos_largos (
+    id SERIAL PRIMARY KEY,
+    basecamp_card_id BIGINT NOT NULL UNIQUE,
+    charriot TEXT,
+    wip_cmp NUMERIC,
+    wip_lar NUMERIC,
+    wip_esp NUMERIC,
+    toro_cmp NUMERIC,
+    toro_tipo TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now(),
+    atualizado_em TIMESTAMPTZ DEFAULT now()
+);
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1023,6 +1045,75 @@ def guardar_tipo_madeira_producao(basecamp_card_id: int, tipo_madeira: str) -> d
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        tipo_madeira = EXCLUDED.tipo_madeira, atualizado_em = now()""",
                 (basecamp_card_id, tipo_madeira)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def entradas_charriot_ecos_largos() -> list[dict]:
+    """Todos os registos da página "Planeamento de Entradas" — ver
+    tools/planeamento_entradas.py, que cruza isto com a OF de produção já
+    agendada (nome, linha, dia de início, volume, tipo de madeira vêm de
+    lá, não são guardados aqui em duplicado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT basecamp_card_id, charriot, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo
+                   FROM entradas_charriot_ecos_largos"""
+            )
+            return [{
+                "basecamp_card_id": l["basecamp_card_id"],
+                "charriot": l["charriot"],
+                "wip_cmp": float(l["wip_cmp"]) if l["wip_cmp"] is not None else None,
+                "wip_lar": float(l["wip_lar"]) if l["wip_lar"] is not None else None,
+                "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
+                "toro_cmp": float(l["toro_cmp"]) if l["toro_cmp"] is not None else None,
+                "toro_tipo": l["toro_tipo"],
+            } for l in cur.fetchall()]
+
+def atribuir_charriot_entrada(basecamp_card_id: int, charriot: str = None) -> dict:
+    """Atribui (ou remove, com charriot=None) o charriot de uma OF na
+    página "Planeamento de Entradas" — usado ao arrastar um card entre a
+    linha "Por atribuir" e um dos charriots."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, charriot)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       charriot = EXCLUDED.charriot, atualizado_em = now()""",
+                (basecamp_card_id, charriot)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: float) -> dict:
+    """Guarda os campos WIP (comprimento/largura/espessura) de uma OF na
+    página "Planeamento de Entradas"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, wip_cmp, wip_lar, wip_esp)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       wip_cmp = EXCLUDED.wip_cmp, wip_lar = EXCLUDED.wip_lar, wip_esp = EXCLUDED.wip_esp,
+                       atualizado_em = now()""",
+                (basecamp_card_id, cmp, lar, esp)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def guardar_toro_entrada(basecamp_card_id: int, cmp: float, tipo: str) -> dict:
+    """Guarda os campos Toro (comprimento/tipo) de uma OF na página
+    "Planeamento de Entradas"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, toro_cmp, toro_tipo)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       toro_cmp = EXCLUDED.toro_cmp, toro_tipo = EXCLUDED.toro_tipo,
+                       atualizado_em = now()""",
+                (basecamp_card_id, cmp, tipo)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
