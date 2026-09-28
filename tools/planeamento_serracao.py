@@ -1486,21 +1486,40 @@ const buscaClasse=c=>!buscaQuery ? "" : (corresponde(c,buscaQuery) ? " busca-mat
    desviar a PRODUÇÃO (a de cima), não a própria logística — a tabela em
    que se clica fica sempre parada na vista atual, é a outra que salta
    para se alinhar com ela. `tipo` diz de que tabela veio o clique
-   ("producao"/"fila" ou "logistica"). */
+   ("producao"/"fila" ou "logistica").
+
+   BUG REAL (Rui, 2026-10-01): re-renderizar SEMPRE as duas tabelas (mesmo
+   a que acabou de ser clicada) destruía e recriava o próprio elemento
+   ".blk" clicado — o segundo clique de um duplo clique físico deixava de
+   contar como duplo clique para o browser (o "dblclick" nativo depende de
+   voltar a acertar no mesmo elemento; um elemento novo, mesmo que na
+   mesma posição, não conta), impedindo abrir a ficha por duplo clique.
+   Só se voltam a desenhar os blocos de uma tabela quando o desvio DELA
+   realmente muda de valor — a tabela onde se clicou nunca precisa de se
+   desviar a si própria, por isso o seu próprio desvio nunca muda aqui, e
+   o elemento clicado sobrevive ao clique (incluindo ao clique de
+   desseleção), deixando o duplo clique nativo continuar a funcionar. */
 function selecionar(id, tipo){
+  const desvioLogAntes=desvioLog, desvioProdAntes=desvioProd;
   selecionadoId = (selecionadoId===id) ? null : id;
-  if(selecionadoId===null){ desvioLog=0; desvioProd=0; renderDays(); renderLanes(); renderLogistica(); return; }
-  const cP=card(id), cL=cardLog(id);
-  const prodColocado = cP && cP.linha!==null && cP.gs!==null;
-  const parPronto = prodColocado && cL;
-  if(tipo==="logistica"){
-    desvioLog=0;
-    desvioProd = parPronto ? (cP.gs-cL.gs) : 0;
+  if(selecionadoId===null){
+    desvioLog=0; desvioProd=0;
   }else{
-    desvioProd=0;
-    desvioLog = parPronto ? (cL.gs-cP.gs) : 0;
+    const cP=card(id), cL=cardLog(id);
+    const prodColocado = cP && cP.linha!==null && cP.gs!==null;
+    const parPronto = prodColocado && cL;
+    if(tipo==="logistica"){
+      desvioLog=0;
+      desvioProd = parPronto ? (cP.gs-cL.gs) : 0;
+    }else{
+      desvioProd=0;
+      desvioLog = parPronto ? (cL.gs-cP.gs) : 0;
+    }
   }
-  renderDays(); renderLanes(); renderLogistica(); aplicarSelecao();
+  renderDays();
+  if(desvioProd!==desvioProdAntes) renderLanes();
+  if(desvioLog!==desvioLogAntes) renderLogistica();
+  aplicarSelecao();
 }
 function aplicarSelecao(){
   document.querySelectorAll(".blk,.qcard").forEach(el=>{
