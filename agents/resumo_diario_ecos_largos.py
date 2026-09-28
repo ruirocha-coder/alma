@@ -26,11 +26,19 @@ Regras desta mensagem:
 """ + ecos_largos.REGRAS_APRESENTACAO_PRODUCAO
 
 def _gerar_resumo(conteudo_dashboard: str) -> str:
+    # bug real (Rui, 2026-09-28): 800 era baixo demais para um dashboard
+    # com vários charriots/linhas a comentar — a mensagem publicada no
+    # Mural ficava cortada a meio (a API para de gerar exatamente nesse
+    # ponto, sem erro nenhum a avisar). Subido para 2000, mesma ordem de
+    # grandeza de outras análises deste género (ver
+    # agents/estimativa_montagem.py, agents/resumo_anual_cargas_toros.py).
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=800,
+        model="claude-sonnet-4-6", max_tokens=2000,
         system=MISSAO_RESUMO_DIARIO_ECOS_LARGOS,
         messages=[{"role": "user", "content": conteudo_dashboard}]
     )
+    if resposta.stop_reason == "max_tokens":
+        print("[resumo_diario_ecos_largos] AVISO: resposta cortada por max_tokens mesmo assim — considerar subir mais")
     return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
 def correr_resumo_diario_ecos_largos():
