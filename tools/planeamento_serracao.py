@@ -565,7 +565,7 @@ def _validar_capacidade(linha: str, dia_inicio: str, duracao_dias: int,
                 f"em {duracao_dias} dia(s) — faltariam {max(0, faltam):.1f} m³")
     return None
 
-DIAS_CURA_MADEIRA = {"seca": 4, "verde": 1}
+DIAS_CURA_MADEIRA = {"seca": 5, "verde": 1}
 
 def _calcular_dia_carregamento(dia_inicio: str, duracao_dias: int, tipo_madeira: str) -> str:
     """Dia de carregamento de uma OF: conta a partir do FIM da produção
