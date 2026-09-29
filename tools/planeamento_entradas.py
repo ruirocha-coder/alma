@@ -40,6 +40,14 @@ _PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
 def _eh_quadradilho(titulo: str) -> bool:
     return not bool(_PADRAO_OF.search(titulo or ""))
 
+# tamanhos WIP mais usados para "quadradilho" (pedido explícito do Rui,
+# 2026-10-01) — não são regra fixa, por isso só preenchem por omissão um
+# campo que ainda ninguém tenha escrito nada (ver estado_planeamento_
+# entradas); continuam totalmente editáveis por OF.
+WIP_CMP_QUADRADILHO_DEFAULT = 2500
+WIP_LAR_QUADRADILHO_DEFAULT = 32
+WIP_ESP_QUADRADILHO_DEFAULT = 32
+
 def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     """Dia em que os troncos desta OF entram no charriot.
 
@@ -87,15 +95,33 @@ def estado_planeamento_entradas() -> dict:
                 and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
             continue
         extra = extras.get(c["id"]) or {}
+        eh_quadradilho = _eh_quadradilho(c["titulo"])
         em_continuo = extra.get("em_continuo")
         if em_continuo is None:
-            em_continuo = _eh_quadradilho(c["titulo"])
+            em_continuo = eh_quadradilho
         indice_toros = extra.get("indice_toros")
         if indice_toros is None:
             indice_toros = INDICE_TOROS_DEFAULT
         indice_wip = extra.get("indice_wip")
         if indice_wip is None:
             indice_wip = INDICE_WIP_DEFAULT
+        # pedido explícito do Rui (2026-10-01): para "quadradilho", o WIP
+        # começa logo preenchido com os tamanhos mais usados (2500/32/32)
+        # — não são regra fixa, por isso continuam totalmente editáveis;
+        # cada campo só usa o valor por omissão enquanto ninguém tiver
+        # escrito nada nele (ver guardar_wip: escrever aqui grava o valor
+        # escolhido em definitivo para esta OF, mesmo que seja igual ao
+        # que já vinha por omissão).
+        wip_cmp = extra.get("wip_cmp")
+        wip_lar = extra.get("wip_lar")
+        wip_esp = extra.get("wip_esp")
+        if eh_quadradilho:
+            if wip_cmp is None:
+                wip_cmp = WIP_CMP_QUADRADILHO_DEFAULT
+            if wip_lar is None:
+                wip_lar = WIP_LAR_QUADRADILHO_DEFAULT
+            if wip_esp is None:
+                wip_esp = WIP_ESP_QUADRADILHO_DEFAULT
         volume = agendamento["volume_m3"]
         entradas.append({
             "basecamp_card_id": c["id"],
@@ -114,9 +140,9 @@ def estado_planeamento_entradas() -> dict:
             "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
             "em_continuo": em_continuo,
             "charriot": extra.get("charriot"),
-            "wip_cmp": extra.get("wip_cmp"),
-            "wip_lar": extra.get("wip_lar"),
-            "wip_esp": extra.get("wip_esp"),
+            "wip_cmp": wip_cmp,
+            "wip_lar": wip_lar,
+            "wip_esp": wip_esp,
             "indice_wip": indice_wip,
             "qtd_wip_m3": round(volume * indice_wip, 2) if volume is not None else None,
             "toro_cmp": extra.get("toro_cmp"),
