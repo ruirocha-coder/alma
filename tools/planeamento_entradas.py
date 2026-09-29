@@ -572,7 +572,7 @@ window.addEventListener("resize",render);
 /* ---------- arrastar entre lanes (só vertical — o dia é sempre calculado,
    nunca se arrasta para outro dia; ver tools/planeamento_entradas
    ._calcular_dia_entrada) ---------- */
-let drag=null, arrastouAgora=false;
+let drag=null;
 $("#lanes").addEventListener("pointerdown",e=>{
   const b=e.target.closest(".blk"); if(!b) return;
   const it=item(+b.dataset.id); if(!it) return;
@@ -590,8 +590,7 @@ $("#lanes").addEventListener("pointerup",e=>{
   const {el,it,moveu}=drag;
   el.classList.remove("drag"); el.style.transform="";
   drag=null;
-  if(!moveu) return; // clique simples — deixa o "click" nativo abrir a ficha
-  arrastouAgora=true;
+  if(!moveu) return; // clique simples sem arrastar — não faz nada sozinho
   const r=$("#lanes").getBoundingClientRect();
   const novaLane=laneDeY(e.clientY-r.top);
   const novoCharriot = novaLane===0 ? null : CHARRIOTS[novaLane-1];
@@ -601,8 +600,11 @@ $("#lanes").addEventListener("pointerup",e=>{
   renderLanes();
   atribuirServidor(it, anterior);
 });
-$("#lanes").addEventListener("click",e=>{
-  if(arrastouAgora){ arrastouAgora=false; return; }
+/* pedido explícito do Rui (2026-10-02): apesar de aqui não haver segunda
+   tabela para alinhar (ver planeamento de linhas/logística, onde o clique
+   simples serve para isso), mantém-se o mesmo hábito de duplo clique para
+   abrir a ficha — o clique simples não faz nada sozinho. */
+$("#lanes").addEventListener("dblclick",e=>{
   const b=e.target.closest(".blk"); if(!b) return;
   openSheet(+b.dataset.id);
 });
