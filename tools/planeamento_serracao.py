@@ -23,6 +23,7 @@ import unicodedata
 from datetime import date, timedelta
 import db
 from tools import basecamp
+from tools.tempo import dia_da_semana
 
 PROJETO = "Ecos Largos"
 
@@ -669,7 +670,14 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     (a nova, e a antiga se a OF mudou de linha — ver _recalcular_linha):
     mudar os m³ ou o dia desta OF pode libertar ou ocupar espaço que
     outras já lá colocadas estavam a usar/precisar, e essas nunca são
-    tocadas por nenhum outro pedido a não ser este."""
+    tocadas por nenhum outro pedido a não ser este.
+
+    Se a OF já estava agendada antes e a data ou a linha mudaram, comenta
+    isso no card real do Basecamp (pedido explícito do Rui, 2026-09-29) —
+    quem usa o quadro no Basecamp recebe notificação de lá e deixa de
+    perder reagendamentos (ex: encomendas que passam para mais cedo na
+    semana). Não dispara no primeiro agendamento de uma OF (não há
+    "mudança" nenhuma para avisar nesse caso)."""
     if linha not in LINHAS:
         return {"erro": f"linha desconhecida: {linha!r}"}
     if not dia_inicio:
@@ -708,6 +716,26 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     tipo_madeira = existente["tipo_madeira"] if existente else None
     _talvez_duplicar_logistica(basecamp_card_id, dia_inicio, duracao_dias, tipo_madeira)
     linha_antiga = existente["linha"] if existente else None
+    dia_antigo = existente["dia_inicio"] if existente else None
+    # pedido explícito do Rui (2026-09-29): quem usa o quadro no dia a dia
+    # não reparava quando uma encomenda já agendada mudava de dia/linha
+    # (ex: passava para mais cedo na semana) — comentário no próprio card
+    # do Basecamp avisa a equipa real, que recebe notificação de lá. Só
+    # dispara quando a OF já estava agendada antes (não no 1º agendamento,
+    # que não é uma "mudança" para ninguém reparar) e só sobre o que
+    # realmente mudou. Melhor esforço, tal como o "Due on" acima: uma
+    # falha aqui nunca pode impedir o agendamento local.
+    if existente and (dia_antigo != dia_inicio or (linha_antiga and linha_antiga != linha)):
+        mudancas = []
+        if dia_antigo != dia_inicio:
+            mudancas.append(f"a data de produção foi alterada para {dia_da_semana(dia_inicio)['data_extenso']}")
+        if linha_antiga and linha_antiga != linha:
+            mudancas.append(f"a linha de produção foi alterada para {linha}")
+        try:
+            basecamp.comentar(basecamp_card_id, "Alma avisa: " + " e ".join(mudancas) + ".", projeto=PROJETO)
+        except Exception as e:
+            print(f"[planeamento_serracao] falhou a comentar no Basecamp o "
+                  f"reagendamento do card {basecamp_card_id}: {e}")
     if linha_antiga and linha_antiga != linha:
         _recalcular_linha(linha_antiga, ids_ativos=ids_ativos)
     _recalcular_linha(linha, excluir_id=basecamp_card_id, ids_ativos=ids_ativos)
