@@ -124,7 +124,7 @@ def estado_planeamento_entradas() -> dict:
             "indice_toros": indice_toros,
             "qtd_toros_m3": round(volume * indice_toros, 2) if volume is not None else None,
         })
-    return {"charriots": CHARRIOTS, "entradas": entradas}
+    return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas()}
 
 def atribuir_charriot(basecamp_card_id: int, charriot: str = None) -> dict:
     """Atribui (ou remove, com charriot=None) o charriot de uma OF."""
@@ -307,6 +307,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   /* grupos WIP/Toro: sub-campos numa única linha, ordenados (pedido
      explícito do Rui, 2026-10-01) */
   .grupoLbl{display:block;font-size:14px;font-weight:700;color:var(--ink);margin-top:16px}
+  /* pedido explícito do Rui (2026-10-01): "Em contínuo" mais destacado */
+  .destaque{color:var(--blue)!important;font-weight:700;font-size:15.5px}
   .miniRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
   .miniField{display:flex;flex-direction:column;gap:3px}
   .miniField label{font-size:11.5px;color:var(--dim)}
@@ -401,6 +403,7 @@ const CORES={
 };
 const corProduto=e=>CORES[e.cor]||CORES.cinza;
 let entradas=[];
+let historico={wip_cmp:[],wip_lar:[],wip_esp:[],toro_cmp:[]};
 let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let logs=[], DAY=92, LANE=78;
 
@@ -430,7 +433,7 @@ function renderDays(){
   $("#days").style.width=(D.length*DAY)+"px";
 }
 
-const ITEM_H=44, ITEM_GAP=4, ITEM_PAD=6;
+const ITEM_H=58, ITEM_GAP=4, ITEM_PAD=6;
 let ALTURAS_LANE=[], OFFSETS_LANE=[];
 function calcularAlturasLanes(){
   ALTURAS_LANE=LANES.map((_,li)=>{
@@ -483,7 +486,8 @@ function renderLanes(){
         el.style.width=(DAY-8)+"px";
         el.style.height=ITEM_H+"px";
         el.innerHTML=`<div class="tt">${e.titulo}</div>
-          <div class="of">${e.linha||""}${e.volume?(" · "+e.volume+" m³"):""} · #${numCurto(e.id)}</div>`;
+          <div class="of">QTD Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
+          <div class="of">QTD Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>`;
         bl.appendChild(el);
       });
     });
@@ -605,6 +609,13 @@ function recalcularQtd(it){
   $("#fQtdWip").textContent = (it.volume!=null && !isNaN(indiceWip)) ? (Math.round(it.volume*indiceWip*100)/100)+" m³" : "—";
   $("#fQtdToros").textContent = (it.volume!=null && !isNaN(indiceToros)) ? (Math.round(it.volume*indiceToros*100)/100)+" m³" : "—";
 }
+/* sugestões de valores já usados antes (pedido explícito do Rui,
+   2026-10-01) — <datalist> nativo do browser: ao escrever, por exemplo,
+   "2" num campo com histórico, a lista de valores já usados que começam
+   por "2" aparece sozinha, sem precisar de nenhum JS próprio. */
+function datalistHtml(idLista, valores){
+  return `<datalist id="${idLista}">${(valores||[]).map(v=>`<option value="${v}">`).join("")}</datalist>`;
+}
 function openSheet(id){
   const it=item(id); if(!it) return;
   const toroEhPreset = it.toroCmp!=null && TORO_PRESETS.includes(it.toroCmp);
@@ -613,17 +624,17 @@ function openSheet(id){
     <div class="of mono">card #${numCurto(it.id)}</div>
     <h3>${it.titulo}</h3>
 
-    <div class="frow"><label>Em contínuo</label>
-      <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto" ${it.emContinuo?"checked":""}></div>
+    <div class="frow"><label class="destaque">Em contínuo</label>
+      <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
     <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
       Marcado: entra no charriot no mesmo dia do início da produção. Desmarcado: entra no dia anterior
       (ou sexta-feira, se isso cair a fim de semana).</div>
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
-      <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="number" min="0" step="0.1" value="${it.wipCmp??""}"></div>
-      <div class="miniField"><label>Lar</label><input id="fWipLar" type="number" min="0" step="0.1" value="${it.wipLar??""}"></div>
-      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="number" min="0" step="0.1" value="${it.wipEsp??""}"></div>
+      <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="number" min="0" step="0.1" value="${it.wipCmp??""}" list="histWipCmp"></div>
+      <div class="miniField"><label>Lar</label><input id="fWipLar" type="number" min="0" step="0.1" value="${it.wipLar??""}" list="histWipLar"></div>
+      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="number" min="0" step="0.1" value="${it.wipEsp??""}" list="histWipEsp"></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="number" min="0" step="0.01" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
     </div>
@@ -632,7 +643,7 @@ function openSheet(id){
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><select id="fToroCmp">${toroCmpOptionsHtml(it.toroCmp)}</select></div>
       <div class="miniField" id="fToroCmpOutroWrap" style="${(toroEhPreset||it.toroCmp==null)?"display:none":""}">
-        <label>Valor</label><input id="fToroCmpOutro" type="number" min="0" step="1" value="${toroOutroValor}"></div>
+        <label>Valor</label><input id="fToroCmpOutro" type="number" min="0" step="1" value="${toroOutroValor}" list="histToroCmp"></div>
       <div class="miniField"><label>Tipo</label><select id="fToroTipo">
         <option value="" ${!it.toroTipo?"selected":""}>—</option>
         <option value="IN"${it.toroTipo==="IN"?" selected":""}>IN</option>
@@ -641,6 +652,10 @@ function openSheet(id){
       <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="number" min="0" step="0.01" value="${it.indiceToros}"></div>
       <div class="miniField"><label>QTD Toros</label><b id="fQtdToros" class="mono" style="align-self:center">—</b></div>
     </div>
+    ${datalistHtml("histWipCmp",historico.wip_cmp)}
+    ${datalistHtml("histWipLar",historico.wip_lar)}
+    ${datalistHtml("histWipEsp",historico.wip_esp)}
+    ${datalistHtml("histToroCmp",historico.toro_cmp)}
 
     <div class="kv"><span>Nome</span><b>${it.titulo}</b></div>
     <div class="kv"><span>Linha</span><b>${it.linha||"—"}</b></div>
@@ -722,6 +737,7 @@ async function carregar(){
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,
       indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
     })).filter(e=>e.gs>=0);
+    historico=d.historico||historico;
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render();
     log("local",`lido do Basecamp: ${entradas.length} OFs`);

@@ -1068,6 +1068,24 @@ def guardar_tipo_madeira_producao(basecamp_card_id: int, tipo_madeira: str) -> d
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
+def historico_valores_entradas() -> dict:
+    """Todos os valores distintos já usados nos campos WIP (Cmp/Lar/Esp) e
+    Toro (Cmp) de qualquer OF na página "Planeamento de Entradas" — usado
+    para sugerir automaticamente (autocompletar) tamanhos já usados antes
+    ao preencher uma OF nova (pedido explícito do Rui, 2026-10-01: "se num
+    card ele escreveu 2500, futuramente... começar a escrever 2... dá-lhe
+    logo a opção")."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            resultado = {}
+            for campo in ("wip_cmp", "wip_lar", "wip_esp", "toro_cmp"):
+                cur.execute(
+                    f"""SELECT DISTINCT {campo} AS v FROM entradas_charriot_ecos_largos
+                        WHERE {campo} IS NOT NULL ORDER BY {campo}"""
+                )
+                resultado[campo] = [float(l["v"]) for l in cur.fetchall()]
+    return resultado
+
 def entradas_charriot_ecos_largos() -> list[dict]:
     """Todos os registos da página "Planeamento de Entradas" — ver
     tools/planeamento_entradas.py, que cruza isto com a OF de produção já
