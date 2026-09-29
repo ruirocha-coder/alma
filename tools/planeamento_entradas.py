@@ -657,7 +657,7 @@ function openSheet(id){
     ${datalistHtml("histWipEsp",historico.wip_esp)}
     ${datalistHtml("histToroCmp",historico.toro_cmp)}
 
-    <div class="kv"><span>Nome</span><b>${it.titulo}</b></div>
+    <div class="kv" style="margin-top:16px"><span>Nome</span><b>${it.titulo}</b></div>
     <div class="kv"><span>Linha</span><b>${it.linha||"—"}</b></div>
     <div class="kv"><span>Início produção</span><b>${it.dataInicioProducao||"—"}</b></div>
     <div class="kv"><span>Volume</span><b>${it.volume?(it.volume+" m³"):"—"}</b></div>
