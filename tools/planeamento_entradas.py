@@ -106,6 +106,11 @@ def estado_planeamento_entradas() -> dict:
             "dia_inicio_producao": agendamento["dia_inicio"],
             "volume_m3": volume,
             "tipo_madeira": agendamento["tipo_madeira"],
+            # cor da barra lateral (tipo de produto) — pedido explícito do
+            # Rui (2026-10-01): mesma cor da produção/logística, para dar
+            # para distinguir produtos também aqui (senão ficam todos
+            # cinzentos); é só consulta, escolhe-se sempre na outra página.
+            "cor": agendamento["cor"],
             "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
             "em_continuo": em_continuo,
             "charriot": extra.get("charriot"),
@@ -379,6 +384,22 @@ const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3"];
 const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=[2600,2500,3100,2350,2550];
 const INDICE_TOROS_DEFAULT=1.58, INDICE_WIP_DEFAULT=1.8;
+/* mesmas cores da página de planeamento de linhas/logística (pedido
+   explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
+   uma página para a outra") — a cor em si só se escolhe lá; aqui é só
+   consulta, para dar para distinguir produtos também neste quadro. */
+const CORES={
+  vermelho_escuro:"#D32F2F", laranja_escuro:"#F57C00", amarelo_escuro:"#FFA000",
+  verde_escuro:"#388E3C", azul_escuro:"#1976D2", roxo_escuro:"#7B1FA2",
+  vermelho:"#F44336", laranja:"#FF9800", amarelo:"#FFC107",
+  verde:"#4CAF50", azul:"#2196F3", roxo:"#9C27B0",
+  vermelho_medio:"#E57373", laranja_medio:"#FFB74D", amarelo_medio:"#FFD54F",
+  verde_medio:"#81C784", azul_medio:"#64B5F6", roxo_medio:"#BA68C8",
+  vermelho_claro:"#FFCDD2", laranja_claro:"#FFE0B2", amarelo_claro:"#FFECB3",
+  verde_claro:"#C8E6C9", azul_claro:"#BBDEFB", roxo_claro:"#E1BEE7",
+  cinza:"#9AA0A6",
+};
+const corProduto=e=>CORES[e.cor]||CORES.cinza;
 let entradas=[];
 let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let logs=[], DAY=92, LANE=78;
@@ -456,6 +477,7 @@ function renderLanes(){
         const el=document.createElement("div");
         el.className="blk"+(e.charriot?"":" semCharriot");
         el.tabIndex=0; el.dataset.id=e.id;
+        el.style.borderLeftColor=corProduto(e);
         el.style.left=(a*DAY+3)+"px";
         el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+i*(ITEM_H+ITEM_GAP))+"px";
         el.style.width=(DAY-8)+"px";
@@ -693,7 +715,7 @@ async function carregar(){
     const d=await r.json();
     entradas=(d.entradas||[]).map(e=>({
       id:e.basecamp_card_id, titulo:e.titulo, url:e.url, coluna:e.coluna_basecamp,
-      linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira,
+      linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira, cor:e.cor,
       gs:idxOf(e.dia_entrada), charriot:e.charriot, emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
