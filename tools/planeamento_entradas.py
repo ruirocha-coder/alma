@@ -27,7 +27,7 @@ TORO_TIPOS = {"IN", "MT"}
 # omissão usados enquanto ninguém escolher outro à mão para essa OF em
 # concreto (ver db.entradas_charriot_ecos_largos, colunas indice_toros/
 # indice_wip).
-INDICE_TOROS_DEFAULT = 1.58
+INDICE_TOROS_DEFAULT = 2.85
 INDICE_WIP_DEFAULT = 1.8
 
 # "quadradilho" = título sem "OF" (pedido explícito do Rui, 2026-10-01,
@@ -411,7 +411,7 @@ const $=s=>document.querySelector(s);
 const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3"];
 const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=[2600,2500,3100,2350,2550];
-const INDICE_TOROS_DEFAULT=1.58, INDICE_WIP_DEFAULT=1.8;
+const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
    explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
    uma página para a outra") — a cor em si só se escolhe lá; aqui é só
