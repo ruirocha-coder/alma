@@ -12,6 +12,7 @@
 # aqui sozinha, sempre que se lê o estado (ver estado_planeamento_entradas),
 # exatamente como uma OF com tipo de madeira definido aparece sozinha na
 # logística.
+import re
 from datetime import date, timedelta
 import db
 from tools import planeamento_serracao as ps
@@ -20,12 +21,40 @@ CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3"]
 TORO_CMP_PRESETS = [2600, 2500, 3100, 2350, 2550]
 TORO_TIPOS = {"IN", "MT"}
 
-def _calcular_dia_entrada(dia_inicio: str) -> str:
-    """Dia em que os troncos desta OF entram no charriot: um dia antes do
-    início da produção (pedido explícito do Rui, 2026-10-01). Se isso
-    calhar a sábado ou domingo (acontece sempre que a produção começa a
-    uma segunda-feira), recua para a sexta-feira anterior — os charriots
-    não trabalham ao fim de semana, tal como a produção em si."""
+# QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
+# — pedido explícito do Rui (2026-10-01). Cada OF pode ter o seu próprio
+# índice (ver guardar_wip/guardar_toro); estes são só os valores por
+# omissão usados enquanto ninguém escolher outro à mão para essa OF em
+# concreto (ver db.entradas_charriot_ecos_largos, colunas indice_toros/
+# indice_wip).
+INDICE_TOROS_DEFAULT = 1.58
+INDICE_WIP_DEFAULT = 1.8
+
+# "quadradilho" = título sem "OF" (pedido explícito do Rui, 2026-10-01,
+# ex: "Fepal — Quadradilho MT", "Girona — 2600 MT" não têm "OF"; "Palcax
+# OF 508" tem). Por omissão entra "em contínuo" (ver _calcular_dia_entrada)
+# — a pessoa pode sempre desmarcar à mão para uma OF em concreto (ver
+# definir_em_continuo), e essa escolha fica gravada em definitivo.
+_PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
+
+def _eh_quadradilho(titulo: str) -> bool:
+    return not bool(_PADRAO_OF.search(titulo or ""))
+
+def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
+    """Dia em que os troncos desta OF entram no charriot.
+
+    "Em contínuo" (pedido explícito do Rui, 2026-10-01): a OF entra no
+    MESMO dia do início da produção — salta o cálculo habitual (dia
+    anterior). Usado sobretudo para quadradilho (ver _eh_quadradilho), mas
+    qualquer OF pode ser marcada/desmarcada à mão (ver definir_em_continuo).
+
+    Caso contrário (o cálculo habitual): um dia antes do início da
+    produção. Se isso calhar a sábado ou domingo (acontece sempre que a
+    produção começa a uma segunda-feira), recua para a sexta-feira
+    anterior — os charriots não trabalham ao fim de semana, tal como a
+    produção em si."""
+    if em_continuo:
+        return dia_inicio
     dia = date.fromisoformat(dia_inicio) - timedelta(days=1)
     if dia.weekday() == 5:  # sábado
         dia -= timedelta(days=1)
@@ -58,6 +87,16 @@ def estado_planeamento_entradas() -> dict:
                 and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
             continue
         extra = extras.get(c["id"]) or {}
+        em_continuo = extra.get("em_continuo")
+        if em_continuo is None:
+            em_continuo = _eh_quadradilho(c["titulo"])
+        indice_toros = extra.get("indice_toros")
+        if indice_toros is None:
+            indice_toros = INDICE_TOROS_DEFAULT
+        indice_wip = extra.get("indice_wip")
+        if indice_wip is None:
+            indice_wip = INDICE_WIP_DEFAULT
+        volume = agendamento["volume_m3"]
         entradas.append({
             "basecamp_card_id": c["id"],
             "titulo": c["titulo"],
@@ -65,15 +104,20 @@ def estado_planeamento_entradas() -> dict:
             "coluna_basecamp": c["estado"],
             "linha": agendamento["linha"],
             "dia_inicio_producao": agendamento["dia_inicio"],
-            "volume_m3": agendamento["volume_m3"],
+            "volume_m3": volume,
             "tipo_madeira": agendamento["tipo_madeira"],
-            "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"]),
+            "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
+            "em_continuo": em_continuo,
             "charriot": extra.get("charriot"),
             "wip_cmp": extra.get("wip_cmp"),
             "wip_lar": extra.get("wip_lar"),
             "wip_esp": extra.get("wip_esp"),
+            "indice_wip": indice_wip,
+            "qtd_wip_m3": round(volume * indice_wip, 2) if volume is not None else None,
             "toro_cmp": extra.get("toro_cmp"),
             "toro_tipo": extra.get("toro_tipo"),
+            "indice_toros": indice_toros,
+            "qtd_toros_m3": round(volume * indice_toros, 2) if volume is not None else None,
         })
     return {"charriots": CHARRIOTS, "entradas": entradas}
 
@@ -94,20 +138,28 @@ def _validar_numero_positivo(nome: str, valor):
         return f"{nome} tem de ser maior que 0"
     return None
 
-def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp: float = None) -> dict:
-    for nome, valor in (("comprimento (WIP)", cmp), ("largura (WIP)", lar), ("espessura (WIP)", esp)):
+def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp: float = None,
+                indice_wip: float = None) -> dict:
+    for nome, valor in (("comprimento (WIP)", cmp), ("largura (WIP)", lar), ("espessura (WIP)", esp),
+                       ("índice de WIP", indice_wip)):
         erro = _validar_numero_positivo(nome, valor)
         if erro:
             return {"erro": erro}
-    return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp)
+    return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
 
-def guardar_toro(basecamp_card_id: int, cmp: float = None, tipo: str = None) -> dict:
-    erro = _validar_numero_positivo("comprimento do toro", cmp)
-    if erro:
-        return {"erro": erro}
+def guardar_toro(basecamp_card_id: int, cmp: float = None, tipo: str = None, indice_toros: float = None) -> dict:
+    for nome, valor in (("comprimento do toro", cmp), ("índice de toros", indice_toros)):
+        erro = _validar_numero_positivo(nome, valor)
+        if erro:
+            return {"erro": erro}
     if tipo is not None and tipo not in TORO_TIPOS:
         return {"erro": f"tipo de toro desconhecido: {tipo!r} — usa \"IN\" ou \"MT\""}
-    return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo)
+    return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo, indice_toros)
+
+def definir_em_continuo(basecamp_card_id: int, em_continuo: bool) -> dict:
+    """Marca/desmarca "Em contínuo" (ver _calcular_dia_entrada) para uma OF
+    em concreto — fica gravado em definitivo, mesmo que o título mude."""
+    return db.definir_em_continuo_entrada(basecamp_card_id, bool(em_continuo))
 
 def pagina_planeamento_entradas() -> str:
     return _TEMPLATE
@@ -240,6 +292,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
   a.btn{display:inline-block;text-decoration:none}
   .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
   .btn.primary:hover{background:#175CAF;border-color:#175CAF}
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:9px 0;border-top:1px solid var(--line)}
+  .frow label{color:var(--dim);font-size:14px;flex:0 0 auto}
+  .frow input,.frow select,.frow textarea{flex:1 1 auto;min-width:0;max-width:62%}
+  .owner{font-size:12.5px;color:var(--dim);margin-top:12px;background:var(--canvas);
+    border-radius:8px;padding:9px 11px}
 
   /* grupos WIP/Toro: sub-campos numa única linha, ordenados (pedido
      explícito do Rui, 2026-10-01) */
@@ -320,6 +378,7 @@ const $=s=>document.querySelector(s);
 const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3"];
 const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=[2600,2500,3100,2350,2550];
+const INDICE_TOROS_DEFAULT=1.58, INDICE_WIP_DEFAULT=1.8;
 let entradas=[];
 let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let logs=[], DAY=92, LANE=78;
@@ -514,6 +573,16 @@ function toroCmpOptionsHtml(atual){
     `<option value="outro"${(atual!=null && !ehPreset)?" selected":""}>Outro…</option>`;
 }
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
+/* QTD Toros/QTD Wip nunca se guardam — recalculam-se aqui ao vivo, à
+   medida que o índice muda no formulário (pedido explícito do Rui,
+   2026-10-01: "por omissão tem de fazer sempre este cálculo"), a partir
+   do volume da OF (fixo, vem da produção) × o índice atual no campo. */
+function recalcularQtd(it){
+  const indiceWip=parseFloat($("#fIndiceWip").value);
+  const indiceToros=parseFloat($("#fIndiceToros").value);
+  $("#fQtdWip").textContent = (it.volume!=null && !isNaN(indiceWip)) ? (Math.round(it.volume*indiceWip*100)/100)+" m³" : "—";
+  $("#fQtdToros").textContent = (it.volume!=null && !isNaN(indiceToros)) ? (Math.round(it.volume*indiceToros*100)/100)+" m³" : "—";
+}
 function openSheet(id){
   const it=item(id); if(!it) return;
   const toroEhPreset = it.toroCmp!=null && TORO_PRESETS.includes(it.toroCmp);
@@ -522,11 +591,19 @@ function openSheet(id){
     <div class="of mono">card #${numCurto(it.id)}</div>
     <h3>${it.titulo}</h3>
 
+    <div class="frow"><label>Em contínuo</label>
+      <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto" ${it.emContinuo?"checked":""}></div>
+    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
+      Marcado: entra no charriot no mesmo dia do início da produção. Desmarcado: entra no dia anterior
+      (ou sexta-feira, se isso cair a fim de semana).</div>
+
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="number" min="0" step="0.1" value="${it.wipCmp??""}"></div>
       <div class="miniField"><label>Lar</label><input id="fWipLar" type="number" min="0" step="0.1" value="${it.wipLar??""}"></div>
       <div class="miniField"><label>Esp</label><input id="fWipEsp" type="number" min="0" step="0.1" value="${it.wipEsp??""}"></div>
+      <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="number" min="0" step="0.01" value="${it.indiceWip}"></div>
+      <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
     </div>
 
     <label class="grupoLbl">Toro</label>
@@ -539,6 +616,8 @@ function openSheet(id){
         <option value="IN"${it.toroTipo==="IN"?" selected":""}>IN</option>
         <option value="MT"${it.toroTipo==="MT"?" selected":""}>MT</option>
       </select></div>
+      <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="number" min="0" step="0.01" value="${it.indiceToros}"></div>
+      <div class="miniField"><label>QTD Toros</label><b id="fQtdToros" class="mono" style="align-self:center">—</b></div>
     </div>
 
     <div class="kv"><span>Nome</span><b>${it.titulo}</b></div>
@@ -558,28 +637,42 @@ function openSheet(id){
   $("#fToroCmp").onchange=()=>{
     $("#fToroCmpOutroWrap").style.display = $("#fToroCmp").value==="outro" ? "" : "none";
   };
+  $("#fIndiceWip").oninput=()=>recalcularQtd(it);
+  $("#fIndiceToros").oninput=()=>recalcularQtd(it);
+  recalcularQtd(it);
   $("#guardar").onclick=async()=>{
     $("#fErro").textContent="";
     const wipCmp=$("#fWipCmp").value?parseFloat($("#fWipCmp").value):null;
     const wipLar=$("#fWipLar").value?parseFloat($("#fWipLar").value):null;
     const wipEsp=$("#fWipEsp").value?parseFloat($("#fWipEsp").value):null;
+    const indiceWip=$("#fIndiceWip").value?parseFloat($("#fIndiceWip").value):null;
+    const indiceToros=$("#fIndiceToros").value?parseFloat($("#fIndiceToros").value):null;
     let toroCmp=null;
     if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value?parseFloat($("#fToroCmpOutro").value):null; }
     else if($("#fToroCmp").value){ toroCmp=parseFloat($("#fToroCmp").value); }
     const toroTipo=$("#fToroTipo").value||null;
+    const emContinuo=$("#fEmContinuo").checked;
     try{
       const r1=await fetch("/planeamento-entradas/wip",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:it.id,cmp:wipCmp,lar:wipLar,esp:wipEsp})});
+        body:JSON.stringify({basecamp_card_id:it.id,cmp:wipCmp,lar:wipLar,esp:wipEsp,indice_wip:indiceWip})});
       const d1=await r1.json();
       if(d1.erro){ $("#fErro").textContent=d1.erro; return; }
       const r2=await fetch("/planeamento-entradas/toro",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:it.id,cmp:toroCmp,tipo:toroTipo})});
+        body:JSON.stringify({basecamp_card_id:it.id,cmp:toroCmp,tipo:toroTipo,indice_toros:indiceToros})});
       const d2=await r2.json();
       if(d2.erro){ $("#fErro").textContent=d2.erro; return; }
+      if(emContinuo!==it.emContinuo){
+        const r3=await fetch("/planeamento-entradas/em-continuo",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:it.id,em_continuo:emContinuo})});
+        const d3=await r3.json();
+        if(d3.erro){ $("#fErro").textContent=d3.erro; return; }
+      }
       it.wipCmp=wipCmp; it.wipLar=wipLar; it.wipEsp=wipEsp; it.toroCmp=toroCmp; it.toroTipo=toroTipo;
+      it.indiceWip=indiceWip??INDICE_WIP_DEFAULT; it.indiceToros=indiceToros??INDICE_TOROS_DEFAULT;
+      it.emContinuo=emContinuo;
       log("local",`dados de "${it.titulo}" guardados`);
       closeSheet();
-      renderLanes();
+      await carregar(); // o dia de entrada pode ter mudado (ver "em contínuo")
     }catch(e){ $("#fErro").textContent="Falhou a guardar: "+e; }
   };
 }
@@ -601,9 +694,11 @@ async function carregar(){
     entradas=(d.entradas||[]).map(e=>({
       id:e.basecamp_card_id, titulo:e.titulo, url:e.url, coluna:e.coluna_basecamp,
       linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira,
-      gs:idxOf(e.dia_entrada), charriot:e.charriot,
+      gs:idxOf(e.dia_entrada), charriot:e.charriot, emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
+      indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,
+      indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
     })).filter(e=>e.gs>=0);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render();

@@ -437,6 +437,25 @@ CREATE TABLE IF NOT EXISTS entradas_charriot_ecos_largos (
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
 );
+-- pedido explícito do Rui (2026-10-01): QTD Toros/QTD Wip (m³) calculados
+-- sempre a partir do volume da OF (já lido em direto da produção, nunca
+-- duplicado aqui) vezes um índice — indice_toros/indice_wip guardam-se
+-- por OF (NULL = ainda não escolhido à mão, usa-se o valor por omissão,
+-- 1.58/1.8 — ver tools/planeamento_entradas.INDICE_TOROS_DEFAULT/
+-- INDICE_WIP_DEFAULT) para cada encomenda poder ter o seu próprio índice
+-- sem afetar as outras. Os próprios QTD Toros/QTD Wip nunca se guardam —
+-- calculam-se sempre em direto (ver estado_planeamento_entradas), para
+-- nunca ficarem desatualizados se o volume mudar na outra página.
+--
+-- em_continuo (NULL = ainda não escolhido à mão) marca que esta OF entra
+-- no charriot no MESMO dia do início da produção, em vez do dia anterior
+-- (pedido explícito do Rui, 2026-10-01) — por omissão true para
+-- "quadradilho" (título sem "OF" — ver tools.planeamento_entradas.
+-- _eh_quadradilho), false para as restantes; a pessoa pode sempre mudar à
+-- mão, e essa escolha fica gravada aqui em definitivo.
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_toros NUMERIC;
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_wip NUMERIC;
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS em_continuo BOOLEAN;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1057,7 +1076,8 @@ def entradas_charriot_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, charriot, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo
+                """SELECT basecamp_card_id, charriot, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
+                          indice_toros, indice_wip, em_continuo
                    FROM entradas_charriot_ecos_largos"""
             )
             return [{
@@ -1068,6 +1088,9 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
                 "toro_cmp": float(l["toro_cmp"]) if l["toro_cmp"] is not None else None,
                 "toro_tipo": l["toro_tipo"],
+                "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
+                "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
+                "em_continuo": l["em_continuo"],
             } for l in cur.fetchall()]
 
 def atribuir_charriot_entrada(basecamp_card_id: int, charriot: str = None) -> dict:
@@ -1086,34 +1109,59 @@ def atribuir_charriot_entrada(basecamp_card_id: int, charriot: str = None) -> di
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
-def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: float) -> dict:
-    """Guarda os campos WIP (comprimento/largura/espessura) de uma OF na
-    página "Planeamento de Entradas"."""
+def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: float, indice_wip: float = None) -> dict:
+    """Guarda os campos WIP (comprimento/largura/espessura) e o índice usado
+    para calcular QTD Wip (m³) desta OF na página "Planeamento de
+    Entradas" — indice_wip=None mantém o já guardado (ou o valor por
+    omissão, 1.8, se nunca tiver sido definido; ver
+    tools.planeamento_entradas.INDICE_WIP_DEFAULT)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, wip_cmp, wip_lar, wip_esp)
-                   VALUES (%s, %s, %s, %s)
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, wip_cmp, wip_lar, wip_esp, indice_wip)
+                   VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        wip_cmp = EXCLUDED.wip_cmp, wip_lar = EXCLUDED.wip_lar, wip_esp = EXCLUDED.wip_esp,
+                       indice_wip = COALESCE(EXCLUDED.indice_wip, entradas_charriot_ecos_largos.indice_wip),
                        atualizado_em = now()""",
-                (basecamp_card_id, cmp, lar, esp)
+                (basecamp_card_id, cmp, lar, esp, indice_wip)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
-def guardar_toro_entrada(basecamp_card_id: int, cmp: float, tipo: str) -> dict:
-    """Guarda os campos Toro (comprimento/tipo) de uma OF na página
-    "Planeamento de Entradas"."""
+def guardar_toro_entrada(basecamp_card_id: int, cmp: float, tipo: str, indice_toros: float = None) -> dict:
+    """Guarda os campos Toro (comprimento/tipo) e o índice usado para
+    calcular QTD Toros (m³) desta OF na página "Planeamento de Entradas"
+    — indice_toros=None mantém o já guardado (ou o valor por omissão,
+    1.58, se nunca tiver sido definido; ver
+    tools.planeamento_entradas.INDICE_TOROS_DEFAULT)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, toro_cmp, toro_tipo)
-                   VALUES (%s, %s, %s)
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, toro_cmp, toro_tipo, indice_toros)
+                   VALUES (%s, %s, %s, %s)
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        toro_cmp = EXCLUDED.toro_cmp, toro_tipo = EXCLUDED.toro_tipo,
+                       indice_toros = COALESCE(EXCLUDED.indice_toros, entradas_charriot_ecos_largos.indice_toros),
                        atualizado_em = now()""",
-                (basecamp_card_id, cmp, tipo)
+                (basecamp_card_id, cmp, tipo, indice_toros)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def definir_em_continuo_entrada(basecamp_card_id: int, em_continuo: bool) -> dict:
+    """Marca (ou desmarca) "Em contínuo" de uma OF na página "Planeamento
+    de Entradas" — ver tools.planeamento_entradas._calcular_dia_entrada:
+    quando marcado, a OF entra no charriot no mesmo dia do início da
+    produção, em vez do dia anterior."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, em_continuo)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       em_continuo = EXCLUDED.em_continuo, atualizado_em = now()""",
+                (basecamp_card_id, em_continuo)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

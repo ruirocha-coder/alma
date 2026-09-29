@@ -782,28 +782,38 @@ def planeamento_entradas_atribuir(corpo: dict = Body(...)):
 
 @app.post("/planeamento-entradas/wip")
 def planeamento_entradas_wip(corpo: dict = Body(...)):
-    """Guarda os campos WIP (comprimento/largura/espessura) de uma OF —
-    ver tools/planeamento_entradas.guardar_wip."""
+    """Guarda os campos WIP (comprimento/largura/espessura) e o índice de
+    WIP de uma OF — ver tools/planeamento_entradas.guardar_wip."""
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
     resultado = planeamento_entradas.guardar_wip(
-        basecamp_card_id, corpo.get("cmp"), corpo.get("lar"), corpo.get("esp"))
+        basecamp_card_id, corpo.get("cmp"), corpo.get("lar"), corpo.get("esp"), corpo.get("indice_wip"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
 @app.post("/planeamento-entradas/toro")
 def planeamento_entradas_toro(corpo: dict = Body(...)):
-    """Guarda os campos Toro (comprimento/tipo) de uma OF — ver
-    tools/planeamento_entradas.guardar_toro."""
+    """Guarda os campos Toro (comprimento/tipo) e o índice de toros de uma
+    OF — ver tools/planeamento_entradas.guardar_toro."""
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
     resultado = planeamento_entradas.guardar_toro(
-        basecamp_card_id, corpo.get("cmp"), corpo.get("tipo"))
+        basecamp_card_id, corpo.get("cmp"), corpo.get("tipo"), corpo.get("indice_toros"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-entradas/em-continuo")
+def planeamento_entradas_em_continuo(corpo: dict = Body(...)):
+    """Marca/desmarca "Em contínuo" de uma OF — ver
+    tools/planeamento_entradas.definir_em_continuo."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.definir_em_continuo(basecamp_card_id, bool(corpo.get("em_continuo")))
     return JSONResponse(resultado)
 
 
