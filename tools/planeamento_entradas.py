@@ -18,7 +18,11 @@ import db
 from tools import planeamento_serracao as ps
 
 CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros"]
-TORO_CMP_PRESETS = [2600, 2500, 3100, 2350, 2550]
+# valores corrigidos (pedido explícito do Rui, 2026-10-02 — os antigos
+# 2600/2500/3100/2350/2550 estavam com a escala errada) + duas opções
+# novas com diâmetro marcado ("⌀16"), por isso texto e não número puro —
+# ver nota na migração de toro_cmp para TEXT, em db.py.
+TORO_CMP_PRESETS = ["260", "250", "310", "235", "255", "255 ⌀16", "235 ⌀16"]
 TORO_TIPOS = {"IN", "MT"}
 
 # QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
@@ -178,11 +182,15 @@ def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp
             return {"erro": erro}
     return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
 
-def guardar_toro(basecamp_card_id: int, cmp: float = None, tipo: str = None, indice_toros: float = None) -> dict:
-    for nome, valor in (("comprimento do toro", cmp), ("índice de toros", indice_toros)):
-        erro = _validar_numero_positivo(nome, valor)
-        if erro:
-            return {"erro": erro}
+def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indice_toros: float = None) -> dict:
+    # cmp é texto, não número (ver TORO_CMP_PRESETS — há opções como "255
+    # ⌀16" que não são um número puro); só o índice tem de ser validado
+    # como número positivo.
+    erro = _validar_numero_positivo("índice de toros", indice_toros)
+    if erro:
+        return {"erro": erro}
+    if cmp is not None and not str(cmp).strip():
+        return {"erro": "comprimento do toro inválido"}
     if tipo is not None and tipo not in TORO_TIPOS:
         return {"erro": f"tipo de toro desconhecido: {tipo!r} — usa \"IN\" ou \"MT\""}
     return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo, indice_toros)
@@ -410,7 +418,7 @@ const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; retur
 const $=s=>document.querySelector(s);
 const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros"];
 const LANES=["Por atribuir",...CHARRIOTS];
-const TORO_PRESETS=[2600,2500,3100,2350,2550];
+const TORO_PRESETS=["260","250","310","235","255","255 ⌀16","235 ⌀16"];
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
    explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
@@ -712,9 +720,11 @@ function openSheet(id){
     const wipEsp=$("#fWipEsp").value?parseFloat($("#fWipEsp").value):null;
     const indiceWip=$("#fIndiceWip").value?parseFloat($("#fIndiceWip").value):null;
     const indiceToros=$("#fIndiceToros").value?parseFloat($("#fIndiceToros").value):null;
+    // toroCmp é texto (não número — há opções como "255 ⌀16", ver
+    // TORO_PRESETS): nunca usar parseFloat aqui, perderia o "⌀16".
     let toroCmp=null;
-    if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value?parseFloat($("#fToroCmpOutro").value):null; }
-    else if($("#fToroCmp").value){ toroCmp=parseFloat($("#fToroCmp").value); }
+    if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value||null; }
+    else if($("#fToroCmp").value){ toroCmp=$("#fToroCmp").value; }
     const toroTipo=$("#fToroTipo").value||null;
     const emContinuo=$("#fEmContinuo").checked;
     try{

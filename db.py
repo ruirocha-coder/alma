@@ -432,7 +432,7 @@ CREATE TABLE IF NOT EXISTS entradas_charriot_ecos_largos (
     wip_cmp NUMERIC,
     wip_lar NUMERIC,
     wip_esp NUMERIC,
-    toro_cmp NUMERIC,
+    toro_cmp TEXT,
     toro_tipo TEXT,
     criado_em TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
@@ -456,6 +456,16 @@ CREATE TABLE IF NOT EXISTS entradas_charriot_ecos_largos (
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_toros NUMERIC;
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_wip NUMERIC;
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS em_continuo BOOLEAN;
+
+-- toro_cmp passou de NUMERIC a TEXT (pedido explícito do Rui, 2026-10-02):
+-- há opções de comprimento de toro que não são um número puro (ex: "255
+-- ⌀16", a marcar um diâmetro específico) — nunca foi usado em nenhum
+-- cálculo (só mostrado/escolhido, ver tools/planeamento_entradas.py), por
+-- isso passar a texto não afeta QTD Toros/QTD Wip. Instalações novas já
+-- criam a coluna como TEXT (ver CREATE TABLE acima); esta linha migra as
+-- que já tinham NUMERIC, sem perder os valores já lá guardados. Idempotente
+-- — corre em todos os arranques, sem custo depois da 1ª vez (já fica TEXT).
+ALTER TABLE entradas_charriot_ecos_largos ALTER COLUMN toro_cmp TYPE TEXT USING toro_cmp::text;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1083,7 +1093,11 @@ def historico_valores_entradas() -> dict:
                     f"""SELECT DISTINCT {campo} AS v FROM entradas_charriot_ecos_largos
                         WHERE {campo} IS NOT NULL ORDER BY {campo}"""
                 )
-                resultado[campo] = [float(l["v"]) for l in cur.fetchall()]
+                linhas = cur.fetchall()
+                # toro_cmp é TEXT (ver nota na migração, em SCHEMA) — pode ter
+                # valores como "255 ⌀16", não convertíveis a número.
+                resultado[campo] = ([l["v"] for l in linhas] if campo == "toro_cmp"
+                                    else [float(l["v"]) for l in linhas])
     return resultado
 
 def entradas_charriot_ecos_largos() -> list[dict]:
@@ -1104,7 +1118,7 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "wip_cmp": float(l["wip_cmp"]) if l["wip_cmp"] is not None else None,
                 "wip_lar": float(l["wip_lar"]) if l["wip_lar"] is not None else None,
                 "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
-                "toro_cmp": float(l["toro_cmp"]) if l["toro_cmp"] is not None else None,
+                "toro_cmp": l["toro_cmp"],
                 "toro_tipo": l["toro_tipo"],
                 "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
                 "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
@@ -1147,7 +1161,7 @@ def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: floa
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
-def guardar_toro_entrada(basecamp_card_id: int, cmp: float, tipo: str, indice_toros: float = None) -> dict:
+def guardar_toro_entrada(basecamp_card_id: int, cmp: str, tipo: str, indice_toros: float = None) -> dict:
     """Guarda os campos Toro (comprimento/tipo) e o índice usado para
     calcular QTD Toros (m³) desta OF na página "Planeamento de Entradas"
     — indice_toros=None mantém o já guardado (ou o valor por omissão,
