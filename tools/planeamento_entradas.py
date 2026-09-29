@@ -512,8 +512,8 @@ function renderLanes(){
         el.style.width=(DAY-8)+"px";
         el.style.height=ITEM_H+"px";
         el.innerHTML=`<div class="tt">${e.titulo}</div>
-          <div class="of">QTD Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
-          <div class="of">QTD Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>`;
+          <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
+          <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>`;
         bl.appendChild(el);
       });
     });
