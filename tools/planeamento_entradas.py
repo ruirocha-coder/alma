@@ -17,7 +17,7 @@ from datetime import date, timedelta
 import db
 from tools import planeamento_serracao as ps
 
-CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3"]
+CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros"]
 TORO_CMP_PRESETS = [2600, 2500, 3100, 2350, 2550]
 TORO_TIPOS = {"IN", "MT"}
 
@@ -408,7 +408,7 @@ const idxOf=iso=>MASTER.findIndex(d=>d.iso===iso);
 const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; return idx-((dow+6)%7); };
 
 const $=s=>document.querySelector(s);
-const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3"];
+const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros"];
 const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=[2600,2500,3100,2350,2550];
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
