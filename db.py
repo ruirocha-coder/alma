@@ -428,7 +428,7 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS inicio_ver
 CREATE TABLE IF NOT EXISTS entradas_charriot_ecos_largos (
     id SERIAL PRIMARY KEY,
     basecamp_card_id BIGINT NOT NULL UNIQUE,
-    charriot TEXT,
+    charriots TEXT[],
     wip_cmp NUMERIC,
     wip_lar NUMERIC,
     wip_esp NUMERIC,
@@ -494,6 +494,30 @@ BEGIN
 END $$;
 """
 
+# suporte a produção em vários charriots ao mesmo tempo (pedido explícito
+# do Rui, 2026-10-02): uma OF pode estar a ser trabalhada em mais que um
+# charriot em simultâneo (ex: Charriot 1 e 2) — "charriot" (um só valor)
+# passa a "charriots" (lista). Nenhuma OF real tinha charriot atribuído
+# até esta mudança (confirmado ao vivo, 2026-10-02, contra os dados reais
+# em produção) — a conversão do valor antigo para a lista nova é só por
+# segurança, para o caso de alguma atribuição ter acontecido entre essa
+# verificação e o deploy desta migração. Guardado por "a coluna antiga,
+# singular, ainda existe" — deixa de correr sozinho assim que a migração
+# acontece uma vez (RENAME COLUMN falharia numa 2ª tentativa, ao contrário
+# de ADD COLUMN IF NOT EXISTS), tal como MIGRACAO_CLIENTE_RESUMO_NULAVEL.
+MIGRACAO_CHARRIOTS_ARRAY = """
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'entradas_charriot_ecos_largos' AND column_name = 'charriot') THEN
+        ALTER TABLE entradas_charriot_ecos_largos RENAME COLUMN charriot TO charriots;
+        ALTER TABLE entradas_charriot_ecos_largos
+            ALTER COLUMN charriots TYPE TEXT[]
+            USING (CASE WHEN charriots IS NULL THEN NULL ELSE ARRAY[charriots] END);
+    END IF;
+END $$;
+"""
+
 def get_conn():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -503,6 +527,7 @@ def inicializar_schema():
             cur.execute(SCHEMA)
             cur.execute(MIGRACOES)
             cur.execute(MIGRACAO_CLIENTE_RESUMO_NULAVEL)
+            cur.execute(MIGRACAO_CHARRIOTS_ARRAY)
             cur.execute(SEED_PARAMETROS_ESTIMATIVA)
             cur.execute(SEED_PAUSA_FERIAS_AGOSTO_2026)
             cur.execute(SEED_LINHAS_PRODUCAO_ECOS_LARGOS)
@@ -1108,13 +1133,13 @@ def entradas_charriot_ecos_largos() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT basecamp_card_id, charriot, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
+                """SELECT basecamp_card_id, charriots, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
                           indice_toros, indice_wip, em_continuo
                    FROM entradas_charriot_ecos_largos"""
             )
             return [{
                 "basecamp_card_id": l["basecamp_card_id"],
-                "charriot": l["charriot"],
+                "charriots": l["charriots"] or [],
                 "wip_cmp": float(l["wip_cmp"]) if l["wip_cmp"] is not None else None,
                 "wip_lar": float(l["wip_lar"]) if l["wip_lar"] is not None else None,
                 "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
@@ -1125,18 +1150,21 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "em_continuo": l["em_continuo"],
             } for l in cur.fetchall()]
 
-def atribuir_charriot_entrada(basecamp_card_id: int, charriot: str = None) -> dict:
-    """Atribui (ou remove, com charriot=None) o charriot de uma OF na
-    página "Planeamento de Entradas" — usado ao arrastar um card entre a
-    linha "Por atribuir" e um dos charriots."""
+def atribuir_charriots_entrada(basecamp_card_id: int, charriots: list = None) -> dict:
+    """Atribui (substitui) a lista de charriots de uma OF na página
+    "Planeamento de Entradas" — pode estar em vários ao mesmo tempo (ex:
+    Charriot 1 e 2 em simultâneo, pedido explícito do Rui, 2026-10-02),
+    ou nenhum (None/lista vazia = "por atribuir"). Usado tanto ao
+    arrastar um card entre lanes (substitui sempre por um único charriot)
+    como pelas caixas de seleção na ficha (pode marcar vários)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, charriot)
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, charriots)
                    VALUES (%s, %s)
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
-                       charriot = EXCLUDED.charriot, atualizado_em = now()""",
-                (basecamp_card_id, charriot)
+                       charriots = EXCLUDED.charriots, atualizado_em = now()""",
+                (basecamp_card_id, charriots or None)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

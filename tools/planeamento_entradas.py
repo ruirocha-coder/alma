@@ -1,13 +1,16 @@
 # tools/planeamento_entradas.py — página "Planeamento de Entradas" da Ecos
-# Largos: planear o que entra nos charriots (Charriot 1/2/3), um dia antes
-# do início da produção de cada OF (pedido explícito do Rui, 2026-10-01).
+# Largos: planear o que entra nos charriots (Charriot 1/2/3, Multiserra de
+# Toros), um dia antes do início da produção de cada OF (pedido explícito
+# do Rui, 2026-10-01) — uma OF pode estar em vários charriots ao mesmo
+# tempo (pedido explícito do Rui, 2026-10-02).
 #
 # Segue exatamente a mesma filosofia da logística (ver
 # tools/planeamento_serracao.py): não duplica nome/linha/dia de início/
 # volume/tipo de madeira — isso lê-se sempre em direto da OF de produção já
 # agendada (mesmos _cards_of_ativos/agendamentos_producao_ecos_largos), e só
-# se guarda aqui o que é específico desta página (charriot atribuído + os
-# campos WIP/Toro preenchidos à mão). Por isso não existe nenhuma função de
+# se guarda aqui o que é específico desta página (charriots atribuídos —
+# pode estar em vários ao mesmo tempo — + os campos WIP/Toro preenchidos à
+# mão). Por isso não existe nenhuma função de
 # "replicar" propriamente dita — uma OF agendada na outra página aparece
 # aqui sozinha, sempre que se lê o estado (ver estado_planeamento_entradas),
 # exatamente como uma OF com tipo de madeira definido aparece sozinha na
@@ -76,10 +79,10 @@ def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
 
 def estado_planeamento_entradas() -> dict:
     """Junta as OFs já agendadas na produção (mesma fonte da outra página)
-    com o charriot/WIP/Toro guardados aqui — devolve todas as OFs
-    "candidatas a entrada", cada uma já com o charriot atribuído (ou None,
-    "por atribuir") e o dia de entrada calculado (ver
-    _calcular_dia_entrada)."""
+    com o(s) charriot(s)/WIP/Toro guardados aqui — devolve todas as OFs
+    "candidatas a entrada", cada uma já com a lista de charriots atribuídos
+    (pode estar em vários ao mesmo tempo; lista vazia = "por atribuir") e o
+    dia de entrada calculado (ver _calcular_dia_entrada)."""
     cards_ativos = ps._cards_of_ativos()
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     extras = {e["basecamp_card_id"]: e for e in db.entradas_charriot_ecos_largos()}
@@ -143,7 +146,7 @@ def estado_planeamento_entradas() -> dict:
             "cor": agendamento["cor"],
             "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
             "em_continuo": em_continuo,
-            "charriot": extra.get("charriot"),
+            "charriots": extra.get("charriots") or [],
             "wip_cmp": wip_cmp,
             "wip_lar": wip_lar,
             "wip_esp": wip_esp,
@@ -156,11 +159,17 @@ def estado_planeamento_entradas() -> dict:
         })
     return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas()}
 
-def atribuir_charriot(basecamp_card_id: int, charriot: str = None) -> dict:
-    """Atribui (ou remove, com charriot=None) o charriot de uma OF."""
-    if charriot is not None and charriot not in CHARRIOTS:
-        return {"erro": f"charriot desconhecido: {charriot!r}"}
-    return db.atribuir_charriot_entrada(basecamp_card_id, charriot)
+def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
+    """Atribui (substitui) os charriots de uma OF — pode estar em vários ao
+    mesmo tempo (ex: Charriot 1 e 2 em simultâneo, pedido explícito do
+    Rui, 2026-10-02), ou nenhum (None/lista vazia volta para "por
+    atribuir")."""
+    charriots = [c for c in (charriots or []) if c] or None
+    if charriots is not None:
+        desconhecidos = [c for c in charriots if c not in CHARRIOTS]
+        if desconhecidos:
+            return {"erro": f"charriot desconhecido: {desconhecidos[0]!r}"}
+    return db.atribuir_charriots_entrada(basecamp_card_id, charriots)
 
 def _validar_numero_positivo(nome: str, valor):
     if valor is None:
@@ -290,13 +299,18 @@ _TEMPLATE = r"""<!DOCTYPE html>
     touch-action:none;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,.09)}
   .blk:hover{box-shadow:0 2px 7px rgba(0,0,0,.13)}
   .blk:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
-  .blk .tt{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .blk .tt{display:flex;align-items:center;gap:5px;font-size:13.5px;font-weight:600}
+  .blk .tt .ttText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .blk .of{font-size:11.5px;color:var(--dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dense .blk{padding:3px 6px;border-radius:7px}
   .dense .blk .of{font-size:10px}
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
   .blk.semCharriot{border-left-style:dashed}
+  /* pedido explícito do Rui (2026-10-02): etiqueta de uma OF em vários
+     charriots ao mesmo tempo (ex: "1+2"), nunca encolhe nem trunca. */
+  .multiBadge{flex:0 0 auto;padding:1px 6px;border-radius:8px;background:var(--gold);
+    color:#fff;font-size:10.5px;font-weight:700}
 
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
@@ -341,6 +355,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   /* grupos WIP/Toro: sub-campos numa única linha, ordenados (pedido
      explícito do Rui, 2026-10-01) */
   .grupoLbl{display:block;font-size:14px;font-weight:700;color:var(--ink);margin-top:16px}
+  .charriotOpts{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:8px}
+  .charriotOpt{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink);font-weight:400}
+  .charriotOpt input{width:auto}
   /* pedido explícito do Rui (2026-10-01): "Em contínuo" mais destacado */
   .destaque{color:var(--blue)!important;font-weight:700;font-size:15.5px}
   .miniRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
@@ -442,7 +459,19 @@ let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
 let logs=[], DAY=92, LANE=78;
 
 const item=id=>entradas.find(e=>e.id===id);
-const laneIdx=e=>e.charriot ? CHARRIOTS.indexOf(e.charriot)+1 : 0;
+/* uma OF pode estar em vários charriots ao mesmo tempo (pedido explícito
+   do Rui, 2026-10-02) mas só aparece numa lane, com uma etiqueta a
+   indicar todos (ver charriotAbbrev) — a lane é a do charriot de menor
+   índice, para ficar sempre num sítio previsível independentemente da
+   ordem em que foram marcados. */
+const laneIdx=e=>{
+  if(!e.charriots || !e.charriots.length) return 0;
+  return Math.min(...e.charriots.map(c=>CHARRIOTS.indexOf(c)))+1;
+};
+/* etiqueta curta do(s) charriot(s) de um card, para quando está em mais
+   que um ao mesmo tempo (ex: "1+2") — Charriot N mostra só o número, a
+   Multiserra mostra "M". */
+const charriotAbbrev=nome=>nome==="Multiserra de Toros" ? "M" : String(CHARRIOTS.indexOf(nome)+1);
 const numCurto=id=>String(id).slice(-4);
 
 function metrics(){
@@ -512,14 +541,20 @@ function renderLanes(){
       if(a<0||a>=view.len) return;
       lista.forEach((e,i)=>{
         const el=document.createElement("div");
-        el.className="blk"+(e.charriot?"":" semCharriot");
+        const temCharriot=e.charriots && e.charriots.length>0;
+        el.className="blk"+(temCharriot?"":" semCharriot");
         el.tabIndex=0; el.dataset.id=e.id;
         el.style.borderLeftColor=corProduto(e);
         el.style.left=(a*DAY+3)+"px";
         el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+i*(ITEM_H+ITEM_GAP))+"px";
         el.style.width=(DAY-8)+"px";
         el.style.height=ITEM_H+"px";
-        el.innerHTML=`<div class="tt">${e.titulo}</div>
+        // pedido explícito do Rui (2026-10-02): OF em vários charriots ao
+        // mesmo tempo aparece só uma vez (nunca duplicada), com uma
+        // etiqueta a indicar quais (ex: "1+2").
+        const badge = (e.charriots && e.charriots.length>1)
+          ? `<span class="multiBadge">${e.charriots.map(charriotAbbrev).join("+")}</span>` : "";
+        el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>${badge}</div>
           <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
           <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>`;
         bl.appendChild(el);
@@ -530,7 +565,7 @@ function renderLanes(){
 }
 function stats(){
   $("#statTotal").textContent=entradas.length;
-  $("#statPorAtribuir").textContent=entradas.filter(e=>!e.charriot).length;
+  $("#statPorAtribuir").textContent=entradas.filter(e=>!(e.charriots&&e.charriots.length)).length;
 }
 function render(){
   metrics(); renderDays(); renderLanes();
@@ -601,10 +636,16 @@ $("#lanes").addEventListener("pointerup",e=>{
   if(!moveu) return; // clique simples sem arrastar — não faz nada sozinho
   const r=$("#lanes").getBoundingClientRect();
   const novaLane=laneDeY(e.clientY-r.top);
-  const novoCharriot = novaLane===0 ? null : CHARRIOTS[novaLane-1];
-  if(novoCharriot===it.charriot){ renderLanes(); return; }
-  const anterior=it.charriot;
-  it.charriot=novoCharriot;
+  // arrastar substitui sempre por um único charriot (ainda que a OF
+  // estivesse em vários ao mesmo tempo — ver caixas de seleção na ficha
+  // para marcar mais que um sem arrastar).
+  const novosCharriots = novaLane===0 ? null : [CHARRIOTS[novaLane-1]];
+  const atuais = it.charriots||[];
+  const semMudanca = (novosCharriots===null && atuais.length===0) ||
+    (novosCharriots && atuais.length===1 && atuais[0]===novosCharriots[0]);
+  if(semMudanca){ renderLanes(); return; }
+  const anterior=it.charriots;
+  it.charriots=novosCharriots;
   renderLanes();
   atribuirServidor(it, anterior);
 });
@@ -620,11 +661,11 @@ async function atribuirServidor(it, anterior){
   try{
     const r=await fetch("/planeamento-entradas/atribuir",{method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({basecamp_card_id:it.id,charriot:it.charriot})});
+      body:JSON.stringify({basecamp_card_id:it.id,charriots:it.charriots||[]})});
     const d=await r.json();
-    if(d.erro){ alert(d.erro); it.charriot=anterior; renderLanes(); return; }
-    log("local",`"${it.titulo}" atribuída a ${it.charriot||"por atribuir"}`);
-  }catch(e){ alert("Falhou a guardar: "+e); it.charriot=anterior; renderLanes(); }
+    if(d.erro){ alert(d.erro); it.charriots=anterior; renderLanes(); return; }
+    log("local",`"${it.titulo}" atribuída a ${(it.charriots&&it.charriots.length)?it.charriots.join(" + "):"por atribuir"}`);
+  }catch(e){ alert("Falhou a guardar: "+e); it.charriots=anterior; renderLanes(); }
 }
 
 /* ---------- ficha ---------- */
@@ -659,6 +700,15 @@ function openSheet(id){
   $("#sheet").innerHTML=`
     <div class="of mono">card #${numCurto(it.id)}</div>
     <h3>${it.titulo}</h3>
+
+    <label class="grupoLbl" style="margin-top:0">Onde vai ser produzido</label>
+    <div class="charriotOpts">
+      ${CHARRIOTS.map(c=>`<label class="charriotOpt">
+        <input type="checkbox" class="fCharriot" value="${c}" ${(it.charriots&&it.charriots.includes(c))?"checked":""}>${c}</label>`).join("")}
+    </div>
+    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
+      Pode marcar mais que um charriot ao mesmo tempo (ex: a produzir em simultâneo no Charriot 1 e no
+      Charriot 2) — nenhum marcado fica "por atribuir".</div>
 
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
@@ -727,7 +777,14 @@ function openSheet(id){
     else if($("#fToroCmp").value){ toroCmp=$("#fToroCmp").value; }
     const toroTipo=$("#fToroTipo").value||null;
     const emContinuo=$("#fEmContinuo").checked;
+    const charriots=Array.from(document.querySelectorAll(".fCharriot:checked")).map(x=>x.value);
     try{
+      if(JSON.stringify(charriots)!==JSON.stringify(it.charriots||[])){
+        const r0=await fetch("/planeamento-entradas/atribuir",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:it.id,charriots})});
+        const d0=await r0.json();
+        if(d0.erro){ $("#fErro").textContent=d0.erro; return; }
+      }
       const r1=await fetch("/planeamento-entradas/wip",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({basecamp_card_id:it.id,cmp:wipCmp,lar:wipLar,esp:wipEsp,indice_wip:indiceWip})});
       const d1=await r1.json();
@@ -742,6 +799,7 @@ function openSheet(id){
         const d3=await r3.json();
         if(d3.erro){ $("#fErro").textContent=d3.erro; return; }
       }
+      it.charriots=charriots;
       it.wipCmp=wipCmp; it.wipLar=wipLar; it.wipEsp=wipEsp; it.toroCmp=toroCmp; it.toroTipo=toroTipo;
       it.indiceWip=indiceWip??INDICE_WIP_DEFAULT; it.indiceToros=indiceToros??INDICE_TOROS_DEFAULT;
       it.emContinuo=emContinuo;
@@ -769,7 +827,7 @@ async function carregar(){
     entradas=(d.entradas||[]).map(e=>({
       id:e.basecamp_card_id, titulo:e.titulo, url:e.url, coluna:e.coluna_basecamp,
       linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira, cor:e.cor,
-      gs:idxOf(e.dia_entrada), charriot:e.charriot, emContinuo:!!e.em_continuo,
+      gs:idxOf(e.dia_entrada), charriots:e.charriots||[], emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,

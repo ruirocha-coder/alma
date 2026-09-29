@@ -770,12 +770,12 @@ def planeamento_entradas_dados():
 
 @app.post("/planeamento-entradas/atribuir")
 def planeamento_entradas_atribuir(corpo: dict = Body(...)):
-    """Atribui (ou remove) o charriot de uma OF — ver
-    tools/planeamento_entradas.atribuir_charriot."""
+    """Atribui (substitui) os charriots de uma OF — pode estar em vários ao
+    mesmo tempo, ver tools/planeamento_entradas.atribuir_charriots."""
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    resultado = planeamento_entradas.atribuir_charriot(basecamp_card_id, corpo.get("charriot"))
+    resultado = planeamento_entradas.atribuir_charriots(basecamp_card_id, corpo.get("charriots"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
