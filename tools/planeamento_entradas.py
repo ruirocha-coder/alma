@@ -147,6 +147,7 @@ def estado_planeamento_entradas() -> dict:
             "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
             "em_continuo": em_continuo,
             "charriots": extra.get("charriots") or [],
+            "largura_dias": extra.get("largura_dias_visual") or 1,
             "wip_cmp": wip_cmp,
             "wip_lar": wip_lar,
             "wip_esp": wip_esp,
@@ -170,6 +171,23 @@ def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
         if desconhecidos:
             return {"erro": f"charriot desconhecido: {desconhecidos[0]!r}"}
     return db.atribuir_charriots_entrada(basecamp_card_id, charriots)
+
+LARGURA_DIAS_MAX = 14
+
+def definir_largura_dias(basecamp_card_id: int, largura_dias) -> dict:
+    """Só visual (pedido explícito do Rui, 2026-10-02): quantos dias um
+    card ocupa na tabela, ao ser alargado pela borda direita — nunca mexe
+    no dia real usado nos cálculos (ver _calcular_dia_entrada). None/1
+    volta ao tamanho normal (um dia)."""
+    if largura_dias is None:
+        largura_dias = 1
+    try:
+        largura_dias = int(largura_dias)
+    except (TypeError, ValueError):
+        return {"erro": "largura em dias inválida"}
+    if largura_dias < 1 or largura_dias > LARGURA_DIAS_MAX:
+        return {"erro": f"largura em dias tem de estar entre 1 e {LARGURA_DIAS_MAX}"}
+    return db.definir_largura_dias_entrada(basecamp_card_id, largura_dias if largura_dias != 1 else None)
 
 def _validar_numero_positivo(nome: str, valor):
     if valor is None:
@@ -311,6 +329,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
      charriots ao mesmo tempo (ex: "1+2"), nunca encolhe nem trunca. */
   .multiBadge{flex:0 0 auto;padding:1px 6px;border-radius:8px;background:var(--gold);
     color:#fff;font-size:10.5px;font-weight:700}
+  /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
+     2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
+     touch não há hover, por isso têm de já lá estar para se poderem tocar),
+     só ficam visualmente destacados ao passar o cursor/tocar. Zona de
+     toque maior que a faixa visível, para serem fáceis de agarrar sem
+     precisar de acertar num traço fino. */
+  /* dentro dos limites do card (que tem overflow:hidden, ver .blk acima —
+     um manípulo "para fora" ficaria cortado e impossível de agarrar). */
+  .rsz{position:absolute}
+  .rsz-h{top:0;right:0;width:9px;height:100%;cursor:ew-resize}
+  .rsz-v{left:0;bottom:0;width:100%;height:9px;cursor:ns-resize}
+  .rsz::after{content:"";display:block;background:var(--blue);opacity:0;border-radius:3px}
+  .rsz-h::after{width:3px;height:60%;margin:20% auto}
+  .rsz-v::after{height:3px;width:60%;margin:3px auto}
+  .rsz:hover::after{opacity:.55}
+  @media (pointer:coarse){
+    .rsz-h{width:16px}
+    .rsz-v{height:16px}
+    .rsz::after{opacity:.25}
+  }
 
   .log{margin-top:14px;background:var(--paper);border:1px solid var(--line);
     border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
@@ -497,12 +535,31 @@ function renderDays(){
 }
 
 const ITEM_H=58, ITEM_GAP=4, ITEM_PAD=6;
+const LARGURA_DIAS_MAX=14;
 let ALTURAS_LANE=[], OFFSETS_LANE=[];
+/* uma OF pode "alargar" (ver .rsz-h) para ocupar vários dias na mesma lane
+   (pedido explícito do Rui, 2026-10-02) — deixa de ser um simples
+   agrupamento por dia exato (um card só nunca se sobrepõe a outro): passa
+   a ser um empacotamento por intervalo (como um calendário), cada item
+   ocupa [gs, gs+larguraDias-1] e só entra na mesma linha vertical de outro
+   se os intervalos não se cruzarem. */
+function empacotarLinhas(lista){
+  const ordenada=[...lista].sort((x,y)=> x.gs-y.gs || x.id-y.id);
+  const fimPorLinha=[];
+  const linhaPorId=new Map();
+  ordenada.forEach(e=>{
+    const fim=e.gs+(e.larguraDias||1)-1;
+    let linha=fimPorLinha.findIndex(f=>f<e.gs);
+    if(linha===-1){ linha=fimPorLinha.length; fimPorLinha.push(fim); }
+    else fimPorLinha[linha]=fim;
+    linhaPorId.set(e.id,linha);
+  });
+  return {linhaPorId, nLinhas:fimPorLinha.length};
+}
 function calcularAlturasLanes(){
   ALTURAS_LANE=LANES.map((_,li)=>{
-    const porDia={};
-    entradas.filter(e=>laneIdx(e)===li).forEach(e=>{ (porDia[e.gs]=porDia[e.gs]||[]).push(e); });
-    const maxN=Math.max(1, ...Object.values(porDia).map(l=>l.length));
+    const {nLinhas}=empacotarLinhas(entradas.filter(e=>laneIdx(e)===li));
+    const maxN=Math.max(1,nLinhas);
     return Math.max(LANE, maxN*ITEM_H+(maxN-1)*ITEM_GAP+ITEM_PAD*2);
   });
   let acumulado=0;
@@ -533,32 +590,39 @@ function renderLanes(){
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   LANES.forEach((nome,li)=>{
-    const porDia={};
-    entradas.filter(e=>laneIdx(e)===li).forEach(e=>{ (porDia[e.gs]=porDia[e.gs]||[]).push(e); });
-    Object.values(porDia).forEach(lista=>lista.sort((x,y)=>x.id-y.id));
-    Object.entries(porDia).forEach(([gs,lista])=>{
-      const a=+gs-view.start;
-      if(a<0||a>=view.len) return;
-      lista.forEach((e,i)=>{
-        const el=document.createElement("div");
-        const temCharriot=e.charriots && e.charriots.length>0;
-        el.className="blk"+(temCharriot?"":" semCharriot");
-        el.tabIndex=0; el.dataset.id=e.id;
-        el.style.borderLeftColor=corProduto(e);
-        el.style.left=(a*DAY+3)+"px";
-        el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+i*(ITEM_H+ITEM_GAP))+"px";
-        el.style.width=(DAY-8)+"px";
-        el.style.height=ITEM_H+"px";
-        // pedido explícito do Rui (2026-10-02): OF em vários charriots ao
-        // mesmo tempo aparece só uma vez (nunca duplicada), com uma
-        // etiqueta a indicar quais (ex: "1+2").
-        const badge = (e.charriots && e.charriots.length>1)
-          ? `<span class="multiBadge">${e.charriots.map(charriotAbbrev).join("+")}</span>` : "";
-        el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>${badge}</div>
-          <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
-          <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>`;
-        bl.appendChild(el);
-      });
+    const itens=entradas.filter(e=>laneIdx(e)===li);
+    const {linhaPorId}=empacotarLinhas(itens);
+    itens.forEach(e=>{
+      const largura=e.larguraDias||1;
+      const aIni=e.gs-view.start, aFim=e.gs+largura-1-view.start;
+      if(aFim<0||aIni>=view.len) return; // completamente fora da vista
+      const aVis=Math.max(aIni,0), aFimVis=Math.min(aFim,view.len-1);
+      const linha=linhaPorId.get(e.id);
+      const el=document.createElement("div");
+      const temCharriot=e.charriots && e.charriots.length>0;
+      el.className="blk"+(temCharriot?"":" semCharriot");
+      el.tabIndex=0; el.dataset.id=e.id;
+      el.style.borderLeftColor=corProduto(e);
+      el.style.left=(aVis*DAY+3)+"px";
+      el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP))+"px";
+      el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
+      el.style.height=ITEM_H+"px";
+      // pedido explícito do Rui (2026-10-02): OF em vários charriots ao
+      // mesmo tempo aparece só uma vez (nunca duplicada), com uma
+      // etiqueta a indicar quais (ex: "1+2").
+      const badge = (e.charriots && e.charriots.length>1)
+        ? `<span class="multiBadge">${e.charriots.map(charriotAbbrev).join("+")}</span>` : "";
+      // manípulos de arrastar para alargar (pedido explícito do Rui,
+      // 2026-10-02): borda direita alarga em dias (só visual — ver
+      // definir_largura_dias); borda de baixo é um atalho extra para
+      // marcar mais charriots ao mesmo tempo (mesmo resultado das caixas
+      // de seleção na ficha) — só faz sentido se já tiver pelo menos um.
+      const rszV = temCharriot ? `<div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>` : "";
+      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>${badge}</div>
+        <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
+        <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>
+        <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>${rszV}`;
+      bl.appendChild(el);
     });
   });
   stats();
@@ -615,20 +679,67 @@ window.addEventListener("resize",render);
 /* ---------- arrastar entre lanes (só vertical — o dia é sempre calculado,
    nunca se arrasta para outro dia; ver tools/planeamento_entradas
    ._calcular_dia_entrada) ---------- */
-let drag=null;
+let drag=null, resize=null;
 $("#lanes").addEventListener("pointerdown",e=>{
+  const rh=e.target.closest(".rsz-h"), rv=e.target.closest(".rsz-v");
+  if(rh||rv){
+    const b=e.target.closest(".blk"); if(!b) return;
+    const it=item(+b.dataset.id); if(!it) return;
+    resize={eixo:rh?"h":"v", el:b, it, x0:e.clientX, y0:e.clientY,
+            larguraIni:it.larguraDias||1, laneIni:laneIdx(it)};
+    b.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
+    return;
+  }
   const b=e.target.closest(".blk"); if(!b) return;
   const it=item(+b.dataset.id); if(!it) return;
   drag={el:b,it,y0:e.clientY,moveu:false};
   b.setPointerCapture(e.pointerId); e.preventDefault();
 });
 $("#lanes").addEventListener("pointermove",e=>{
+  if(resize){
+    if(resize.eixo==="h"){
+      const dx=e.clientX-resize.x0;
+      const nova=Math.max(1,Math.min(LARGURA_DIAS_MAX,resize.larguraIni+Math.round(dx/DAY)));
+      resize.larguraAtual=nova;
+      resize.el.style.width=(nova*DAY-8)+"px";
+    }else{
+      const r=$("#lanes").getBoundingClientRect();
+      const laneAtual=Math.max(resize.laneIni, laneDeY(e.clientY-r.top));
+      resize.laneAtual=laneAtual;
+      // pré-visualização: estica o card até ao fundo da lane alcançada,
+      // sem alterar ainda nada guardado (só ao largar, ver pointerup).
+      const alturaAlvo=(OFFSETS_LANE[laneAtual]+ALTURAS_LANE[laneAtual])-OFFSETS_LANE[resize.laneIni]-ITEM_PAD*2;
+      resize.el.style.height=Math.max(ITEM_H,alturaAlvo)+"px";
+    }
+    return;
+  }
   if(!drag) return;
   const dy=e.clientY-drag.y0;
   if(Math.abs(dy)>6){ drag.moveu=true; drag.el.classList.add("drag"); }
   if(drag.moveu) drag.el.style.transform=`translateY(${dy}px)`;
 });
 $("#lanes").addEventListener("pointerup",e=>{
+  if(resize){
+    const {eixo,it,laneIni,larguraIni}=resize;
+    const larguraFinal=resize.larguraAtual??larguraIni;
+    const laneFinal=resize.laneAtual??laneIni;
+    resize=null;
+    if(eixo==="h"){
+      if(larguraFinal===larguraIni){ renderLanes(); return; }
+      it.larguraDias=larguraFinal;
+      renderLanes();
+      definirLarguraServidor(it, larguraIni);
+    }else{
+      if(laneFinal===laneIni){ renderLanes(); return; }
+      const novosCharriots=[];
+      for(let li=laneIni; li<=laneFinal; li++) novosCharriots.push(CHARRIOTS[li-1]);
+      const anterior=it.charriots;
+      it.charriots=novosCharriots;
+      renderLanes();
+      atribuirServidor(it, anterior);
+    }
+    return;
+  }
   if(!drag) return;
   const {el,it,moveu}=drag;
   el.classList.remove("drag"); el.style.transform="";
@@ -638,7 +749,7 @@ $("#lanes").addEventListener("pointerup",e=>{
   const novaLane=laneDeY(e.clientY-r.top);
   // arrastar substitui sempre por um único charriot (ainda que a OF
   // estivesse em vários ao mesmo tempo — ver caixas de seleção na ficha
-  // para marcar mais que um sem arrastar).
+  // ou o manípulo rsz-v para marcar mais que um sem substituir).
   const novosCharriots = novaLane===0 ? null : [CHARRIOTS[novaLane-1]];
   const atuais = it.charriots||[];
   const semMudanca = (novosCharriots===null && atuais.length===0) ||
@@ -654,6 +765,7 @@ $("#lanes").addEventListener("pointerup",e=>{
    simples serve para isso), mantém-se o mesmo hábito de duplo clique para
    abrir a ficha — o clique simples não faz nada sozinho. */
 $("#lanes").addEventListener("dblclick",e=>{
+  if(e.target.closest(".rsz")) return;
   const b=e.target.closest(".blk"); if(!b) return;
   openSheet(+b.dataset.id);
 });
@@ -666,6 +778,16 @@ async function atribuirServidor(it, anterior){
     if(d.erro){ alert(d.erro); it.charriots=anterior; renderLanes(); return; }
     log("local",`"${it.titulo}" atribuída a ${(it.charriots&&it.charriots.length)?it.charriots.join(" + "):"por atribuir"}`);
   }catch(e){ alert("Falhou a guardar: "+e); it.charriots=anterior; renderLanes(); }
+}
+async function definirLarguraServidor(it, anterior){
+  try{
+    const r=await fetch("/planeamento-entradas/largura-dias",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({basecamp_card_id:it.id,largura_dias:it.larguraDias})});
+    const d=await r.json();
+    if(d.erro){ alert(d.erro); it.larguraDias=anterior; renderLanes(); return; }
+    log("local",`"${it.titulo}" alargada para ${it.larguraDias} dia(s) — só visual`);
+  }catch(e){ alert("Falhou a guardar: "+e); it.larguraDias=anterior; renderLanes(); }
 }
 
 /* ---------- ficha ---------- */
@@ -827,7 +949,7 @@ async function carregar(){
     entradas=(d.entradas||[]).map(e=>({
       id:e.basecamp_card_id, titulo:e.titulo, url:e.url, coluna:e.coluna_basecamp,
       linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira, cor:e.cor,
-      gs:idxOf(e.dia_entrada), charriots:e.charriots||[], emContinuo:!!e.em_continuo,
+      gs:idxOf(e.dia_entrada), charriots:e.charriots||[], larguraDias:e.largura_dias||1, emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,

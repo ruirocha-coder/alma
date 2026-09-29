@@ -457,6 +457,14 @@ ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_toros 
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS indice_wip NUMERIC;
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS em_continuo BOOLEAN;
 
+-- largura_dias_visual (pedido explícito do Rui, 2026-10-02): ao arrastar a
+-- borda direita de um card, pode "alargar" para ocupar vários dias na
+-- tabela — mas é só visual (marca que a entrada acontece ao longo de mais
+-- que um dia), NUNCA mexe no dia real usado nos cálculos/regras (ver
+-- _calcular_dia_entrada em tools/planeamento_entradas.py, que continua a
+-- decidir sozinho o dia "oficial"). NULL/1 = tamanho normal (um dia).
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS largura_dias_visual INTEGER;
+
 -- toro_cmp passou de NUMERIC a TEXT (pedido explícito do Rui, 2026-10-02):
 -- há opções de comprimento de toro que não são um número puro (ex: "255
 -- ⌀16", a marcar um diâmetro específico) — nunca foi usado em nenhum
@@ -1134,7 +1142,7 @@ def entradas_charriot_ecos_largos() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT basecamp_card_id, charriots, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
-                          indice_toros, indice_wip, em_continuo
+                          indice_toros, indice_wip, em_continuo, largura_dias_visual
                    FROM entradas_charriot_ecos_largos"""
             )
             return [{
@@ -1148,6 +1156,7 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
                 "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
                 "em_continuo": l["em_continuo"],
+                "largura_dias_visual": l["largura_dias_visual"],
             } for l in cur.fetchall()]
 
 def atribuir_charriots_entrada(basecamp_card_id: int, charriots: list = None) -> dict:
@@ -1165,6 +1174,24 @@ def atribuir_charriots_entrada(basecamp_card_id: int, charriots: list = None) ->
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        charriots = EXCLUDED.charriots, atualizado_em = now()""",
                 (basecamp_card_id, charriots or None)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def definir_largura_dias_entrada(basecamp_card_id: int, largura_dias: int = None) -> dict:
+    """Só visual (pedido explícito do Rui, 2026-10-02): quantos dias um
+    card da página "Planeamento de Entradas" ocupa na tabela, ao ser
+    alargado pela borda direita. Nunca mexe no dia real usado nos cálculos
+    (ver _calcular_dia_entrada) nem em nenhuma regra de agendamento —
+    None/1 volta ao tamanho normal (um dia)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, largura_dias_visual)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       largura_dias_visual = EXCLUDED.largura_dias_visual, atualizado_em = now()""",
+                (basecamp_card_id, largura_dias)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

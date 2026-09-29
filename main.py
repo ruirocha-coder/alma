@@ -816,6 +816,17 @@ def planeamento_entradas_em_continuo(corpo: dict = Body(...)):
     resultado = planeamento_entradas.definir_em_continuo(basecamp_card_id, bool(corpo.get("em_continuo")))
     return JSONResponse(resultado)
 
+@app.post("/planeamento-entradas/largura-dias")
+def planeamento_entradas_largura_dias(corpo: dict = Body(...)):
+    """Só visual — quantos dias um card ocupa na tabela ao ser alargado
+    pela borda direita (ver tools/planeamento_entradas.definir_largura_dias)."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.definir_largura_dias(basecamp_card_id, corpo.get("largura_dias"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
 
 @app.get("/health")
 def health():
