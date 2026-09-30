@@ -1061,6 +1061,23 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-card-tables-ig")
+def _debug_card_tables_ig():
+    """TEMPORÁRIO — investigação: quadros Kanban e colunas do projeto
+    Interior Guider, para decidir onde criar os cards de recomendação.
+    Remover depois."""
+    tabelas = [t for t in basecamp._card_tables_ativos()
+               if "interior guider" in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")
+               and "marketing" not in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")]
+    resultado = []
+    for t in tabelas:
+        import httpx
+        r = httpx.get(t["url"], headers=basecamp._headers(), timeout=30)
+        r.raise_for_status()
+        colunas = [l.get("title") for l in r.json().get("lists", [])]
+        resultado.append({"bucket": t.get("bucket", {}).get("name"), "titulo": t.get("title"), "colunas": colunas})
+    return {"quadros": resultado}
+
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
