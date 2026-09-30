@@ -1207,8 +1207,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .recomendar-caixa{margin-top:34px;padding:36px 24px;background:#F8B681;border-radius:6px;display:flex;
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
-  .recomendar-encaixado{margin-bottom:40px}
-  .recomendar-encaixado .recomendar-caixa{margin-top:0}
   .recomendar-rodape{margin-top:40px;padding-top:40px;border-top:1px solid var(--line)}
   .recomendar-rodape .recomendar-caixa{margin-top:0}
   .recomendar-caixa.bloqueado{opacity:.65}
@@ -1255,8 +1253,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
-
-  <div class="recomendar-encaixado" id="recomendarTopo"></div>
 
   <main id="fases"></main>
 
@@ -1348,7 +1344,6 @@ const blocoRecomendar = () => `
       ? `<a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Eu recomendo</a>`
       : `<span class="btn-adjudicar" style="opacity:.5;pointer-events:none">Eu recomendo</span>`}
   </div>`;
-$('recomendarTopo').innerHTML = blocoRecomendar();
 $('recomendarRodape').innerHTML = blocoRecomendar();
 
 const conteudo = {
