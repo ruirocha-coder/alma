@@ -863,6 +863,18 @@ def _debug_mencao(bucket_id: int, comment_id: int, card_id: int = None):
         resultado["meu_perfil"] = basecamp.meu_perfil()
     except Exception as e:
         resultado["erro_meu_perfil"] = repr(e)
+    try:
+        with db_mod.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT comment_id, criado_em FROM basecamp_eventos_processados ORDER BY criado_em DESC LIMIT 10"
+                )
+                resultado["ultimos_processados"] = [
+                    {"comment_id": r["comment_id"], "criado_em": r["criado_em"].isoformat()}
+                    for r in cur.fetchall()
+                ]
+    except Exception as e:
+        resultado["erro_ultimos_processados"] = repr(e)
     return JSONResponse(resultado)
 
 @app.get("/health")
