@@ -1248,6 +1248,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
 
+  <div class="recomendar-encaixado" id="recomendarTopo"></div>
+
   <main id="fases"></main>
 
   <p class="fecho">Obrigado.<br><br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
@@ -1338,6 +1340,7 @@ const blocoRecomendar = () => `
       ? `<a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Eu recomendo</a>`
       : `<span class="btn-adjudicar" style="opacity:.5;pointer-events:none">Eu recomendo</span>`}
   </div>`;
+$('recomendarTopo').innerHTML = blocoRecomendar();
 $('recomendarRodape').innerHTML = blocoRecomendar();
 
 const conteudo = {
@@ -1506,7 +1509,6 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
   }
 
   return `<section class="fase ${f.estado==='prevista'?'prevista':''}" id="${f.id}">
-    ${i===0 ? `<div class="recomendar-encaixado">${blocoRecomendar()}</div>` : ''}
     <div class="fase-topo"><h2>${f.titulo}</h2>${estado}</div>
     <div class="corpo">${bloco}</div>
   </section>`;
