@@ -878,6 +878,13 @@ function openSheet(id){
       Pode marcar mais que um charriot ao mesmo tempo (ex: a produzir em simultâneo no Charriot 1 e no
       Charriot 2) — nenhum marcado fica "por atribuir".</div>
 
+    <div class="frow"><label>Duração na tabela (dias)</label>
+      <input id="fLarguraDias" type="number" min="1" max="${LARGURA_DIAS_MAX}" step="1"
+        style="width:70px;flex:0 0 auto" value="${it.larguraDias||1}"></div>
+    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
+      Quantos dias o card ocupa na tabela — o mesmo que arrastar a borda direita do card. Só visual,
+      nunca muda o dia real de entrada.</div>
+
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
     <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
@@ -954,12 +961,19 @@ function openSheet(id){
     const toroTipo=$("#fToroTipo").value||null;
     const emContinuo=$("#fEmContinuo").checked;
     const charriots=Array.from(document.querySelectorAll(".fCharriot:checked")).map(x=>x.value);
+    const larguraDias=Math.max(1,Math.min(LARGURA_DIAS_MAX,parseInt($("#fLarguraDias").value)||1));
     try{
       if(JSON.stringify(charriots)!==JSON.stringify(it.charriots||[])){
         const r0=await fetch("/planeamento-entradas/atribuir",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({basecamp_card_id:it.id,charriots})});
         const d0=await r0.json();
         if(d0.erro){ $("#fErro").textContent=d0.erro; return; }
+      }
+      if(larguraDias!==(it.larguraDias||1)){
+        const r4=await fetch("/planeamento-entradas/largura-dias",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:it.id,largura_dias:larguraDias})});
+        const d4=await r4.json();
+        if(d4.erro){ $("#fErro").textContent=d4.erro; return; }
       }
       const r1=await fetch("/planeamento-entradas/wip",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({basecamp_card_id:it.id,cmp:wipCmp,lar:wipLar,esp:wipEsp,indice_wip:indiceWip})});
@@ -975,7 +989,7 @@ function openSheet(id){
         const d3=await r3.json();
         if(d3.erro){ $("#fErro").textContent=d3.erro; return; }
       }
-      it.charriots=charriots;
+      it.charriots=charriots; it.larguraDias=larguraDias;
       it.wipCmp=wipCmp; it.wipLar=wipLar; it.wipEsp=wipEsp; it.toroCmp=toroCmp; it.toroTipo=toroTipo;
       it.indiceWip=indiceWip??INDICE_WIP_DEFAULT; it.indiceToros=indiceToros??INDICE_TOROS_DEFAULT;
       it.emContinuo=emContinuo;
