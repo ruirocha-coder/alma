@@ -855,6 +855,14 @@ def _debug_mencao(bucket_id: int, comment_id: int, card_id: int = None):
             resultado["comentarios_card"] = basecamp.ler_comentarios(comments_url)
         except Exception as e:
             resultado["erro_comentarios_card"] = repr(e)
+    try:
+        resultado["webhooks"] = basecamp.listar_webhooks(bucket_id)
+    except Exception as e:
+        resultado["erro_webhooks"] = repr(e)
+    try:
+        resultado["meu_perfil"] = basecamp.meu_perfil()
+    except Exception as e:
+        resultado["erro_meu_perfil"] = repr(e)
     return JSONResponse(resultado)
 
 @app.get("/health")
