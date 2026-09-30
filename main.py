@@ -82,12 +82,12 @@ scheduler.add_job(mensagem_motivacional_diaria.correr_mensagem_diaria_motivacion
 # da Gestão) — pedido explícito do Rui (2026-10-04): mesma lógica da
 # mensagem acima, mas com uma perspetiva própria (LEAN, Teoria das
 # Restrições, Marco Aurélio/Séneca) e muito mais curta (ver
-# agents/mensagem_motivacional_diaria_ecos_largos.py). Segunda a sábado
-# (a equipa também produz ao sábado, tal como o resumo diário do
-# dashboard, ver job acima) — minuto 10 só para nunca coincidir ao
-# segundo exato com a corrida das 9h00 da Gestão.
+# agents/mensagem_motivacional_diaria_ecos_largos.py). Segunda a sexta
+# (pedido explícito do Rui, 2026-10-04 — nunca ao sábado, apesar de a
+# equipa também produzir nesse dia) — minuto 10 só para nunca coincidir
+# ao segundo exato com a corrida das 9h00 da Gestão.
 scheduler.add_job(mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diaria_motivacional_ecos_largos,
-                  "cron", day_of_week="mon-sat", hour=9, minute=10)
+                  "cron", day_of_week="mon-fri", hour=9, minute=10)
 # sincronização unidirecional Basecamp (Agenda do projeto Entregas) ->
 # Google Calendar: de 2 em 2 minutos, pedido do Rui (2026-07-29) — o único
 # job por intervalo (não "cron") desta aplicação, porque aqui o objetivo é

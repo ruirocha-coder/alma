@@ -124,8 +124,9 @@ def _gerar_mensagem(analise: str) -> str:
 def correr_mensagem_diaria_motivacional_ecos_largos():
     """Publica uma mensagem diária muito curta no Mural da Ecos Largos, a
     partir da evolução dos cards desse projeto. Pensado para correr de
-    segunda a sábado (a equipa também produz ao sábado) antes do começo do
-    dia de trabalho, mas pode ser disparado manualmente."""
+    segunda a sexta (pedido explícito do Rui, 2026-10-04 — nunca ao sábado,
+    apesar de a equipa também produzir nesse dia) antes do começo do dia de
+    trabalho, mas pode ser disparado manualmente."""
     if not _a_correr.acquire(blocking=False):
         print("[mensagem_motivacional_diaria_ecos_largos] já há uma corrida em curso — ignorado")
         return
