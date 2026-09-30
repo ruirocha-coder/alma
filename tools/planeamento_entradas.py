@@ -245,7 +245,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Planeamento de Entradas — Ecos Largos</title>
+<title>Planeamento Entrada — Ecos Largos</title>
 <style>
   :root{
     --paper:#FFFFFF; --canvas:#F5F5F3; --raise:#FBFBF9;
@@ -431,7 +431,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="wrap">
   <header>
-    <h1>Planeamento de Entradas</h1>
+    <h1>Planeamento Entrada</h1>
     <div class="sub">Ecos Largos · o que entra nos charriots · fins de semana assinalados</div>
   </header>
 
