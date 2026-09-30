@@ -838,6 +838,25 @@ def planeamento_entradas_produzido(corpo: dict = Body(...)):
     resultado = planeamento_entradas.definir_produzido(basecamp_card_id, bool(corpo.get("produzido")))
     return JSONResponse(resultado)
 
+@app.get("/_debug-mencao")
+def _debug_mencao(bucket_id: int, comment_id: int, card_id: int = None):
+    """Diagnóstico temporário — remover depois de usado."""
+    import db as db_mod
+    resultado = {}
+    url_comentario = f"https://3.basecampapi.com/{__import__('os').environ['BASECAMP_ACCOUNT_ID']}/buckets/{bucket_id}/recordings/{comment_id}.json"
+    try:
+        resultado["comentario"] = basecamp.obter_recording(url_comentario)
+    except Exception as e:
+        resultado["erro_comentario"] = repr(e)
+    resultado["ja_processado"] = db_mod.evento_ja_processado(comment_id)
+    if card_id:
+        try:
+            comments_url = f"https://3.basecampapi.com/{__import__('os').environ['BASECAMP_ACCOUNT_ID']}/buckets/{bucket_id}/recordings/{card_id}/comments.json"
+            resultado["comentarios_card"] = basecamp.ler_comentarios(comments_url)
+        except Exception as e:
+            resultado["erro_comentarios_card"] = repr(e)
+    return JSONResponse(resultado)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
