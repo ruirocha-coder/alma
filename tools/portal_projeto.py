@@ -1235,9 +1235,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <main id="fases"></main>
 
-  <div id="recomendarRodape"></div>
-
   <p class="fecho">Obrigado.<br><br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
+
+  <div id="recomendarRodape"></div>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
