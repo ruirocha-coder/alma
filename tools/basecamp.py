@@ -348,18 +348,21 @@ def _coluna_card_table(coluna: str, projeto: str) -> tuple:
                 return p["id"], lista["cards_url"]
     raise ValueError(f"não encontrei a coluna {coluna!r} no quadro Kanban do projeto {p['name']!r}")
 
-def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None) -> dict:
+def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None,
+              assignee_ids: list = None) -> dict:
     """Cria um card novo diretamente numa coluna de um quadro Kanban (ex:
     a coluna "Triagem" do projeto Ecos Largos) — usado pelo quadro de
     planeamento de produção (tools/planeamento_serracao.py) para criar no
-    Basecamp uma encomenda nova que ainda lá não existe.
+    Basecamp uma encomenda nova que ainda lá não existe, e por
+    tools/portal_projeto.criar_recomendacao_amigo para os cards de
+    recomendação (sempre atribuídos à Beatriz Barbosa, ver
+    assignee_ids ali).
 
     NOTA: o endpoint de criação (POST ao mesmo cards_url usado para listar
     cards da coluna, ver _coluna_card_table) segue o padrão REST comum a
     outras ferramentas do Basecamp já confirmadas neste ficheiro (to-dos,
-    documentos, mensagens), mas NÃO foi ainda confirmado ao vivo contra a
-    API real — testar com um card de teste óbvio assim que houver
-    credenciais reais disponíveis, e apagar esse card de teste a seguir.
+    documentos, mensagens) — confirmado ao vivo (2026-09-30), incluindo
+    `assignee_ids`.
 
     Depois de criado, o card fica totalmente independente do planeamento
     local: nada mais é sincronizado automaticamente entre os dois lados
@@ -368,9 +371,10 @@ def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None) -
     if not projeto:
         raise ValueError("indica o projeto (ex: \"Ecos Largos\")")
     _bucket_id, cards_url = _coluna_card_table(coluna, projeto)
-    r = httpx.post(cards_url, headers=_headers(),
-                   json={"title": titulo, "content": _markdown_para_basecamp(notas) if notas else ""},
-                   timeout=30)
+    payload = {"title": titulo, "content": _markdown_para_basecamp(notas) if notas else ""}
+    if assignee_ids:
+        payload["assignee_ids"] = assignee_ids
+    r = httpx.post(cards_url, headers=_headers(), json=payload, timeout=30)
     r.raise_for_status()
     return _formatar_item(r.json())
 

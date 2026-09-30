@@ -853,6 +853,7 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
 
 _COLUNA_RECOMENDACOES = "Triagem"
 _PROJETO_RECOMENDACOES = "@ Interior Guider"
+_RESPONSAVEL_RECOMENDACOES = "Beatriz Barbosa"
 
 
 def _fase_projeto_validada(projeto: dict) -> bool:
@@ -898,7 +899,10 @@ def criar_recomendacao_amigo(card_id: int, dados: dict) -> dict:
     explícito do Rui (2026-09-30): por agora fica na coluna "Triagem" do
     quadro "Fluxo" (confirmado ao vivo que essa coluna existe nesse
     projeto) — ainda não existe uma tabela própria para recomendações;
-    quando existir, o card passa a ser criado lá."""
+    quando existir, o card passa a ser criado lá. Sempre atribuído à
+    Beatriz Barbosa (pedido explícito do Rui, 2026-09-30) — se ela não
+    for encontrada entre as pessoas com acesso ao projeto, o card é
+    criado à mesma, só sem responsável atribuído."""
     obrigatorios = ["cliente_nome", "cliente_telefone", "cliente_email",
                     "amigo_nome", "amigo_telefone", "amigo_email", "desconto_para"]
     faltam = [c for c in obrigatorios if not (dados.get(c) or "").strip()]
@@ -935,7 +939,9 @@ def criar_recomendacao_amigo(card_id: int, dados: dict) -> dict:
 
     titulo = f"Recomendação — {dados['amigo_nome'].strip()} (por {dados['cliente_nome'].strip()})"
     try:
-        card = basecamp.criar_card(_COLUNA_RECOMENDACOES, titulo, notas, projeto=_PROJETO_RECOMENDACOES)
+        responsavel_ids = basecamp._ids_pessoas(_PROJETO_RECOMENDACOES, [_RESPONSAVEL_RECOMENDACOES])
+        card = basecamp.criar_card(_COLUNA_RECOMENDACOES, titulo, notas, projeto=_PROJETO_RECOMENDACOES,
+                                   assignee_ids=responsavel_ids)
     except Exception as exc:
         return {"erro": f"não consegui criar o card no Basecamp: {exc}"}
     return {"ok": True, "card_id": card.get("id")}

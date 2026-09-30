@@ -1079,12 +1079,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-pessoas-ig")
-def _debug_pessoas_ig():
-    """TEMPORÁRIO — lista pessoas com acesso ao projeto Interior Guider,
-    para confirmar o nome exato da Beatriz Barbosa. Remover depois."""
-    return basecamp.pessoas_projeto("@ Interior Guider")
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
