@@ -877,6 +877,22 @@ def _debug_mencao(bucket_id: int, comment_id: int, card_id: int = None):
         resultado["erro_ultimos_processados"] = repr(e)
     return JSONResponse(resultado)
 
+@app.post("/_reprocessar-mencao")
+def _reprocessar_mencao(bucket_id: int, comment_id: int):
+    """Diagnóstico temporário — reprocessa manualmente uma menção cujo
+    webhook se perdeu (ex: entrega falhada durante um deploy). Corre de
+    forma síncrona (não em thread) para se poder ver o resultado/erro na
+    resposta. Remover depois de usado."""
+    import os as os_mod
+    url = f"https://3.basecampapi.com/{os_mod.environ['BASECAMP_ACCOUNT_ID']}/buckets/{bucket_id}/comments/{comment_id}.json"
+    payload = {"kind": "comment_created", "recording": {"id": comment_id, "url": url}}
+    try:
+        responder_basecamp._processar(payload)
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "erro": repr(e), "trace": traceback.format_exc()}, status_code=500)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
