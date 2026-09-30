@@ -893,6 +893,18 @@ def _reprocessar_mencao(bucket_id: int, comment_id: int):
         import traceback
         return JSONResponse({"ok": False, "erro": repr(e), "trace": traceback.format_exc()}, status_code=500)
 
+@app.post("/_comentar-correcao")
+def _comentar_correcao(corpo: dict = Body(...)):
+    """Diagnóstico temporário — publica um comentário à mão (usado para
+    corrigir uma menção mal resolvida por um reprocessamento manual, ver
+    /_reprocessar-mencao). Remover depois de usado."""
+    try:
+        r = basecamp.comentar(corpo["recording_id"], corpo["texto"], projeto=corpo.get("projeto"))
+        return JSONResponse({"ok": True, "resultado": r})
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "erro": repr(e), "trace": traceback.format_exc()}, status_code=500)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
