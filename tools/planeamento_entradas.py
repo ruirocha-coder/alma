@@ -325,10 +325,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
   .blk.semCharriot{border-left-style:dashed}
-  /* pedido explícito do Rui (2026-10-02): etiqueta de uma OF em vários
-     charriots ao mesmo tempo (ex: "1+2"), nunca encolhe nem trunca. */
-  .multiBadge{flex:0 0 auto;padding:1px 6px;border-radius:8px;background:var(--gold);
-    color:#fff;font-size:10.5px;font-weight:700}
   /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
      2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
      touch não há hover, por isso têm de já lá estar para se poderem tocar),
@@ -498,18 +494,15 @@ let logs=[], DAY=92, LANE=78;
 
 const item=id=>entradas.find(e=>e.id===id);
 /* uma OF pode estar em vários charriots ao mesmo tempo (pedido explícito
-   do Rui, 2026-10-02) mas só aparece numa lane, com uma etiqueta a
-   indicar todos (ver charriotAbbrev) — a lane é a do charriot de menor
-   índice, para ficar sempre num sítio previsível independentemente da
-   ordem em que foram marcados. */
-const laneIdx=e=>{
-  if(!e.charriots || !e.charriots.length) return 0;
-  return Math.min(...e.charriots.map(c=>CHARRIOTS.indexOf(c)))+1;
+   do Rui, 2026-10-02) — aparece visivelmente repetida em cada um deles
+   (pedido explícito do Rui, 2026-10-03: "quero que o card fique
+   visivelmente em todos os que eu colocar"), nunca só numa etiqueta.
+   lanesDe devolve todas as lanes onde uma OF deve ser desenhada — [0]
+   ("Por atribuir") quando ainda não tem nenhum charriot. */
+const lanesDe=e=>{
+  if(!e.charriots || !e.charriots.length) return [0];
+  return e.charriots.map(c=>CHARRIOTS.indexOf(c)+1);
 };
-/* etiqueta curta do(s) charriot(s) de um card, para quando está em mais
-   que um ao mesmo tempo (ex: "1+2") — Charriot N mostra só o número, a
-   Multiserra mostra "M". */
-const charriotAbbrev=nome=>nome==="Multiserra de Toros" ? "M" : String(CHARRIOTS.indexOf(nome)+1);
 const numCurto=id=>String(id).slice(-4);
 
 function metrics(){
@@ -558,7 +551,7 @@ function empacotarLinhas(lista){
 }
 function calcularAlturasLanes(){
   ALTURAS_LANE=LANES.map((_,li)=>{
-    const {nLinhas}=empacotarLinhas(entradas.filter(e=>laneIdx(e)===li));
+    const {nLinhas}=empacotarLinhas(entradas.filter(e=>lanesDe(e).includes(li)));
     const maxN=Math.max(1,nLinhas);
     return Math.max(LANE, maxN*ITEM_H+(maxN-1)*ITEM_GAP+ITEM_PAD*2);
   });
@@ -590,7 +583,7 @@ function renderLanes(){
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   LANES.forEach((nome,li)=>{
-    const itens=entradas.filter(e=>laneIdx(e)===li);
+    const itens=entradas.filter(e=>lanesDe(e).includes(li));
     const {linhaPorId}=empacotarLinhas(itens);
     itens.forEach(e=>{
       const largura=e.larguraDias||1;
@@ -601,27 +594,22 @@ function renderLanes(){
       const el=document.createElement("div");
       const temCharriot=e.charriots && e.charriots.length>0;
       el.className="blk"+(temCharriot?"":" semCharriot");
-      el.tabIndex=0; el.dataset.id=e.id;
+      el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
       el.style.borderLeftColor=corProduto(e);
       el.style.left=(aVis*DAY+3)+"px";
       el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP))+"px";
       el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
       el.style.height=ITEM_H+"px";
-      // pedido explícito do Rui (2026-10-02): OF em vários charriots ao
-      // mesmo tempo aparece só uma vez (nunca duplicada), com uma
-      // etiqueta a indicar quais (ex: "1+2").
-      const badge = (e.charriots && e.charriots.length>1)
-        ? `<span class="multiBadge">${e.charriots.map(charriotAbbrev).join("+")}</span>` : "";
       // manípulos de arrastar para alargar (pedido explícito do Rui,
       // 2026-10-02): borda direita alarga em dias (só visual — ver
-      // definir_largura_dias); borda de baixo é um atalho extra para
-      // marcar mais charriots ao mesmo tempo (mesmo resultado das caixas
-      // de seleção na ficha) — só faz sentido se já tiver pelo menos um.
-      const rszV = temCharriot ? `<div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>` : "";
-      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>${badge}</div>
+      // definir_largura_dias); borda de baixo marca mais charriots ao
+      // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
+      // seleção na ficha, mas mais rápido).
+      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
         <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
         <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>
-        <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>${rszV}`;
+        <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
+        <div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>`;
       bl.appendChild(el);
     });
   });
@@ -686,7 +674,7 @@ $("#lanes").addEventListener("pointerdown",e=>{
     const b=e.target.closest(".blk"); if(!b) return;
     const it=item(+b.dataset.id); if(!it) return;
     resize={eixo:rh?"h":"v", el:b, it, x0:e.clientX, y0:e.clientY,
-            larguraIni:it.larguraDias||1, laneIni:laneIdx(it)};
+            larguraIni:it.larguraDias||1, laneIni:+b.dataset.lane};
     b.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
     return;
   }
@@ -731,8 +719,12 @@ $("#lanes").addEventListener("pointerup",e=>{
       definirLarguraServidor(it, larguraIni);
     }else{
       if(laneFinal===laneIni){ renderLanes(); return; }
+      // laneIni pode ser 0 ("Por atribuir", quando a OF ainda não tinha
+      // nenhum charriot) — 0 não é um charriot real, só serve de ponto de
+      // partida do arrasto, por isso o intervalo de charriots começa
+      // sempre, no mínimo, em 1.
       const novosCharriots=[];
-      for(let li=laneIni; li<=laneFinal; li++) novosCharriots.push(CHARRIOTS[li-1]);
+      for(let li=Math.max(laneIni,1); li<=laneFinal; li++) novosCharriots.push(CHARRIOTS[li-1]);
       const anterior=it.charriots;
       it.charriots=novosCharriots;
       renderLanes();
