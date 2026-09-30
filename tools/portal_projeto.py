@@ -1621,7 +1621,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
 </head>
 <body>
 
-<h1><span class="x">✕</span>Recomende-nos a um amigo</h1>
+<h1><span class="x">✕</span>Recomende e receba 500€</h1>
 <p class="sub">Preencha os dados abaixo — entramos em contacto consigo e com o seu amigo assim que recebermos.</p>
 
 <form id="form">
