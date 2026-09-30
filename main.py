@@ -478,6 +478,20 @@ def planeamento_ecos_largos_dados():
     tools/planeamento_serracao.estado_planeamento_serracao."""
     return planeamento_serracao.estado_planeamento_serracao()
 
+@app.post("/ecos-largos/feriado")
+def ecos_largos_feriado(corpo: dict = Body(...)):
+    """Marca/desmarca um dia como feriado — partilhado entre "Planeamento
+    de linhas" e "Planeamento de Entradas" (mesmo calendário da mesma
+    equipa), ver tools/planeamento_serracao.definir_feriado."""
+    dia = corpo.get("dia")
+    if not dia:
+        return JSONResponse({"erro": "falta indicar dia"}, status_code=400)
+    resultado = planeamento_serracao.definir_feriado(dia, bool(corpo.get("feriado")), corpo.get("motivo"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    _notificar_planeamento_ecos_largos()
+    return JSONResponse(resultado)
+
 # tempo real (pedido explícito do Rui, 2026-09): sempre que alguém muda
 # algo no quadro, todas as páginas abertas devem atualizar sozinhas, sem
 # precisar de refresh. Um único processo uvicorn (sem --workers, ver

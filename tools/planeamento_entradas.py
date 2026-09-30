@@ -159,7 +159,8 @@ def estado_planeamento_entradas() -> dict:
             "indice_toros": indice_toros,
             "qtd_toros_m3": round(volume * indice_toros, 2) if volume is not None else None,
         })
-    return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas()}
+    return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas(),
+            "feriados": db.feriados_ecos_largos()}
 
 def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
     """Atribui (substitui) os charriots de uma OF — pode estar em vários ao
@@ -251,7 +252,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --ink:#1A1C1E; --dim:#75797D;
     --line:#E8E8E3; --edge:#D9D9D2;
     --blue:#1B6AC9; --gold:#E0A02C; --red:#C4452E; --grey:#9AA0A6; --hoje:#FFF6D6;
-    --green:#2E9E4F; --green-bg:#E1F5E6;
+    --green:#2E9E4F; --green-bg:#E1F5E6; --feriado-bg:#FBDFDD;
     --day:92px; --lane:78px; --label:180px;
   }
   *{box-sizing:border-box}
@@ -311,6 +312,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .dense .day{padding:8px 4px;text-align:center}
   .dense .day .dn{font-size:12.5px}
   .dense .day .dm{font-size:10px}
+  /* feriado (pedido explícito do Rui, 2026-10-03) — cor bem diferente do
+     "hoje"/fim de semana, para nunca se confundir; continua a poder levar
+     cards à mesma (só um marcador visual, ver ehFeriado). Clica no
+     cabeçalho do dia para marcar/desmarcar. */
+  .day.feriado{background:var(--feriado-bg);box-shadow:inset 0 -3px 0 var(--red);cursor:pointer}
+  .day:not(.feriado){cursor:pointer}
+  .dm.fer{color:var(--red);font-weight:700}
 
   .lanes{position:relative}
   .row{display:flex;height:var(--lane);border-bottom:1px solid var(--line)}
@@ -318,6 +326,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .cell{flex:0 0 var(--day);border-right:1px solid var(--line);position:relative;background:var(--paper)}
   .cell.wk{border-right:1px solid var(--edge)}
   .cell.hoje{background:#FFFDF4}
+  .cell.feriado{background:var(--feriado-bg)}
 
   .blocks{position:absolute;inset:0;pointer-events:none}
   .blk{position:absolute;box-sizing:border-box;
@@ -479,6 +488,12 @@ const MASTER=[];
   }
 }
 const FDS=d=>d.dow===6||d.dow===0;
+/* feriados marcados à mão (pedido explícito do Rui, 2026-10-03) —
+   partilhado com "Planeamento de linhas" (mesmo calendário da mesma
+   equipa, ver /ecos-largos/feriado); só um marcador visual, nunca impede
+   colocar cards nesse dia. */
+let FERIADOS=new Set();
+const ehFeriado=d=>FERIADOS.has(d.iso);
 const clamp=(v,a,b)=>Math.max(a,Math.min(v,b));
 const hojeISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`})();
 const HOJE=MASTER.findIndex(d=>d.iso===hojeISO);
@@ -535,10 +550,15 @@ function metrics(){
 }
 function days(){ return MASTER.slice(view.start,view.start+view.len); }
 function diaHtml(d,hoje){
-  const wk=FDS(d);
-  return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}">
+  const wk=FDS(d), fer=ehFeriado(d);
+  // feriado troca a 2ª linha (mês) por "Feriado" em vez de acrescentar uma
+  // 3ª linha — o cabeçalho do dia tem altura fixa, não há espaço para mais.
+  const linha2 = fer ? `<div class="dm fer">Feriado</div>`
+                     : `<div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div>`;
+  return `<div class="day${wk?" wk":""}${wk?" sab":""}${hoje?" hoje":""}${fer?" feriado":""}"
+      data-iso="${d.iso}" title="${fer?"Feriado — clica para desmarcar":"Clica para marcar feriado"}">
     <div class="dn">${view.mode==="mes"?d.dd:DOW[d.dow]+" "+d.dd}</div>
-    <div class="dm">${view.mode==="mes"?DOW[d.dow][0]:MESC[d.mo]}</div></div>`;
+    ${linha2}</div>`;
 }
 function renderDays(){
   const D=days();
@@ -596,7 +616,7 @@ function renderLanes(){
   let h="";
   LANES.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LANE[li]}px">`+D.map(d=>{
     const hoje=MASTER.indexOf(d)===HOJE;
-    return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}"></div>`;
+    return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
@@ -986,6 +1006,7 @@ async function carregar(){
       indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
     })).filter(e=>e.gs>=0);
     historico=d.historico||historico;
+    FERIADOS=new Set(d.feriados||[]);
     $("#syncDot").classList.remove("busy"); $("#syncTxt").textContent="Ligado ao Basecamp";
     render();
     log("local",`lido do Basecamp: ${entradas.length} OFs`);
@@ -995,6 +1016,24 @@ async function carregar(){
   }
 }
 $("#atualizar").onclick=()=>carregar();
+/* marcar/desmarcar feriado (pedido explícito do Rui, 2026-10-03) —
+   clicar no cabeçalho do dia, com confirmação (é um marcador partilhado
+   por toda a equipa nas duas páginas, não uma preferência pessoal). */
+$("#days").addEventListener("click",async e=>{
+  const d=e.target.closest(".day"); if(!d) return;
+  const iso=d.dataset.iso;
+  const jaEhFeriado=FERIADOS.has(iso);
+  if(!confirm(jaEhFeriado?`Desmarcar ${iso} como feriado?`:`Marcar ${iso} como feriado?`)) return;
+  try{
+    const r=await fetch("/ecos-largos/feriado",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({dia:iso,feriado:!jaEhFeriado})});
+    const resp=await r.json();
+    if(resp.erro){ alert(resp.erro); return; }
+    if(jaEhFeriado) FERIADOS.delete(iso); else FERIADOS.add(iso);
+    render();
+    log("local",`${iso} ${jaEhFeriado?"deixou de ser":"passou a ser"} feriado`);
+  }catch(err){ alert("Falhou a guardar: "+err); }
+});
 carregar();
 </script>
 </body>

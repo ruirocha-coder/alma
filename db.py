@@ -416,6 +416,22 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS atrasado_c
 -- tempo ou não; nunca se volta a verificar depois disso, atrasada ou não.
 ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS inicio_verificado BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- feriados marcados à mão nos quadros da Ecos Largos (pedido explícito do
+-- Rui, 2026-10-03): partilhado entre "Planeamento de linhas" e
+-- "Planeamento de Entradas" — é o mesmo calendário da mesma equipa, por
+-- isso um feriado marcado numa página tem de aparecer também na outra. Só
+-- um marcador visual (dia fica destacado no quadro) — nunca bloqueia
+-- agendar/colocar cards nesse dia, ao contrário de um fim de semana
+-- (pedido explícito: "temos de poder colocar nesse dias cards se assim o
+-- quisermos"). Antes disto, a única forma de assinalar um feriado era
+-- criar um card falso só para ocupar o dia visualmente — nada ideal.
+CREATE TABLE IF NOT EXISTS feriados_ecos_largos (
+    id SERIAL PRIMARY KEY,
+    dia DATE NOT NULL UNIQUE,
+    motivo TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
 -- página nova "Planeamento de Entradas" (pedido explícito do Rui,
 -- 2026-10-01): planear o que entra nos charriots, um dia antes do início
 -- da produção de cada OF (ver tools/planeamento_entradas.py). Ao
@@ -1221,6 +1237,31 @@ def definir_produzido_entrada(basecamp_card_id: int, produzido: bool) -> dict:
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def feriados_ecos_largos() -> list[str]:
+    """Todos os dias marcados como feriado (pedido explícito do Rui,
+    2026-10-03) — partilhado entre "Planeamento de linhas" e "Planeamento
+    de Entradas" (ver tools/planeamento_serracao.definir_feriado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT dia FROM feriados_ecos_largos ORDER BY dia")
+            return [r["dia"].isoformat() for r in cur.fetchall()]
+
+def definir_feriado(dia: str, feriado: bool, motivo: str = None) -> dict:
+    """Marca/desmarca um dia como feriado nos quadros da Ecos Largos — só
+    um marcador visual, nunca bloqueia agendar/colocar cards nesse dia."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if feriado:
+                cur.execute(
+                    """INSERT INTO feriados_ecos_largos (dia, motivo) VALUES (%s, %s)
+                       ON CONFLICT (dia) DO UPDATE SET motivo = EXCLUDED.motivo""",
+                    (dia, motivo)
+                )
+            else:
+                cur.execute("DELETE FROM feriados_ecos_largos WHERE dia = %s", (dia,))
+        conn.commit()
+    return {"guardado": True, "dia": dia, "feriado": feriado}
 
 def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: float, indice_wip: float = None) -> dict:
     """Guarda os campos WIP (comprimento/largura/espessura) e o índice usado
