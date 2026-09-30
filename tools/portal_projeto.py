@@ -1186,7 +1186,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   .recomendar-caixa{margin-top:34px;padding:36px 24px;background:#F8B681;border-radius:6px;display:flex;
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
-  .recomendar-topo .recomendar-caixa{margin-top:0;margin-bottom:40px}
+  .recomendar-encaixado{margin-bottom:40px}
+  .recomendar-encaixado .recomendar-caixa{margin-top:0}
   .recomendar-texto{flex:1;min-width:220px}
   .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
   .recomendar-texto h3 .x{color:#A55646;font-weight:600;margin-right:6px}
@@ -1230,8 +1231,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
-
-  <div class="recomendar-topo" id="recomendarTopo"></div>
 
   <main id="fases"></main>
 
@@ -1319,7 +1318,6 @@ const blocoRecomendar = () => `
     </div>
     <a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Recomendar amigo</a>
   </div>`;
-$('recomendarTopo').innerHTML = blocoRecomendar();
 $('recomendarRodape').innerHTML = blocoRecomendar();
 
 const conteudo = {
@@ -1488,6 +1486,7 @@ $('fases').innerHTML = projeto.fases.map((f,i)=>{
   }
 
   return `<section class="fase ${f.estado==='prevista'?'prevista':''}" id="${f.id}">
+    ${i===0 ? `<div class="recomendar-encaixado">${blocoRecomendar()}</div>` : ''}
     <div class="fase-topo"><h2>${f.titulo}</h2>${estado}</div>
     <div class="corpo">${bloco}</div>
   </section>`;
