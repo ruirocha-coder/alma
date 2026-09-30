@@ -1061,14 +1061,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_preview-mensagem-ecos-largos")
-def _preview_mensagem_ecos_largos():
-    """TEMPORÁRIO — gera o texto da mensagem diária da Ecos Largos sem
-    publicar no Mural, só para mostrar um exemplo ao Rui. Remover depois."""
-    analise = mensagem_motivacional_diaria_ecos_largos._analisar_projeto()
-    texto = mensagem_motivacional_diaria_ecos_largos._gerar_mensagem(analise)
-    return {"texto": texto}
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
