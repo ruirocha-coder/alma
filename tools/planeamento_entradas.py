@@ -334,13 +334,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
   .blk.semCharriot{border-left-style:dashed}
-  /* botão "Produzido" (pedido explícito do Rui, 2026-10-03, só nesta
-     página) — marca/desmarca à mão, muda o fundo do card para verde. */
+  /* "Produzido" (pedido explícito do Rui, 2026-10-03, só nesta página) —
+     marca/desmarca na ficha (botão "Marcar Produzido", ao lado de
+     Guardar/Fechar — de propósito longe do card, para não ser fácil
+     demais de carregar sem querer), muda o fundo do card para verde. */
   .blk.produzido{background:var(--green-bg)}
-  .btnProduzido{flex:0 0 auto;width:17px;height:17px;padding:0;border:1.5px solid var(--green);
-    color:var(--green);background:var(--paper);border-radius:50%;font-size:10.5px;font-weight:700;
-    line-height:14px;cursor:pointer;touch-action:none}
-  .btnProduzido.ativo{background:var(--green);color:#fff}
   /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
      2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
      touch não há hover, por isso têm de já lá estar para se poderem tocar),
@@ -395,6 +393,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   a.btn{display:inline-block;text-decoration:none}
   .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
   .btn.primary:hover{background:#175CAF;border-color:#175CAF}
+  /* botão "Produzido" (pedido explícito do Rui, 2026-10-03) — na ficha, ao
+     lado de Guardar/Fechar, de propósito: um botão pequeno no card era
+     fácil demais de carregar sem querer. */
+  .btn.verde{color:var(--green);border-color:var(--green)}
+  .btn.verde.ativo{background:var(--green);color:#fff;font-weight:600}
   .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;
     padding:9px 0;border-top:1px solid var(--line)}
   .frow label{color:var(--dim);font-size:14px;flex:0 0 auto}
@@ -621,12 +624,7 @@ function renderLanes(){
       // definir_largura_dias); borda de baixo marca mais charriots ao
       // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
       // seleção na ficha, mas mais rápido).
-      // botão "Produzido" (pedido explícito do Rui, 2026-10-03, só nesta
-      // página): marca/desmarca à mão, muda o fundo do card para verde
-      // (ver definir_produzido) — intercetado no pointerdown antes do
-      // arrastar normal, tal como os manípulos .rsz.
-      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>
-          <button type="button" class="btnProduzido${e.produzido?" ativo":""}" title="Produzido">✓</button></div>
+      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
         <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
         <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>
         <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
@@ -690,17 +688,6 @@ window.addEventListener("resize",render);
    ._calcular_dia_entrada) ---------- */
 let drag=null, resize=null;
 $("#lanes").addEventListener("pointerdown",e=>{
-  const btnP=e.target.closest(".btnProduzido");
-  if(btnP){
-    const b=e.target.closest(".blk"); if(!b) return;
-    const it=item(+b.dataset.id); if(!it) return;
-    e.preventDefault(); e.stopPropagation();
-    const anterior=it.produzido;
-    it.produzido=!it.produzido;
-    renderLanes();
-    definirProduzidoServidor(it, anterior);
-    return;
-  }
   const rh=e.target.closest(".rsz-h"), rv=e.target.closest(".rsz-v");
   if(rh||rv){
     const b=e.target.closest(".blk"); if(!b) return;
@@ -789,7 +776,7 @@ $("#lanes").addEventListener("pointerup",e=>{
    simples serve para isso), mantém-se o mesmo hábito de duplo clique para
    abrir a ficha — o clique simples não faz nada sozinho. */
 $("#lanes").addEventListener("dblclick",e=>{
-  if(e.target.closest(".rsz")||e.target.closest(".btnProduzido")) return;
+  if(e.target.closest(".rsz")) return;
   const b=e.target.closest(".blk"); if(!b) return;
   openSheet(+b.dataset.id);
 });
@@ -908,11 +895,19 @@ function openSheet(id){
     <div class="err" id="fErro"></div>
     <div class="acts" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
       ${it.url?`<a class="btn" target="_blank" rel="noopener" href="${it.url}">Abrir card no Basecamp</a>`:""}
+      <button class="btn verde${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
       <button class="btn primary" id="guardar">Guardar</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
   $("#veil").classList.add("on"); $("#sheet").classList.add("on");
   $("#close").onclick=$("#veil").onclick=closeSheet;
+  $("#btnProduzido").onclick=async()=>{
+    const anterior=it.produzido;
+    it.produzido=!it.produzido;
+    await definirProduzidoServidor(it, anterior);
+    const btn=$("#btnProduzido");
+    if(btn){ btn.textContent=it.produzido?"Produzido ✓":"Marcar Produzido"; btn.classList.toggle("ativo",it.produzido); }
+  };
   $("#fToroCmp").onchange=()=>{
     $("#fToroCmpOutroWrap").style.display = $("#fToroCmp").value==="outro" ? "" : "none";
   };
