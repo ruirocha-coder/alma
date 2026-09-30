@@ -474,6 +474,24 @@ def portal_projeto_validar_fase(card_id: int, corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.get("/portal/{card_id}/recomendar", response_class=HTMLResponse)
+def portal_recomendar_pagina(card_id: int):
+    """Página pública "Recomendar amigo", aberta a partir do bloco laranja
+    do portal — ver tools/portal_projeto.pagina_recomendar_amigo."""
+    resultado = portal_projeto.pagina_recomendar_amigo(card_id)
+    if "erro" in resultado:
+        raise HTTPException(status_code=404, detail=resultado["erro"])
+    return HTMLResponse(resultado["html"])
+
+@app.post("/portal/{card_id}/recomendar")
+def portal_recomendar_gravar(card_id: int, corpo: dict = Body(...)):
+    """Grava a recomendação submetida na página acima — cria o card no
+    Basecamp. Ver tools/portal_projeto.criar_recomendacao_amigo."""
+    resultado = portal_projeto.criar_recomendacao_amigo(card_id, corpo)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.get("/planeamento-ecos-largos", response_class=HTMLResponse)
 def planeamento_ecos_largos_pagina():
     """Página interna (sem login) do quadro de planeamento de produção da
@@ -1060,23 +1078,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         target=mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diaria_motivacional_ecos_largos,
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
-
-@app.get("/_debug-card-tables-ig")
-def _debug_card_tables_ig():
-    """TEMPORÁRIO — investigação: quadros Kanban e colunas do projeto
-    Interior Guider, para decidir onde criar os cards de recomendação.
-    Remover depois."""
-    tabelas = [t for t in basecamp._card_tables_ativos()
-               if "interior guider" in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")
-               and "marketing" not in basecamp._normalizar((t.get("bucket") or {}).get("name") or "")]
-    resultado = []
-    for t in tabelas:
-        import httpx
-        r = httpx.get(t["url"], headers=basecamp._headers(), timeout=30)
-        r.raise_for_status()
-        colunas = [l.get("title") for l in r.json().get("lists", [])]
-        resultado.append({"bucket": t.get("bucket", {}).get("name"), "titulo": t.get("title"), "colunas": colunas})
-    return {"quadros": resultado}
 
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():

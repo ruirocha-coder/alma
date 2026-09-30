@@ -378,7 +378,8 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          conceito_pdf_download_url: str = None, conceito_materiais: str = None,
                          conceito_leitura: str = None, documento_apresentacao_download_url: str = None,
                          documento_orcamento_download_url: str = None,
-                         documento_honorarios_download_url: str = None) -> dict:
+                         documento_honorarios_download_url: str = None,
+                         cliente_telefone: str = None, cliente_email: str = None) -> dict:
     """Gera o portal de acompanhamento de um projeto Interior Guider (página
     HTML autónoma, o link que o cliente abre) a partir dos dados já lidos
     do card do Basecamp, e devolve um url para partilhares no comentário de
@@ -649,14 +650,16 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     return _construir_e_gravar(utilizador, card_id, cliente, validade, honorarios_total, honorarios_linhas,
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
                                conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento,
-                               documento_conceito, projeto_imagem, documento_honorarios)
+                               documento_conceito, projeto_imagem, documento_honorarios,
+                               cliente_telefone, cliente_email)
 
 
 def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
                         honorarios_linhas: list, ambientes: list, fases_estado: dict, valor_produto: float,
                         conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
                         documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None,
-                        projeto_imagem: str = None, documento_honorarios: str = None) -> dict:
+                        projeto_imagem: str = None, documento_honorarios: str = None,
+                        cliente_telefone: str = None, cliente_email: str = None) -> dict:
     """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
     por gerar_portal_projeto (extração a partir do PDF) e
     atualizar_portal_projeto_edicao (valores já editados à mão pela
@@ -675,6 +678,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
         "cliente": cliente,
         "sub": _SUB_PADRAO,
         "contacto": {"rotulo": _CONTACTO_ROTULO, "href": _mailto("Projeto", ref)},
+        "clienteContacto": {"nome": cliente, "telefone": cliente_telefone, "email": cliente_email},
         "validade": validade,
         "honorarios": {"total": honorarios_total, "linhas": [
             {"t": l["titulo"], "d": l["descricao"], "v": l["valor"]} for l in honorarios_linhas
@@ -764,7 +768,8 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["conceito"].get("imagem"), campos["conceito"].get("materiais"),
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
                                campos.get("documento_orcamento"), campos["conceito"].get("documento"),
-                               campos.get("projeto_imagem"), campos.get("documento_honorarios"))
+                               campos.get("projeto_imagem"), campos.get("documento_honorarios"),
+                               campos.get("cliente_telefone"), campos.get("cliente_email"))
 
 
 def validar_fase_portal(card_id: int, fase: str) -> dict:
@@ -818,12 +823,14 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
             aviso = (f"a fase \"{titulo_fase}\" foi validada, mas a fase seguinte ainda não abriu — "
                      "falta completar o conteúdo dela na página de edição do portal.")
 
+    contacto_cliente = projeto.get("clienteContacto") or {}
     resultado = _construir_e_gravar(
         "cliente (via portal)", card_id, projeto["cliente"], projeto["validade"],
         projeto["honorarios"]["total"], honorarios_linhas, projeto["ambientes"], fases_estado,
         valor_produto, conceito_imagem, projeto["conceito"].get("materiais"), projeto["conceito"].get("leitura"),
         documento_apresentacao, documento_orcamento,
-        projeto["documentos"].get("conceito"), projeto.get("projetoImagem"), documento_honorarios)
+        projeto["documentos"].get("conceito"), projeto.get("projetoImagem"), documento_honorarios,
+        contacto_cliente.get("telefone"), contacto_cliente.get("email"))
 
     comentario = (f"A cliente validou a fase \"{titulo_fase}\" no portal do projeto "
                   f"({resultado['ref']}), a {tempo.data_extenso_hoje()}.")
@@ -842,6 +849,82 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
     if aviso:
         resultado["aviso"] = aviso
     return resultado
+
+
+_COLUNA_RECOMENDACOES = "Triagem"
+_PROJETO_RECOMENDACOES = "@ Interior Guider"
+
+
+def pagina_recomendar_amigo(card_id: int) -> dict:
+    """Página pública "Recomendar amigo" (link a partir do bloco laranja
+    do portal, ver _TEMPLATE) onde o cliente preenche os dados dele e de
+    um amigo a quem recomendou o studio. Os dados do cliente vêm
+    pré-preenchidos do que já está gravado no portal (ver
+    `clienteContacto` em _construir_e_gravar) — nunca pedidos de novo à
+    Alma aqui. Devolve {"erro": ...} se este card não tiver portal."""
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"erro": "portal não encontrado"}
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    contacto = projeto.get("clienteContacto") or {}
+    dados = {
+        "cardId": card_id,
+        "portalUrl": f"/documentos-gerados/{registo['id']}",
+        "clienteNome": contacto.get("nome") or projeto.get("cliente") or "",
+        "clienteTelefone": contacto.get("telefone") or "",
+        "clienteEmail": contacto.get("email") or "",
+    }
+    dados_json = json.dumps(dados, ensure_ascii=False).replace("</", "<\\/")
+    return {"html": _TEMPLATE_RECOMENDAR.replace("__DADOS_JSON__", dados_json)}
+
+
+def criar_recomendacao_amigo(card_id: int, dados: dict) -> dict:
+    """Chamada pelo formulário da página acima (POST /portal/{card_id}/
+    recomendar, nunca pela Alma/LLM) — cria um card no Basecamp, no
+    projeto Interior Guider, com os dados da recomendação. Pedido
+    explícito do Rui (2026-09-30): por agora fica na coluna "Triagem" do
+    quadro "Fluxo" (confirmado ao vivo que essa coluna existe nesse
+    projeto) — ainda não existe uma tabela própria para recomendações;
+    quando existir, o card passa a ser criado lá."""
+    obrigatorios = ["cliente_nome", "cliente_telefone", "cliente_email",
+                    "amigo_nome", "amigo_telefone", "amigo_email", "desconto_para"]
+    faltam = [c for c in obrigatorios if not (dados.get(c) or "").strip()]
+    if faltam:
+        return {"erro": f"faltam campos obrigatórios: {', '.join(faltam)}"}
+    if dados["desconto_para"] not in ("cliente", "amigo"):
+        return {"erro": "desconto_para tem de ser \"cliente\" ou \"amigo\""}
+
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"erro": "portal não encontrado"}
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    ref = projeto.get("ref") or str(card_id)
+
+    quem_fica_desconto = "o cliente (quem recomendou)" if dados["desconto_para"] == "cliente" else "o amigo recomendado"
+    notas = (
+        f"Card de Recomendação — gerado automaticamente a partir do portal do projeto {ref}. "
+        f"Ainda não existe uma tabela própria para recomendações; por agora fica em {_COLUNA_RECOMENDACOES}.\n\n"
+        f"Cliente que recomendou:\n"
+        f"- Nome: {dados['cliente_nome'].strip()}\n"
+        f"- Telemóvel: {dados['cliente_telefone'].strip()}\n"
+        f"- Email: {dados['cliente_email'].strip()}\n\n"
+        f"Amigo recomendado:\n"
+        f"- Nome: {dados['amigo_nome'].strip()}\n"
+        f"- Telemóvel: {dados['amigo_telefone'].strip()}\n"
+        f"- Email: {dados['amigo_email'].strip()}\n\n"
+        f"Desconto a ficar para: {quem_fica_desconto}."
+    )
+    comentario = (dados.get("comentario") or "").strip()
+    if comentario:
+        notas += f"\n\nComentário do cliente: {comentario}"
+
+    titulo = f"Recomendação — {dados['amigo_nome'].strip()} (por {dados['cliente_nome'].strip()})"
+    try:
+        card = basecamp.criar_card(_COLUNA_RECOMENDACOES, titulo, notas, projeto=_PROJETO_RECOMENDACOES)
+    except Exception as exc:
+        return {"erro": f"não consegui criar o card no Basecamp: {exc}"}
+    return {"ok": True, "card_id": card.get("id")}
+
 
 TOOLS_PORTAL_PROJETO = [
     {
@@ -894,6 +977,8 @@ TOOLS_PORTAL_PROJETO = [
                 "card_id": {"type": "integer", "description": "id numérico do card do Basecamp (nunca inventado)"},
                 "cliente": {"type": "string", "description": "nome do cliente, tal como está no card"},
                 "validade": {"type": "string", "description": "até quando a proposta/orçamento é válido, ex: \"Proposta válida até 15 de outubro de 2026.\""},
+                "cliente_telefone": {"type": "string", "description": "telemóvel de contacto do cliente, tal como estiver escrito no card (Notas ou comentários) — usado só para pré-preencher o formulário de \"Recomendar amigo\" no portal. Opcional; deixa vazio/omite se não encontrares no card, nunca inventes"},
+                "cliente_email": {"type": "string", "description": "email de contacto do cliente, tal como estiver escrito no card (Notas ou comentários) — mesmo uso e mesma regra de cliente_telefone: opcional, nunca inventado"},
                 "honorarios_total": {"type": "number", "description": "valor final COM IVA — o que o cliente paga"},
                 "honorarios_total_com_iva": {"type": "boolean", "description": "True só se `honorarios_total` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
                 "honorarios_linhas": {
@@ -1098,6 +1183,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .validar-texto{flex:1;min-width:220px}
   .validar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3;background-position:0 5px}
   .validar-texto p{color:var(--ink);font-size:13.5px;font-weight:400;margin-top:8px;max-width:420px}
+
+  .recomendar-caixa{margin-top:34px;padding:36px 24px;background:#F8B681;border-radius:6px;display:flex;
+       justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+  .recomendar-topo .recomendar-caixa{margin-top:0;margin-bottom:40px}
+  .recomendar-texto{flex:1;min-width:220px}
+  .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
+  .recomendar-texto h3 .x{color:#A55646;font-weight:600;margin-right:6px}
+  .recomendar-texto p{color:var(--ink);font-size:13.5px;font-weight:400;margin-top:8px;max-width:420px}
   .btn-adjudicar{display:inline-block;background:var(--paper);color:var(--ink);border:none;padding:16px 28px;
        font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
        white-space:nowrap;transition:.15s}
@@ -1138,7 +1231,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <nav class="tiles" id="tiles" aria-label="Fases do projeto"></nav>
 
+  <div class="recomendar-topo" id="recomendarTopo"></div>
+
   <main id="fases"></main>
+
+  <div id="recomendarRodape"></div>
 
   <p class="fecho">Obrigado.<br><br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
@@ -1213,6 +1310,17 @@ $('tiles').innerHTML = projeto.fases.map((f,i)=>`
     <div class="t">${f.titulo}</div>
     <div class="e">${rotuloTile(f)}</div>
   </a>`).join('');
+
+const blocoRecomendar = () => `
+  <div class="recomendar-caixa">
+    <div class="recomendar-texto">
+      <h3><span class="x">✕</span>Recomende-nos a um amigo</h3>
+      <p>Conhece alguém que também sonha em transformar a sua casa? Recomende-nos e escolha quem fica com o desconto — você ou o seu amigo.</p>
+    </div>
+    <a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Recomendar amigo</a>
+  </div>`;
+$('recomendarTopo').innerHTML = blocoRecomendar();
+$('recomendarRodape').innerHTML = blocoRecomendar();
 
 const conteudo = {
   honorarios: () => `
@@ -1410,6 +1518,137 @@ async function validarFase(faseId, botao){
 """
 
 
+_TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Recomendar um amigo — Interior Guider</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--paper:#fdfaee; --ink:#1C1A17; --stone:#8E877C; --line:#E5E0D7; --clay:#A43A23; --err:#B94E4E;}
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
+      max-width:560px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:24px;font-weight:400;line-height:1.3;margin:0}
+  h1 .x{color:#A55646;font-weight:600;margin-right:8px}
+  .sub{color:var(--stone);font-size:14px;margin-top:10px;line-height:1.5}
+  .voltar{display:inline-block;margin-top:18px;font-size:13px;color:var(--stone);text-decoration:none;
+        border-bottom:1px solid var(--line)}
+  fieldset{border:none;padding:0;margin:34px 0 0}
+  legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--stone);
+        padding:0 0 12px;border-bottom:1px solid var(--line);width:100%;margin-bottom:16px}
+  label{display:block;font-size:12.5px;color:var(--stone);margin-bottom:4px}
+  .campo{margin-bottom:14px}
+  input[type=text],input[type=tel],input[type=email],textarea{
+      width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;
+      font-family:inherit;font-size:14.5px;color:var(--ink)}
+  textarea{resize:vertical;min-height:70px}
+  .escolha{display:flex;gap:10px;margin-top:4px}
+  .escolha label{display:flex;align-items:center;gap:7px;flex:1;border:1px solid var(--line);border-radius:5px;
+        padding:10px 12px;font-size:13.5px;color:var(--ink);cursor:pointer;margin:0}
+  .escolha input{width:auto;margin:0}
+  .escolha label:has(input:checked){border-color:#A55646;background:rgba(165,86,70,.06)}
+  .btn{display:block;width:100%;margin-top:30px;background:#A55646;border:1px solid #A55646;color:var(--paper);
+       text-decoration:none;font-size:14.5px;font-weight:400;padding:13px 32px;transition:.15s;
+       font-family:inherit;cursor:pointer;border-radius:5px}
+  .btn:hover{background:transparent;color:var(--ink)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .msg{font-size:13px;margin-top:12px}
+  .msg.err{color:var(--err)}
+  .msg.ok{color:#5A7D5A}
+</style>
+</head>
+<body>
+
+<h1><span class="x">✕</span>Recomende-nos a um amigo</h1>
+<p class="sub">Preencha os dados abaixo — entramos em contacto consigo e com o seu amigo assim que recebermos.</p>
+
+<form id="form">
+  <fieldset>
+    <legend>Os seus dados</legend>
+    <div class="campo"><label>Nome</label><input type="text" id="cliente-nome" required></div>
+    <div class="campo"><label>Telemóvel</label><input type="tel" id="cliente-telefone" required></div>
+    <div class="campo"><label>Email</label><input type="email" id="cliente-email" required></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Dados do seu amigo</legend>
+    <div class="campo"><label>Nome</label><input type="text" id="amigo-nome" required></div>
+    <div class="campo"><label>Telemóvel</label><input type="tel" id="amigo-telefone" required></div>
+    <div class="campo"><label>Email</label><input type="email" id="amigo-email" required></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Para quem fica o desconto?</legend>
+    <div class="escolha">
+      <label><input type="radio" name="desconto" value="cliente" required> Para mim</label>
+      <label><input type="radio" name="desconto" value="amigo"> Para o meu amigo</label>
+    </div>
+    <div class="campo" style="margin-top:16px">
+      <label>Comentário (opcional)</label>
+      <textarea id="comentario"></textarea>
+    </div>
+  </fieldset>
+
+  <button type="submit" class="btn" id="btnEnviar">Enviar recomendação</button>
+  <p class="msg" id="msg"></p>
+</form>
+
+<script>
+const dados = __DADOS_JSON__;
+const $ = id => document.getElementById(id);
+
+$('cliente-nome').value = dados.clienteNome;
+$('cliente-telefone').value = dados.clienteTelefone;
+$('cliente-email').value = dados.clienteEmail;
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btnEnviar'), msg = $('msg');
+  const descontoEl = document.querySelector('input[name="desconto"]:checked');
+  if (!descontoEl) {
+    msg.className = 'msg err';
+    msg.textContent = 'Escolha para quem fica o desconto.';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'A enviar…';
+  msg.textContent = '';
+  try {
+    const r = await fetch(`/portal/${dados.cardId}/recomendar`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        cliente_nome: $('cliente-nome').value,
+        cliente_telefone: $('cliente-telefone').value,
+        cliente_email: $('cliente-email').value,
+        amigo_nome: $('amigo-nome').value,
+        amigo_telefone: $('amigo-telefone').value,
+        amigo_email: $('amigo-email').value,
+        desconto_para: descontoEl.value,
+        comentario: $('comentario').value,
+      })
+    });
+    const corpo = await r.json();
+    if (!r.ok) throw new Error(corpo.erro || 'não foi possível enviar');
+    document.getElementById('form').innerHTML =
+      '<p class="msg ok">Obrigado! Recebemos a sua recomendação — vamos entrar em contacto em breve.</p>';
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Enviar recomendação';
+    msg.className = 'msg err';
+    msg.textContent = err.message || 'Falha de rede — tenta outra vez.';
+  }
+});
+</script>
+</body>
+</html>
+"""
+
+
 def pagina_edicao(id_documento: int, projeto: dict) -> str:
     """Página interna (nunca linkada ao cliente) onde a equipa corrige ou
     completa os campos de um portal já gerado, sem precisar de pedir à
@@ -1443,6 +1682,7 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
       font-family:inherit;font-size:14.5px;color:var(--ink)}
   textarea{resize:vertical;min-height:70px}
   .campo{margin-bottom:14px}
+  .ajuda{font-size:12px;color:var(--stone);margin:-8px 0 14px}
   .linha2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .linha3{display:grid;grid-template-columns:2fr 3fr 1fr;gap:10px;align-items:end}
   .check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);margin:10px 0}
@@ -1477,6 +1717,11 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
   <h2>Identificação</h2>
   <div class="campo"><label>Cliente</label><input type="text" id="f-cliente"></div>
   <div class="campo"><label>Validade da proposta</label><input type="text" id="f-validade"></div>
+  <div class="campo linha2">
+    <div><label>Telemóvel do cliente</label><input type="text" id="f-cliente-telefone"></div>
+    <div><label>Email do cliente</label><input type="text" id="f-cliente-email"></div>
+  </div>
+  <p class="ajuda">Usados só para pré-preencher automaticamente o formulário de "Recomendar amigo" no portal.</p>
 </section>
 
 <section>
@@ -1567,6 +1812,8 @@ const FASES = [
 document.getElementById('tit-cliente').textContent = projeto.cliente;
 document.getElementById('f-cliente').value = projeto.cliente || '';
 document.getElementById('f-validade').value = projeto.validade || '';
+document.getElementById('f-cliente-telefone').value = (projeto.clienteContacto && projeto.clienteContacto.telefone) || '';
+document.getElementById('f-cliente-email').value = (projeto.clienteContacto && projeto.clienteContacto.email) || '';
 document.getElementById('f-honorarios-total').value = projeto.honorarios.total ?? '';
 document.getElementById('f-conceito-leitura').value = projeto.conceito.leitura || '';
 document.getElementById('f-conceito-materiais').value = projeto.conceito.materiais || '';
@@ -1730,6 +1977,8 @@ function guardar() {
   const campos = {
     cliente: document.getElementById('f-cliente').value,
     validade: document.getElementById('f-validade').value,
+    cliente_telefone: document.getElementById('f-cliente-telefone').value || null,
+    cliente_email: document.getElementById('f-cliente-email').value || null,
     honorarios_total: parseFloat(document.getElementById('f-honorarios-total').value) || 0,
     honorarios_total_com_iva: document.getElementById('f-honorarios-com-iva').checked,
     honorarios_linhas,
