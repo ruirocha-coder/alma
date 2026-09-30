@@ -1387,8 +1387,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <div class="bar">
     <div class="pill"><span class="dot" id="syncDot"></span><span id="syncTxt">Ligado ao Basecamp</span></div>
-    <div class="pill"><b id="statBolsa">—</b> por agendar</div>
-    <div class="pill"><b id="statAgendadas">—</b> agendadas</div>
     <button class="btn" id="undo">Anular</button>
     <button class="btn" id="atualizar">Atualizar do Basecamp</button>
     <button class="btn primary" id="modoEdicaoBtn">Editar</button>
@@ -1993,7 +1991,7 @@ function renderLanes(){
       bl.appendChild(el);
     });
   });
-  stats(); aplicarSelecao();
+  aplicarSelecao();
 }
 function renderFila(){
   const q=cards.filter(c=>c.linha===null);
@@ -2051,10 +2049,6 @@ function renderLogistica(){
     });
   });
   aplicarSelecao();
-}
-function stats(){
-  $("#statBolsa").textContent=cards.filter(c=>c.linha===null).length;
-  $("#statAgendadas").textContent=cards.filter(c=>c.linha!==null).length;
 }
 function render(){
   metrics(); renderLabels(); renderDays(); renderLanes(); renderFila(); renderLogistica();
