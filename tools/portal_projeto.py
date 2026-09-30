@@ -1622,7 +1622,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
 <body>
 
 <h1><span class="x">✕</span>Recomende e receba 500€</h1>
-<p class="sub">Preencha os dados abaixo — entramos em contacto consigo e com o seu amigo assim que recebermos.</p>
+<p class="sub">Preencha os dados abaixo. Entramos em contacto consigo e com o contacto recomendado.</p>
 
 <form id="form">
   <fieldset>
@@ -1633,7 +1633,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
   </fieldset>
 
   <fieldset>
-    <legend>Dados do seu amigo</legend>
+    <legend>Dados do contacto recomendado</legend>
     <div class="campo"><label>Nome</label><input type="text" id="amigo-nome" required></div>
     <div class="campo"><label>Telemóvel</label><input type="tel" id="amigo-telefone" required></div>
     <div class="campo"><label>Email</label><input type="email" id="amigo-email" required></div>
