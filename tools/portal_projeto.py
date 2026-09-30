@@ -1342,7 +1342,7 @@ const blocoRecomendar = () => `
   <div class="recomendar-caixa ${recomendarDisponivel ? '' : 'bloqueado'}">
     <div class="recomendar-texto">
       <h3><span class="x">✕</span>Recomende e receba 500€</h3>
-      <p>A melhor forma de a partilhar é apresentar alguém que também possa beneficiar dela. Por cada recomendação que resulte num projeto com compra mínima de €10.000, oferecemos €500 na última fatura.</p>
+      <p>Se a sua experiência com o Interior Guider foi significativa, a melhor forma de a partilhar é apresentar alguém que também possa beneficiar dela. Por cada recomendação que resulte num projeto com compra mínima de €10.000, oferecemos €500 na última fatura.</p>
     </div>
     ${recomendarDisponivel
       ? `<a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Eu recomendo</a>`
