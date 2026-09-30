@@ -19,7 +19,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_anual_cargas_toros, logistica_entregas,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
-                    mensagem_motivacional_diaria)
+                    mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas
 from db import inicializar_schema
 inicializar_schema()
@@ -78,6 +78,16 @@ scheduler.add_job(avisos_gestao_agendas.correr_avisos_gestao_agendas, "cron", ho
 # publicações distintas, com locks próprios, nunca a mesma corrida.
 scheduler.add_job(mensagem_motivacional_diaria.correr_mensagem_diaria_motivacional, "cron",
                   day_of_week="mon-fri", hour=9, minute=0)
+# mensagem diária motivacional própria da Ecos Largos (Mural deles, não o
+# da Gestão) — pedido explícito do Rui (2026-10-04): mesma lógica da
+# mensagem acima, mas com uma perspetiva própria (LEAN, Teoria das
+# Restrições, Marco Aurélio/Séneca) e muito mais curta (ver
+# agents/mensagem_motivacional_diaria_ecos_largos.py). Segunda a sábado
+# (a equipa também produz ao sábado, tal como o resumo diário do
+# dashboard, ver job acima) — minuto 10 só para nunca coincidir ao
+# segundo exato com a corrida das 9h00 da Gestão.
+scheduler.add_job(mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diaria_motivacional_ecos_largos,
+                  "cron", day_of_week="mon-sat", hour=9, minute=10)
 # sincronização unidirecional Basecamp (Agenda do projeto Entregas) ->
 # Google Calendar: de 2 em 2 minutos, pedido do Rui (2026-07-29) — o único
 # job por intervalo (não "cron") desta aplicação, porque aqui o objetivo é
@@ -1040,6 +1050,15 @@ def mensagem_diaria_motivacional_agora():
     verdade, tal como a corrida agendada das 9h (sem modo de simulação)."""
     threading.Thread(
         target=mensagem_motivacional_diaria.correr_mensagem_diaria_motivacional, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/ecos-largos/mensagem-diaria")
+def mensagem_diaria_motivacional_ecos_largos_agora():
+    """Dispara já a mensagem diária motivacional própria da Ecos Largos, no Mural deles, em segundo
+    plano — publica de verdade, tal como a corrida agendada das 9h10 (sem modo de simulação)."""
+    threading.Thread(
+        target=mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diaria_motivacional_ecos_largos,
+        daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/basecamp/webhooks/registar")
