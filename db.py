@@ -421,8 +421,8 @@ ALTER TABLE planeamento_producao_ecos_largos ADD COLUMN IF NOT EXISTS inicio_ver
 -- "Planeamento de Entradas" — é o mesmo calendário da mesma equipa, por
 -- isso um feriado marcado numa página tem de aparecer também na outra. Só
 -- um marcador visual (dia fica destacado no quadro) — nunca bloqueia
--- agendar/colocar cards nesse dia, ao contrário de um fim de semana
--- (pedido explícito: "temos de poder colocar nesse dias cards se assim o
+-- agendar/colocar cards nesse dia, ao contrário de um domingo (pedido
+-- explícito: "temos de poder colocar nesse dias cards se assim o
 -- quisermos"). Antes disto, a única forma de assinalar um feriado era
 -- criar um card falso só para ocupar o dia visualmente — nada ideal.
 CREATE TABLE IF NOT EXISTS feriados_ecos_largos (

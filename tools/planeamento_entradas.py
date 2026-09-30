@@ -64,17 +64,17 @@ def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     qualquer OF pode ser marcada/desmarcada à mão (ver definir_em_continuo).
 
     Caso contrário (o cálculo habitual): um dia antes do início da
-    produção. Se isso calhar a sábado ou domingo (acontece sempre que a
-    produção começa a uma segunda-feira), recua para a sexta-feira
-    anterior — os charriots não trabalham ao fim de semana, tal como a
-    produção em si."""
+    produção. Se isso calhar a domingo (acontece sempre que a produção
+    começa a uma segunda-feira), recua para o sábado anterior — só
+    domingo não é dia de produção; sábado passou a ser (pedido explícito
+    do Rui, 2026-10-03: a equipa trabalha ao sábado de manhã, mesma
+    capacidade de um dia normal), por isso os charriots também podem
+    receber entradas nesse dia."""
     if em_continuo:
         return dia_inicio
     dia = date.fromisoformat(dia_inicio) - timedelta(days=1)
-    if dia.weekday() == 5:  # sábado
+    if dia.weekday() == 6:  # domingo
         dia -= timedelta(days=1)
-    elif dia.weekday() == 6:  # domingo
-        dia -= timedelta(days=2)
     return dia.isoformat()
 
 def estado_planeamento_entradas() -> dict:
@@ -487,7 +487,12 @@ const MASTER=[];
       iso:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`});
   }
 }
-const FDS=d=>d.dow===6||d.dow===0;
+/* pedido explícito do Rui (2026-10-03): sábado passou a ser um dia de
+   produção normal (a equipa trabalha de manhã, mesma capacidade de
+   qualquer outro dia) — só domingo continua a não ser dia de produção,
+   por isso só domingo aparece destacado como "sem trabalho" aqui (ver
+   _calcular_dia_entrada, que já só recua até sábado, nunca até sexta). */
+const NAO_PRODUZ=d=>d.dow===0;
 /* feriados marcados à mão (pedido explícito do Rui, 2026-10-03) —
    partilhado com "Planeamento de linhas" (mesmo calendário da mesma
    equipa, ver /ecos-largos/feriado); só um marcador visual, nunca impede
@@ -550,7 +555,7 @@ function metrics(){
 }
 function days(){ return MASTER.slice(view.start,view.start+view.len); }
 function diaHtml(d,hoje){
-  const wk=FDS(d), fer=ehFeriado(d);
+  const wk=NAO_PRODUZ(d), fer=ehFeriado(d);
   // feriado troca a 2ª linha (mês) por "Feriado" em vez de acrescentar uma
   // 3ª linha — o cabeçalho do dia tem altura fixa, não há espaço para mais.
   const linha2 = fer ? `<div class="dm fer">Feriado</div>`
@@ -616,7 +621,7 @@ function renderLanes(){
   let h="";
   LANES.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LANE[li]}px">`+D.map(d=>{
     const hoje=MASTER.indexOf(d)===HOJE;
-    return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
+    return `<div class="cell${NAO_PRODUZ(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
@@ -877,7 +882,7 @@ function openSheet(id){
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
     <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
       Marcado: entra no charriot no mesmo dia do início da produção. Desmarcado: entra no dia anterior
-      (ou sexta-feira, se isso cair a fim de semana).</div>
+      (ou sábado, se isso cair a domingo).</div>
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">

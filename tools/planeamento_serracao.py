@@ -360,16 +360,18 @@ def _repartir_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
     já ocupados no 1º dia e nada no 2º, cabe em 2 dias — 11 no primeiro,
     24 no segundo — e não em 4 como uma repartição uniforme exigiria).
 
-    Sábado e domingo nunca dão capacidade nenhuma (pedido explícito do
-    Rui, 2026-09): uma encomenda demasiado grande para acabar até
-    sexta-feira não passa para sábado — salta o fim de semana inteiro
-    (conta como dias de calendário ocupados, sem produção nenhuma neles)
-    e só continua a ser produzida na segunda-feira seguinte.
+    Domingo nunca dá capacidade nenhuma — a linha não produz nesse dia.
+    Sábado DÁ capacidade normal (pedido explícito do Rui, 2026-10-03: a
+    equipa ainda trabalha ao sábado de manhã, com a mesma capacidade de
+    um dia normal da linha — ver CAPACIDADES) desde 2026-10-03; antes
+    disso, uma encomenda demasiado grande para acabar até sexta-feira
+    saltava o fim de semana inteiro (conta sempre como dia de calendário
+    ocupado, mesmo quando não dá capacidade nenhuma).
 
     Devolve (dias, alocacao): `dias` é quantos dias de calendário isso
     ocupa (mesmo que algum desses dias não tenha contribuído nada — um
-    fim de semana, ou um dia reservado por completo por outra OF sem
-    volume definido, não dão espaço nenhum, mas continuam a contar como
+    domingo, ou um dia reservado por completo por outra OF sem volume
+    definido, não dão espaço nenhum, mas continuam a contar como
     dias ocupados do calendário); `alocacao` é {dia_iso: m³ que esta
     encomenda ficou mesmo a ocupar nesse dia} — os m³ REAIS usados, nunca
     uma média, para quem chamar poder somar a `ocupacao` sem repetir o
@@ -382,12 +384,11 @@ def _repartir_greedy(capacidade: float, ocupacao: dict, dia_inicio: str,
         data = inicio + timedelta(days=dias - 1)
         dia = data.isoformat()
         usado = ocupacao.get(dia, 0)
-        # fim de semana não é dia de produção — nunca dá capacidade
-        # nenhuma, esteja o que estiver ocupado nesse dia (pedido
-        # explícito do Rui, 2026-09): uma encomenda grande demais para
-        # acabar até sexta-feira não passa para sábado, salta o fim de
-        # semana inteiro e continua na segunda-feira seguinte.
-        if data.weekday() >= 5:  # sábado=5, domingo=6
+        # só domingo não é dia de produção — nunca dá capacidade nenhuma.
+        # Sábado dá capacidade normal (pedido explícito do Rui,
+        # 2026-10-03: a equipa ainda trabalha ao sábado de manhã, mesma
+        # capacidade de um dia normal da linha).
+        if data.weekday() == 6:  # domingo
             livre = 0
         else:
             livre = 0 if usado == float("inf") else max(0, capacidade - usado)
@@ -487,13 +488,14 @@ def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None,
             # cálculo automático — nesse caso já não faz sentido repartir
             # greedily a partir do volume (a duração já está decidida,
             # não é para calcular), reparte-se em vez disso um ritmo
-            # uniforme pelos dias ÚTEIS do intervalo escolhido (fins de
-            # semana continuam a não produzir nada, mesmo numa duração
-            # manual).
+            # uniforme pelos dias ÚTEIS do intervalo escolhido (só domingo
+            # continua a não produzir nada, mesmo numa duração manual —
+            # sábado conta como dia útil desde 2026-10-03, ver
+            # _repartir_greedy).
             duracao = max(1, a["duracao_dias"] or 1)
             inicio_manual = date.fromisoformat(a["dia_inicio"])
             dias_uteis = [inicio_manual + timedelta(days=i) for i in range(duracao)
-                         if (inicio_manual + timedelta(days=i)).weekday() < 5]
+                         if (inicio_manual + timedelta(days=i)).weekday() != 6]
             ritmo = a["volume_m3"] / max(1, len(dias_uteis))
             for dia_data in dias_uteis:
                 dia = dia_data.isoformat()
@@ -671,10 +673,11 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     indicado, mantém o volume já guardado anteriormente para esta OF (não
     o apaga só por não vir neste pedido). Recusa o agendamento (ver
     _validar_capacidade) se ultrapassar a capacidade da linha nalgum dos
-    dias ocupados, ou se `dia_inicio` cair num sábado ou domingo — pedido
-    explícito do Rui (2026-09-30): a linha nunca produz ao fim de semana
-    (ver _repartir_greedy), por isso não faz sentido nenhuma OF começar
-    nesse dia; ao recusar, o arrastar no quadro reverte sozinho para onde
+    dias ocupados, ou se `dia_inicio` cair num domingo — a linha nunca
+    produz nesse dia (ver _repartir_greedy), por isso não faz sentido
+    nenhuma OF começar aí; sábado é um dia de produção válido desde
+    2026-10-03 (pedido explícito do Rui: a equipa ainda trabalha ao
+    sábado de manhã). Ao recusar, o arrastar no quadro reverte sozinho para onde
     a OF estava antes (fila ou linha anterior, ver guardarAgendamento no
     template). Se já tiver tipo de madeira definido, duplica para a
     logística (ver _talvez_duplicar_logistica).
@@ -696,8 +699,8 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     if not dia_inicio:
         return {"erro": "falta indicar o dia de início"}
     try:
-        if date.fromisoformat(dia_inicio).weekday() >= 5:
-            return {"erro": "não é possível começar a produção num fim de semana — escolhe um dia útil"}
+        if date.fromisoformat(dia_inicio).weekday() == 6:
+            return {"erro": "não é possível começar a produção num domingo — escolhe um dia útil"}
     except (TypeError, ValueError):
         return {"erro": f"dia de início inválido: {dia_inicio!r}"}
     existente = db.agendamento_producao(basecamp_card_id)
@@ -767,11 +770,12 @@ def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
     marca de novo.
 
     Avisa se isto ultrapassar a capacidade da linha (repartindo o volume
-    em partes iguais pelos dias úteis do intervalo escolhido — fim de
-    semana nunca produz, mesmo numa duração manual, ver _ocupacao_diaria)
-    mas guarda sempre na mesma (pedido explícito do Rui, 2026-09-29): ao
-    contrário do agendamento automático, aqui a equipa está deliberadamente
-    a corrigir o modelo com a realidade da produção — se souberem que cabe
+    em partes iguais pelos dias úteis do intervalo escolhido — só domingo
+    nunca produz, mesmo numa duração manual, sábado conta desde
+    2026-10-03, ver _ocupacao_diaria) mas guarda sempre na mesma (pedido
+    explícito do Rui, 2026-09-29): ao contrário do agendamento automático,
+    aqui a equipa está deliberadamente a corrigir o modelo com a
+    realidade da produção — se souberem que cabe
     na mesma (ex: um turno extra), não faz sentido o aviso bloquear a
     gravação. O aviso vem no campo `aviso` da resposta, não em `erro`."""
     existente = db.agendamento_producao(basecamp_card_id)
@@ -793,9 +797,9 @@ def redefinir_fim(basecamp_card_id: int, dia_fim: str) -> dict:
         capacidade = db.capacidades_linhas_producao_ecos_largos().get(linha) or 0
         if capacidade > 0:
             dias_uteis = [inicio + timedelta(days=i) for i in range(duracao_dias)
-                         if (inicio + timedelta(days=i)).weekday() < 5]
+                         if (inicio + timedelta(days=i)).weekday() != 6]
             if not dias_uteis:
-                aviso = "este intervalo não tem nenhum dia útil — fim de semana nunca produz, ficaria sem nenhum m³ atribuído"
+                aviso = "este intervalo não tem nenhum dia útil — domingo nunca produz, ficaria sem nenhum m³ atribuído"
             else:
                 ritmo = volume_m3 / len(dias_uteis)
                 ocupacao = _ocupacao_diaria(linha, antes_de=_prioridade(existente["dia_inicio"], basecamp_card_id),
@@ -1450,6 +1454,12 @@ const MASTER=[];
   }
 }
 const FDS=d=>d.dow===6||d.dow===0;
+/* pedido explícito do Rui (2026-10-03): a linha de produção passou a
+   trabalhar ao sábado de manhã (capacidade igual a qualquer outro dia) —
+   só domingo continua a não ser dia de produção. A logística mantém-se
+   sem trabalhar ao fim de semana (sábado+domingo, ver FDS acima) — nunca
+   se planeiam carregamentos ao sábado. */
+const NAO_PRODUZ=d=>d.dow===0;
 /* feriados marcados à mão (pedido explícito do Rui, 2026-10-03) —
    partilhado com "Planeamento de Entradas" (mesmo calendário da mesma
    equipa, ver /ecos-largos/feriado); só um marcador visual, nunca impede
@@ -1837,8 +1847,8 @@ function renderLabels(){
     el.onclick=()=>{ if(modoEdicao) editarCapacidade(el.dataset.linha); };
   });
 }
-function diaHtml(d,hoje){
-  const wk=FDS(d), fer=ehFeriado(d);
+function diaHtml(d,hoje,semTrabalho){
+  const wk=semTrabalho(d), fer=ehFeriado(d);
   // feriado troca a 2ª linha (mês) por "Feriado" em vez de acrescentar uma
   // 3ª linha — o cabeçalho do dia tem altura fixa, não há espaço para mais.
   const linha2 = fer ? `<div class="dm fer">Feriado</div>`
@@ -1850,10 +1860,13 @@ function diaHtml(d,hoje){
 }
 function renderDays(){
   const D=days();
-  $("#days").innerHTML=D.map((d,i)=>diaHtml(d,view.start+desvioProd+i===HOJE)).join("");
+  // produção: só domingo não trabalha (sábado passou a dia de produção
+  // normal, 2026-10-03); logística: mantém-se sem trabalhar ao sábado
+  // nem domingo (ver NAO_PRODUZ/FDS acima).
+  $("#days").innerHTML=D.map((d,i)=>diaHtml(d,view.start+desvioProd+i===HOJE,NAO_PRODUZ)).join("");
   $("#days").style.width=(D.length*DAY)+"px";
   const DL=daysLog();
-  $("#daysLog").innerHTML=DL.map((d,i)=>diaHtml(d,view.start+desvioLog+i===HOJE)).join("");
+  $("#daysLog").innerHTML=DL.map((d,i)=>diaHtml(d,view.start+desvioLog+i===HOJE,FDS)).join("");
   $("#daysLog").style.width=(DL.length*DAY)+"px";
 }
 /* várias OFs cabem na mesma linha/dia enquanto a soma dos seus ritmos
@@ -1869,11 +1882,12 @@ function renderDays(){
    só os visíveis), para a posição de cada um não saltar ao navegar entre
    semanas. */
 const ITEM_PROD_H=44, ITEM_PROD_GAP=4, ITEM_PROD_PAD=6;
-/* fim de semana não é dia de produção (pedido explícito do Rui, 2026-09):
-   um card que atravessa sábado/domingo não deve aparecer a "ocupar"
-   esses dias no quadro — só os dias em que se produz mesmo (ex: uma
-   encomenda de sexta a segunda mostra-se só na sexta e na segunda,
-   nunca um bloco contínuo a cobrir o fim de semana também). `c.dur`
+/* só domingo não é dia de produção (sábado passou a ser, pedido explícito
+   do Rui, 2026-10-03 — a equipa trabalha ao sábado de manhã, mesma
+   capacidade de um dia normal): um card que atravessa um domingo não deve
+   aparecer a "ocupar" esse dia no quadro — só os dias em que se produz
+   mesmo (ex: uma encomenda de sábado a segunda mostra-se só no sábado e
+   na segunda, nunca um bloco contínuo a cobrir o domingo também). `c.dur`
    continua a ser a duração em dias de calendário (usada pelo backend
    para calcular capacidade/carregamento, ver _dias_necessarios_greedy),
    mas a apresentação usa só os dias úteis dentro desse intervalo. */
@@ -1881,7 +1895,7 @@ function diasUteisCard(c){
   const dias=[];
   for(let k=0;k<c.dur;k++){
     const idx=c.gs+k, d=MASTER[idx];
-    if(d && !FDS(d)) dias.push(idx);
+    if(d && !NAO_PRODUZ(d)) dias.push(idx);
   }
   return dias;
 }
@@ -1946,16 +1960,17 @@ function renderLanes(){
   let h="";
   LINHAS.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LINHA[li]}px">`+D.map(d=>{
     const hoje=MASTER.indexOf(d)===HOJE;
-    return `<div class="cell${FDS(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
+    // só domingo não é dia de produção (sábado passou a ser, 2026-10-03)
+    return `<div class="cell${NAO_PRODUZ(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   cards.filter(c=>c.linha!==null).forEach(c=>{
-    // um card que atravessa um fim de semana desenha-se em vários
-    // segmentos (um por cada grupo de dias úteis seguidos), com um
-    // espaço em branco por cima do sábado/domingo — nunca um bloco
-    // contínuo a cobrir dias em que não há produção (ver segmentosCard).
+    // um card que atravessa um domingo desenha-se em vários segmentos
+    // (um por cada grupo de dias úteis seguidos), com um espaço em
+    // branco por cima do domingo — nunca um bloco contínuo a cobrir
+    // dias em que não há produção (ver segmentosCard).
     const segmentos=segmentosCard(c);
     segmentos.forEach((seg,i)=>{
       const a=seg.inicio-(view.start+desvioProd), b=seg.fim-(view.start+desvioProd)+1;
@@ -2112,7 +2127,7 @@ $("#lanes").addEventListener("pointerdown",e=>{
   if(e.target.closest(".editBtn"))return;
   const b=e.target.closest(".blk"); if(!b)return;
   const c=card(+b.dataset.id);
-  // um card com fim de semana no meio tem vários segmentos (ver
+  // um card com um domingo no meio tem vários segmentos (ver
   // segmentosCard) — agarrar em qualquer um deles tem de arrastar todos
   // juntos, senão só o segmento tocado se move durante o gesto e o
   // outro fica visualmente para trás até ao próximo render.
