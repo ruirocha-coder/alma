@@ -2078,7 +2078,22 @@ function log(dir,t){ logs.unshift({dir,t}); renderLog(); }
    a alteração já feita no ecrã (arrastar, largar da fila, ...) é revertida
    para `anterior`, para o quadro nunca ficar a mostrar algo que o servidor
    não aceitou. */
+/* pedido explícito do Rui (2026-10-04): sábado já é um dia de produção
+   válido (ver tools/planeamento_serracao.agendar), mas continua a ser
+   uma mudança de hábito recente — pede sempre confirmação antes de
+   gravar um início a um sábado, só para garantir que é mesmo intencional
+   (nunca bloqueia de vez: confirmando, a ação conclui-se normalmente). */
+function confirmarSabado(iso){
+  const d=MASTER[idxOf(iso)];
+  if(!d || d.dow!==6) return true;
+  return confirm(`${iso} é um sábado — tens mesmo a certeza que queres colocar produção nesse dia?`);
+}
 async function guardarAgendamento(c, anterior){
+  if(!confirmarSabado(MASTER[c.gs].iso)){
+    if(anterior){ c.linha=anterior.linha; c.gs=anterior.gs; c.dur=anterior.dur; c.volume=anterior.volume; }
+    renderFila(); renderLanes();
+    return;
+  }
   $("#syncDot").classList.add("busy"); $("#syncTxt").textContent="A gravar…";
   try{
     const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
@@ -2444,7 +2459,7 @@ function openSheet(id,somenteLeitura){
       const isoOriginal=$("#fInicio").dataset.original;
       const vol=+$("#fVol").value;
       const linhaMudou=linhaIdx!==c.linha, inicioMudou=iso&&iso!==isoOriginal, volMudou=vol>0&&vol!==c.volume;
-      if(linhaMudou||inicioMudou||volMudou){
+      if((linhaMudou||inicioMudou||volMudou) && confirmarSabado(iso||MASTER[c.gs].iso)){
         try{
           const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
             headers:{"Content-Type":"application/json"},
@@ -2485,7 +2500,7 @@ function openSheet(id,somenteLeitura){
       const vol=+$("#fVol").value;
       if(linhaIdx>=0){
         if(!iso) erros.push("linha/início: escolhe uma data de início");
-        else{
+        else if(confirmarSabado(iso)){
           try{
             const r=await fetch("/planeamento-ecos-largos/agendar",{method:"POST",
               headers:{"Content-Type":"application/json"},
