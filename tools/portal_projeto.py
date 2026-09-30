@@ -1643,7 +1643,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
     <legend>Para quem fica o desconto?</legend>
     <div class="escolha">
       <label><input type="radio" name="desconto" value="cliente" required> Para mim</label>
-      <label><input type="radio" name="desconto" value="amigo"> Para o meu amigo</label>
+      <label><input type="radio" name="desconto" value="amigo"> Para o meu contacto</label>
     </div>
     <div class="campo" style="margin-top:16px">
       <label>Comentário (opcional)</label>
