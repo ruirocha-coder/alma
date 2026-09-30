@@ -881,9 +881,6 @@ function openSheet(id){
     <div class="frow"><label>Duração na tabela (dias)</label>
       <input id="fLarguraDias" type="number" min="1" max="${LARGURA_DIAS_MAX}" step="1"
         style="width:70px;flex:0 0 auto" value="${it.larguraDias||1}"></div>
-    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
-      Quantos dias o card ocupa na tabela — o mesmo que arrastar a borda direita do card. Só visual,
-      nunca muda o dia real de entrada.</div>
 
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
