@@ -1208,7 +1208,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
   .recomendar-texto h3 .x{color:#A55646;font-weight:600;margin-right:6px}
   .recomendar-texto p{color:var(--ink);font-size:13.5px;font-weight:400;margin-top:8px;max-width:420px}
-  .recomendar-texto .recomendar-nota{font-size:12px;font-style:italic;margin-top:8px}
   .btn-adjudicar{display:inline-block;background:var(--paper);color:var(--ink);border:none;padding:16px 28px;
        font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
        white-space:nowrap;transition:.15s}
@@ -1334,7 +1333,6 @@ const blocoRecomendar = () => `
     <div class="recomendar-texto">
       <h3><span class="x">✕</span>Recomende e receba 500€</h3>
       <p>A melhor forma de a partilhar é apresentar alguém que também possa beneficiar dela. Por cada recomendação que resulte num projeto com compra mínima de €10.000, oferecemos €500 na última fatura.</p>
-      ${recomendarDisponivel ? '' : '<p class="recomendar-nota">Disponível assim que o projeto for validado.</p>'}
     </div>
     ${recomendarDisponivel
       ? `<a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Eu recomendo</a>`
@@ -1561,7 +1559,7 @@ _TEMPLATE_RECOMENDAR_BLOQUEADO = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1><span class="x">✕</span>Recomende e receba 500€</h1>
-<p>Esta recomendação ainda não está disponível — fica aberta assim que o projeto for validado.</p>
+<p>Esta recomendação ainda não está disponível.</p>
 </body>
 </html>
 """
