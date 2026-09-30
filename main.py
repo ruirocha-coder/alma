@@ -828,6 +828,16 @@ def planeamento_entradas_largura_dias(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/planeamento-entradas/produzido")
+def planeamento_entradas_produzido(corpo: dict = Body(...)):
+    """Marca/desmarca "Produzido" de uma OF — ver
+    tools/planeamento_entradas.definir_produzido."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.definir_produzido(basecamp_card_id, bool(corpo.get("produzido")))
+    return JSONResponse(resultado)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —

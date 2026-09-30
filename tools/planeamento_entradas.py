@@ -148,6 +148,7 @@ def estado_planeamento_entradas() -> dict:
             "em_continuo": em_continuo,
             "charriots": extra.get("charriots") or [],
             "largura_dias": extra.get("largura_dias_visual") or 1,
+            "produzido": bool(extra.get("produzido")),
             "wip_cmp": wip_cmp,
             "wip_lar": wip_lar,
             "wip_esp": wip_esp,
@@ -188,6 +189,13 @@ def definir_largura_dias(basecamp_card_id: int, largura_dias) -> dict:
     if largura_dias < 1 or largura_dias > LARGURA_DIAS_MAX:
         return {"erro": f"largura em dias tem de estar entre 1 e {LARGURA_DIAS_MAX}"}
     return db.definir_largura_dias_entrada(basecamp_card_id, largura_dias if largura_dias != 1 else None)
+
+def definir_produzido(basecamp_card_id: int, produzido: bool) -> dict:
+    """Marca/desmarca "Produzido" (pedido explícito do Rui, 2026-10-03) —
+    só um marcador visual à mão (muda o fundo do card para verde), sem
+    ligação ao estado real da OF no Basecamp nem a nenhum cálculo desta
+    página."""
+    return db.definir_produzido_entrada(basecamp_card_id, bool(produzido))
 
 def _validar_numero_positivo(nome: str, valor):
     if valor is None:
@@ -243,6 +251,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --ink:#1A1C1E; --dim:#75797D;
     --line:#E8E8E3; --edge:#D9D9D2;
     --blue:#1B6AC9; --gold:#E0A02C; --red:#C4452E; --grey:#9AA0A6; --hoje:#FFF6D6;
+    --green:#2E9E4F; --green-bg:#E1F5E6;
     --day:92px; --lane:78px; --label:180px;
   }
   *{box-sizing:border-box}
@@ -325,6 +334,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .dense .blk .tt{font-size:12px}
   .blk.drag{cursor:grabbing;box-shadow:0 8px 22px rgba(0,0,0,.22);z-index:9;border-color:var(--blue)}
   .blk.semCharriot{border-left-style:dashed}
+  /* botão "Produzido" (pedido explícito do Rui, 2026-10-03, só nesta
+     página) — marca/desmarca à mão, muda o fundo do card para verde. */
+  .blk.produzido{background:var(--green-bg)}
+  .btnProduzido{flex:0 0 auto;width:17px;height:17px;padding:0;border:1.5px solid var(--green);
+    color:var(--green);background:var(--paper);border-radius:50%;font-size:10.5px;font-weight:700;
+    line-height:14px;cursor:pointer;touch-action:none}
+  .btnProduzido.ativo{background:var(--green);color:#fff}
   /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
      2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
      touch não há hover, por isso têm de já lá estar para se poderem tocar),
@@ -593,7 +609,7 @@ function renderLanes(){
       const linha=linhaPorId.get(e.id);
       const el=document.createElement("div");
       const temCharriot=e.charriots && e.charriots.length>0;
-      el.className="blk"+(temCharriot?"":" semCharriot");
+      el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"");
       el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
       el.style.borderLeftColor=corProduto(e);
       el.style.left=(aVis*DAY+3)+"px";
@@ -605,7 +621,12 @@ function renderLanes(){
       // definir_largura_dias); borda de baixo marca mais charriots ao
       // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
       // seleção na ficha, mas mais rápido).
-      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
+      // botão "Produzido" (pedido explícito do Rui, 2026-10-03, só nesta
+      // página): marca/desmarca à mão, muda o fundo do card para verde
+      // (ver definir_produzido) — intercetado no pointerdown antes do
+      // arrastar normal, tal como os manípulos .rsz.
+      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span>
+          <button type="button" class="btnProduzido${e.produzido?" ativo":""}" title="Produzido">✓</button></div>
         <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
         <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>
         <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
@@ -669,6 +690,17 @@ window.addEventListener("resize",render);
    ._calcular_dia_entrada) ---------- */
 let drag=null, resize=null;
 $("#lanes").addEventListener("pointerdown",e=>{
+  const btnP=e.target.closest(".btnProduzido");
+  if(btnP){
+    const b=e.target.closest(".blk"); if(!b) return;
+    const it=item(+b.dataset.id); if(!it) return;
+    e.preventDefault(); e.stopPropagation();
+    const anterior=it.produzido;
+    it.produzido=!it.produzido;
+    renderLanes();
+    definirProduzidoServidor(it, anterior);
+    return;
+  }
   const rh=e.target.closest(".rsz-h"), rv=e.target.closest(".rsz-v");
   if(rh||rv){
     const b=e.target.closest(".blk"); if(!b) return;
@@ -757,7 +789,7 @@ $("#lanes").addEventListener("pointerup",e=>{
    simples serve para isso), mantém-se o mesmo hábito de duplo clique para
    abrir a ficha — o clique simples não faz nada sozinho. */
 $("#lanes").addEventListener("dblclick",e=>{
-  if(e.target.closest(".rsz")) return;
+  if(e.target.closest(".rsz")||e.target.closest(".btnProduzido")) return;
   const b=e.target.closest(".blk"); if(!b) return;
   openSheet(+b.dataset.id);
 });
@@ -780,6 +812,16 @@ async function definirLarguraServidor(it, anterior){
     if(d.erro){ alert(d.erro); it.larguraDias=anterior; renderLanes(); return; }
     log("local",`"${it.titulo}" alargada para ${it.larguraDias} dia(s) — só visual`);
   }catch(e){ alert("Falhou a guardar: "+e); it.larguraDias=anterior; renderLanes(); }
+}
+async function definirProduzidoServidor(it, anterior){
+  try{
+    const r=await fetch("/planeamento-entradas/produzido",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({basecamp_card_id:it.id,produzido:it.produzido})});
+    const d=await r.json();
+    if(d.erro){ alert(d.erro); it.produzido=anterior; renderLanes(); return; }
+    log("local",`"${it.titulo}" marcada como ${it.produzido?"produzida":"não produzida"}`);
+  }catch(e){ alert("Falhou a guardar: "+e); it.produzido=anterior; renderLanes(); }
 }
 
 /* ---------- ficha ---------- */
@@ -941,7 +983,8 @@ async function carregar(){
     entradas=(d.entradas||[]).map(e=>({
       id:e.basecamp_card_id, titulo:e.titulo, url:e.url, coluna:e.coluna_basecamp,
       linha:e.linha, dataInicioProducao:e.dia_inicio_producao, volume:e.volume_m3, madeira:e.tipo_madeira, cor:e.cor,
-      gs:idxOf(e.dia_entrada), charriots:e.charriots||[], larguraDias:e.largura_dias||1, emContinuo:!!e.em_continuo,
+      gs:idxOf(e.dia_entrada), charriots:e.charriots||[], larguraDias:e.largura_dias||1,
+      produzido:!!e.produzido, emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,

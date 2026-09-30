@@ -465,6 +465,14 @@ ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS em_continuo B
 -- decidir sozinho o dia "oficial"). NULL/1 = tamanho normal (um dia).
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS largura_dias_visual INTEGER;
 
+-- botão "Produzido" (pedido explícito do Rui, 2026-10-03, só na página
+-- "Planeamento de Entradas"): marca/desmarca à mão que os troncos desta
+-- OF já foram produzidos — muda o fundo do card para verde. Não tem
+-- nenhuma ligação ao estado real da OF no Basecamp (Em Produção/
+-- Produzido/Vendido, ver COLUNAS_OF_FLUXO) nem a nenhum cálculo desta
+-- página — é só um marcador visual à mão da equipa.
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS produzido BOOLEAN;
+
 -- toro_cmp passou de NUMERIC a TEXT (pedido explícito do Rui, 2026-10-02):
 -- há opções de comprimento de toro que não são um número puro (ex: "255
 -- ⌀16", a marcar um diâmetro específico) — nunca foi usado em nenhum
@@ -1142,7 +1150,7 @@ def entradas_charriot_ecos_largos() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT basecamp_card_id, charriots, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
-                          indice_toros, indice_wip, em_continuo, largura_dias_visual
+                          indice_toros, indice_wip, em_continuo, largura_dias_visual, produzido
                    FROM entradas_charriot_ecos_largos"""
             )
             return [{
@@ -1157,6 +1165,7 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
                 "em_continuo": l["em_continuo"],
                 "largura_dias_visual": l["largura_dias_visual"],
+                "produzido": bool(l["produzido"]),
             } for l in cur.fetchall()]
 
 def atribuir_charriots_entrada(basecamp_card_id: int, charriots: list = None) -> dict:
@@ -1192,6 +1201,23 @@ def definir_largura_dias_entrada(basecamp_card_id: int, largura_dias: int = None
                    ON CONFLICT (basecamp_card_id) DO UPDATE SET
                        largura_dias_visual = EXCLUDED.largura_dias_visual, atualizado_em = now()""",
                 (basecamp_card_id, largura_dias)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def definir_produzido_entrada(basecamp_card_id: int, produzido: bool) -> dict:
+    """Marca/desmarca "Produzido" num card da página "Planeamento de
+    Entradas" (pedido explícito do Rui, 2026-10-03) — só um marcador visual
+    à mão (muda o fundo do card para verde), sem ligação ao estado real da
+    OF no Basecamp nem a nenhum cálculo desta página."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, produzido)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       produzido = EXCLUDED.produzido, atualizado_em = now()""",
+                (basecamp_card_id, produzido)
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
