@@ -1203,6 +1203,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
   .recomendar-encaixado{margin-bottom:40px}
   .recomendar-encaixado .recomendar-caixa{margin-top:0}
+  .recomendar-rodape{margin-top:40px;padding-top:40px;border-top:1px solid var(--line)}
+  .recomendar-rodape .recomendar-caixa{margin-top:0}
   .recomendar-caixa.bloqueado{opacity:.65}
   .recomendar-texto{flex:1;min-width:220px}
   .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
@@ -1254,7 +1256,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <p class="fecho">Obrigado.<br><br>Tudo o que é feito com cuidado acaba por criar boas memórias.</p>
 
-  <div id="recomendarRodape"></div>
+  <div class="recomendar-rodape" id="recomendarRodape"></div>
 
   <footer>
     <span>Interior Guider · Vila Nova de Gaia</span>
