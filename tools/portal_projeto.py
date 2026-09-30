@@ -855,17 +855,30 @@ _COLUNA_RECOMENDACOES = "Triagem"
 _PROJETO_RECOMENDACOES = "@ Interior Guider"
 
 
+def _fase_projeto_validada(projeto: dict) -> bool:
+    """A recomendação de amigo (botão/bloco no portal e o próprio
+    formulário) só fica disponível depois de a fase "Projeto" estar
+    validada — pedido explícito do Rui (2026-09-30)."""
+    fase = next((f for f in projeto.get("fases", []) if f.get("id") == "projeto"), None)
+    return bool(fase) and fase.get("estado") == "validada"
+
+
 def pagina_recomendar_amigo(card_id: int) -> dict:
     """Página pública "Recomendar amigo" (link a partir do bloco laranja
     do portal, ver _TEMPLATE) onde o cliente preenche os dados dele e de
     um amigo a quem recomendou o studio. Os dados do cliente vêm
     pré-preenchidos do que já está gravado no portal (ver
     `clienteContacto` em _construir_e_gravar) — nunca pedidos de novo à
-    Alma aqui. Devolve {"erro": ...} se este card não tiver portal."""
+    Alma aqui. Devolve {"erro": ...} se este card não tiver portal, ou
+    uma página de aviso (sem formulário) se a fase "Projeto" ainda não
+    estiver validada — o botão no portal já vem desativado nesse caso,
+    mas alguém podia mesmo assim abrir este link diretamente."""
     registo = db.obter_documento_gerado_por_card_id(card_id)
     if not registo or registo["formato"] != "html":
         return {"erro": "portal não encontrado"}
     projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    if not _fase_projeto_validada(projeto):
+        return {"html": _TEMPLATE_RECOMENDAR_BLOQUEADO}
     contacto = projeto.get("clienteContacto") or {}
     dados = {
         "cardId": card_id,
@@ -898,6 +911,8 @@ def criar_recomendacao_amigo(card_id: int, dados: dict) -> dict:
     if not registo or registo["formato"] != "html":
         return {"erro": "portal não encontrado"}
     projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    if not _fase_projeto_validada(projeto):
+        return {"erro": "a recomendação só fica disponível depois de a fase \"Projeto\" ser validada"}
     ref = projeto.get("ref") or str(card_id)
 
     quem_fica_desconto = "o cliente (quem recomendou)" if dados["desconto_para"] == "cliente" else "o amigo recomendado"
@@ -1188,10 +1203,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
        justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
   .recomendar-encaixado{margin-bottom:40px}
   .recomendar-encaixado .recomendar-caixa{margin-top:0}
+  .recomendar-caixa.bloqueado{opacity:.65}
   .recomendar-texto{flex:1;min-width:220px}
   .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
   .recomendar-texto h3 .x{color:#A55646;font-weight:600;margin-right:6px}
   .recomendar-texto p{color:var(--ink);font-size:13.5px;font-weight:400;margin-top:8px;max-width:420px}
+  .recomendar-texto .recomendar-nota{font-size:12px;font-style:italic;margin-top:8px}
   .btn-adjudicar{display:inline-block;background:var(--paper);color:var(--ink);border:none;padding:16px 28px;
        font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
        white-space:nowrap;transition:.15s}
@@ -1310,13 +1327,18 @@ $('tiles').innerHTML = projeto.fases.map((f,i)=>`
     <div class="e">${rotuloTile(f)}</div>
   </a>`).join('');
 
+const faseProjeto = projeto.fases.find(f => f.id === 'projeto');
+const recomendarDisponivel = !!faseProjeto && faseProjeto.estado === 'validada';
 const blocoRecomendar = () => `
-  <div class="recomendar-caixa">
+  <div class="recomendar-caixa ${recomendarDisponivel ? '' : 'bloqueado'}">
     <div class="recomendar-texto">
-      <h3><span class="x">✕</span>Recomende-nos a um amigo</h3>
-      <p>Conhece alguém que também sonha em transformar a sua casa? Recomende-nos e escolha quem fica com o desconto — você ou o seu amigo.</p>
+      <h3><span class="x">✕</span>Recomende e receba 500€</h3>
+      <p>A melhor forma de a partilhar é apresentar alguém que também possa beneficiar dela. Por cada recomendação que resulte num projeto com compra mínima de €10.000, oferecemos €500 na última fatura.</p>
+      ${recomendarDisponivel ? '' : '<p class="recomendar-nota">Disponível assim que o projeto for validado.</p>'}
     </div>
-    <a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Recomendar amigo</a>
+    ${recomendarDisponivel
+      ? `<a class="btn-adjudicar" href="/portal/${projeto.cardId}/recomendar">Eu recomendo</a>`
+      : `<span class="btn-adjudicar" style="opacity:.5;pointer-events:none">Eu recomendo</span>`}
   </div>`;
 $('recomendarRodape').innerHTML = blocoRecomendar();
 
@@ -1512,6 +1534,34 @@ async function validarFase(faseId, botao){
   }
 }
 </script>
+</body>
+</html>
+"""
+
+
+_TEMPLATE_RECOMENDAR_BLOQUEADO = r"""<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Recomendar um amigo — Interior Guider</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--paper:#fdfaee; --ink:#1C1A17; --stone:#8E877C;}
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
+      max-width:480px;margin:0 auto;padding:60px 20px;text-align:center}
+  h1{font-size:22px;font-weight:400;line-height:1.3;margin:0}
+  h1 .x{color:#A55646;font-weight:600;margin-right:8px}
+  p{color:var(--stone);font-size:14px;margin-top:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<h1><span class="x">✕</span>Recomende e receba 500€</h1>
+<p>Esta recomendação ainda não está disponível — fica aberta assim que o projeto for validado.</p>
 </body>
 </html>
 """
