@@ -1486,13 +1486,19 @@ function garantirNaVista(gs){
    Calendar), com o dia de hoje só destacado por cor, nunca forçado a ser
    a primeira coluna. */
 const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; return idx-((dow+6)%7); };
+/* limite mínimo de view.start que mantém a semana sempre alinhada a
+   segunda-feira ao navegar para trás — MASTER pode começar a meio de uma
+   semana (bug real, 2026-10-04: recuar demasiadas semanas desalinhava os
+   dias mostrados, porque o limite antigo, 0, é só o primeiro dia de
+   MASTER, não necessariamente uma segunda-feira). */
+const INICIO_MIN_SEMANA=(()=>{ const s=segundaDe(0); return s>=0?s:s+7; })();
 
 let LINHAS=[];
 let CAPACIDADES={};
 let cards=[];
 let cardsLog=[];
 let selecionadoId=null;
-let view={mode:"semana",start:Math.max(segundaDe(HOJE),0),len:7};
+let view={mode:"semana",start:Math.max(segundaDe(HOJE),INICIO_MIN_SEMANA),len:7};
 let undoStack=[], logs=[], DAY=92, LANE=78;
 /* modo só consulta por omissão (pedido explícito do Rui, 2026-09-29): a
    página abre sempre assim, mesmo que já se tenha ativado a edição antes
@@ -1779,7 +1785,7 @@ function setMode(m){
   const anchor=view.start;
   if(m==="semana"||m==="duas"){
     view.len = m==="semana"?7:14;
-    view.start = clamp(segundaDe(anchor), 0, Math.max(MASTER.length-view.len,0));
+    view.start = clamp(segundaDe(anchor), INICIO_MIN_SEMANA, Math.max(MASTER.length-view.len,0));
   }else{
     const d=MASTER[clamp(anchor,0,MASTER.length-1)];
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
@@ -1797,7 +1803,7 @@ function step(dir){
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
     view.len=MASTER.filter(x=>x.mo===d.mo && x.y===d.y).length;
   }else{
-    view.start=clamp(view.start+dir*view.len,0,Math.max(MASTER.length-view.len,0));
+    view.start=clamp(view.start+dir*view.len,INICIO_MIN_SEMANA,Math.max(MASTER.length-view.len,0));
   }
   limparAlinhamento(); render();
 }
