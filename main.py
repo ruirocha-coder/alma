@@ -1079,20 +1079,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.post("/_debug-corrigir-card-id")
-def _debug_corrigir_card_id(corpo: dict = Body(...)):
-    """TEMPORÁRIO — corrige o card_id de um documento gerado (ex: a
-    Camila Legey, cujo card mudou de número no Basecamp). Remover
-    depois."""
-    from db import get_conn
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE documentos_gerados SET card_id = %s WHERE id = %s RETURNING id, card_id",
-                       (corpo["novo_card_id"], corpo["id_documento"]))
-            linha = cur.fetchone()
-        conn.commit()
-    return linha if linha else {"erro": "documento não encontrado"}
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
