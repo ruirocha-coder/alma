@@ -1213,7 +1213,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .recomendar-caixa.bloqueado{opacity:.65}
   .recomendar-texto{flex:1;min-width:220px}
   .recomendar-texto h3{color:var(--ink);font-weight:400;font-size:20px;line-height:1.3}
-  .recomendar-texto h3 .x{color:#A55646;font-weight:600;margin-right:6px}
+  .recomendar-texto h3 .x-icone{width:18px;height:auto;vertical-align:-3px;margin-right:7px}
   .recomendar-texto p{color:var(--ink);font-size:13.5px;font-weight:400;margin-top:8px;max-width:420px}
   .btn-adjudicar{display:inline-block;background:var(--paper);color:var(--ink);border:none;padding:16px 28px;
        font-size:14px;font-weight:500;font-family:inherit;text-decoration:none;cursor:pointer;
@@ -1338,7 +1338,7 @@ const recomendarDisponivel = !!faseProjeto && faseProjeto.estado === 'validada';
 const blocoRecomendar = () => `
   <div class="recomendar-caixa ${recomendarDisponivel ? '' : 'bloqueado'}">
     <div class="recomendar-texto">
-      <h3><span class="x">✕</span>Recomende e receba 500€</h3>
+      <h3>__X_ICON__Recomende e receba 500€</h3>
       <p>Se a sua experiência com o Interior Guider foi significativa, a melhor forma de a partilhar é apresentar alguém que também possa beneficiar dela. Por cada recomendação que resulte num projeto com compra mínima de €10.000, oferecemos €500.</p>
     </div>
     ${recomendarDisponivel
@@ -1559,12 +1559,12 @@ _TEMPLATE_RECOMENDAR_BLOQUEADO = r"""<!DOCTYPE html>
   body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
       max-width:480px;margin:0 auto;padding:60px 20px;text-align:center}
   h1{font-size:22px;font-weight:400;line-height:1.3;margin:0}
-  h1 .x{color:#A55646;font-weight:600;margin-right:8px}
+  h1 .x-icone{width:20px;height:auto;vertical-align:-3px;margin-right:8px}
   p{color:var(--stone);font-size:14px;margin-top:14px;line-height:1.6}
 </style>
 </head>
 <body>
-<h1><span class="x">✕</span>Recomende e receba 500€</h1>
+<h1>__X_ICON__Recomende e receba 500€</h1>
 <p>Esta recomendação ainda não está disponível.</p>
 </body>
 </html>
@@ -1587,7 +1587,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
   body{background:var(--paper);color:var(--ink);font-family:'Jost',system-ui,sans-serif;
       max-width:560px;margin:0 auto;padding:40px 20px 80px}
   h1{font-size:24px;font-weight:400;line-height:1.3;margin:0}
-  h1 .x{color:#A55646;font-weight:600;margin-right:8px}
+  h1 .x-icone{width:20px;height:auto;vertical-align:-3px;margin-right:8px}
   .sub{color:var(--stone);font-size:14px;margin-top:10px;line-height:1.5}
   .voltar{display:inline-block;margin-top:18px;font-size:13px;color:var(--stone);text-decoration:none;
         border-bottom:1px solid var(--line)}
@@ -1617,7 +1617,7 @@ _TEMPLATE_RECOMENDAR = r"""<!DOCTYPE html>
 </head>
 <body>
 
-<h1><span class="x">✕</span>Recomende e receba 500€</h1>
+<h1>__X_ICON__Recomende e receba 500€</h1>
 <p class="sub">Preencha os dados abaixo. Entramos em contacto consigo e com o contacto recomendado.</p>
 
 <form id="form">
@@ -1700,6 +1700,15 @@ $('form').addEventListener('submit', async (e) => {
 </body>
 </html>
 """
+
+
+_X_VERMELHO_IG_PNG_B64 = (
+    "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"
+)
+_X_ICON_IMG = f'<img src="data:image/png;base64,{_X_VERMELHO_IG_PNG_B64}" class="x-icone" alt="">'
+_TEMPLATE = _TEMPLATE.replace("__X_ICON__", _X_ICON_IMG)
+_TEMPLATE_RECOMENDAR_BLOQUEADO = _TEMPLATE_RECOMENDAR_BLOQUEADO.replace("__X_ICON__", _X_ICON_IMG)
+_TEMPLATE_RECOMENDAR = _TEMPLATE_RECOMENDAR.replace("__X_ICON__", _X_ICON_IMG)
 
 
 def pagina_edicao(id_documento: int, projeto: dict) -> str:
