@@ -118,12 +118,20 @@ def _tem_imagem_anexada(alvo_completo: dict, comentarios: list) -> bool:
     return any(nome.lower().endswith(_EXTENSOES_IMAGEM) for nome in nomes)
 
 # palavras-chave (já sem acentos, minúsculas) que identificam o documento de
-# cada fase do portal — mesma convenção de nomes descrita em
-# tools/portal_projeto.gerar_portal_projeto ("NOMES PADRONIZADOS dos PDFs").
-# honorários fica de fora: essa fase está sempre aberta desde o início,
-# nunca "prevista", por isso nunca precisa de ser "aberta" por um documento
-# novo.
-_PALAVRA_CHAVE_FASE_PORTAL = ("conceito psicoestetico", "apresentacao", "orcamento")
+# cada fase do portal — radicais curtos, não o nome completo da convenção em
+# tools/portal_projeto.gerar_portal_projeto ("NOMES PADRONIZADOS dos PDFs"),
+# porque na prática nem todos os PDFs seguem a convenção à letra (bug real,
+# 2026-10-01: o orçamento da Sofia Pinto veio nomeado "...ORÇ01102026.pdf",
+# que normalizado fica "orc01102026" — não contém "orcamento" por inteiro,
+# só o radical "orc"). Isto é só um pré-filtro barato para não chamar a Alma
+# por qualquer PDF; é a própria Alma (MISSAO_ATUALIZAR_PORTAL) que depois
+# confirma mesmo o documento antes de abrir qualquer fase, por isso um
+# falso positivo aqui é inofensivo (só gasta uma chamada a mais), mas um
+# falso negativo deixa a fase presa sem ninguém reparar — por isso radicais
+# largos, nunca a frase toda. honorários fica de fora: essa fase está
+# sempre aberta desde o início, nunca "prevista", por isso nunca precisa de
+# ser "aberta" por um documento novo.
+_PALAVRA_CHAVE_FASE_PORTAL = ("conceito", "apresent", "orc")
 
 MISSAO_ATUALIZAR_PORTAL = PERSONA + """
 
