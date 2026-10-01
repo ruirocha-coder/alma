@@ -1079,6 +1079,17 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-vault-raiz")
+def _debug_vault_raiz(projeto: str):
+    """TEMPORÁRIO — mostra a estrutura bruta do Vault de um projeto, para
+    perceber como listar pastas/uploads. Remover depois."""
+    import httpx as _httpx
+    bucket_id, vault_id = basecamp._resolver_vault(projeto)
+    r = _httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}.json",
+                   headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
