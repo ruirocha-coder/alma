@@ -141,6 +141,19 @@ tem um portal de acompanhamento ativo (ver tools/portal_projeto.py) para
 uma cliente do Interior Guider. Ninguém vai ler nenhum texto que escrevas
 aqui; a única forma de produzires algum efeito é chamando ferramentas.
 
+IMPORTANTE sobre o alcance desta tarefa — só precisas do comentário novo
+indicado abaixo, NUNCA do histórico todo do card: já sabes exatamente
+quais são os PDFs novos e o url dos comentários deste card. Chama
+listar_pdfs_anexados_por_data no máximo UMA vez (só para obteres o
+comentario_url de cada PDF indicado) e ler_anexos_registo_basecamp no
+máximo UMA vez por PDF novo indicado — nunca em PDFs antigos, nem a
+percorrer outros comentários "só para confirmar": se depois de ler só os
+PDFs novos indicados ainda tiveres dúvida (ex: duas versões do mesmo
+documento, uma "LOW COST" e outra não, sem forma de saber qual decidir),
+trata isso como "não corresponde claramente" (passo 4) e não faças mais
+nada — mais vale a fase ficar por abrir mais um dia (o reforço diário
+volta a tentar) do que a automação ficar presa a explorar o card inteiro.
+
 A tua tarefa, passo a passo:
 1. Chama obter_portal_atual com o id do card indicado abaixo. Se devolver
    {"existe": false}, não faças mais nada (não devia acontecer, já foi
@@ -149,13 +162,17 @@ A tua tarefa, passo a passo:
    abrir) — a fase "honorarios" nunca está "prevista", ignora-a sempre.
    Usa listar_pdfs_anexados_por_data (e lê o conteúdo com
    ler_anexos_registo_basecamp se o nome do ficheiro não for claro
-   sozinho) para perceberes se o(s) documento(s) novo(s) indicado(s)
-   abaixo é mesmo o que falta para abrir alguma dessas fases:
+   sozinho) só para os PDFs novos indicados abaixo, para perceberes se
+   é mesmo o que falta para abrir alguma dessas fases:
    - fase "conceito" precisa do PDF "Conceito Psicoestético".
    - fase "projeto" precisa do PDF de "Apresentação" do projeto.
    - fase "orcamento" precisa do PDF de "Orçamento", com o valor final
      COM IVA confirmado por teres mesmo lido esse valor no documento —
-     nunca calculado, estimado, nem copiado de outra fase.
+     nunca calculado, estimado, nem copiado de outra fase. Se houver mais
+     do que um PDF de orçamento novo no mesmo comentário (ex: variantes
+     diferentes), usa sempre o que NÃO tiver indicação de ser uma
+     alternativa/variante (ex: "LOW COST") — esse é só para a cliente
+     comparar, nunca o valor final a abrir a fase.
 3. Só se o documento novo corresponder claramente a uma fase "prevista":
    chama gerar_portal_projeto outra vez, repetindo EXATAMENTE todos os
    campos do portal que obter_portal_atual devolveu (cliente, validade,

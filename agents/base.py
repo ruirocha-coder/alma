@@ -19,6 +19,19 @@ _INTERVALO_SINAL_DE_VIDA = 8
 # for pedido para continuar/expandir, gera mais conteúdo a seguir.
 MAX_TOKENS_RESPOSTA = 8192
 
+# limite de segurança a rondas de tool-use dentro de uma só chamada a
+# correr_agente — bug real, 2026-10-02: a missão de atualização automática
+# do portal (ver agents/responder_basecamp.MISSAO_ATUALIZAR_PORTAL), ao
+# tentar confirmar qual de dois PDFs de orçamento quase idênticos (um deles
+# "LOW COST") era o válido, acabou a reler repetidamente comentários e
+# anexos antigos do card da Sofia Pinto — cada ronda reenvia a conversa
+# inteira até ali, por isso o histórico ia crescendo a cada nova leitura, e
+# ao fim de várias dezenas de rondas a API chegou a recusar o pedido por
+# ultrapassar o máximo de 1 milhão de tokens (chegou aos 10 milhões). Sem
+# este limite, uma automação em segundo plano (sem ninguém a ver) podia
+# ficar presa assim indefinidamente, a gastar tokens sem nunca terminar.
+MAX_RONDAS_AGENTE = 25
+
 client = anthropic.Anthropic()
 
 # Pesquisa e leitura da internet: tools do lado do servidor da Anthropic — a
@@ -544,7 +557,13 @@ def correr_agente(system_prompt: str, tools: list, mensagens: list, utilizador: 
     # sido escrito antes de qualquer chamada a uma tool.
     partes_resposta = []
     container_id = None
+    rondas = 0
     while True:
+        rondas += 1
+        if rondas > MAX_RONDAS_AGENTE:
+            print(f"[correr_agente] parado ao fim de {MAX_RONDAS_AGENTE} rondas sem "
+                  f"terminar (utilizador={utilizador!r}) — ver MAX_RONDAS_AGENTE")
+            return "".join(partes_resposta)
         pedido = dict(model=modelo, max_tokens=MAX_TOKENS_RESPOSTA,
                       system=system, tools=tools_completas, messages=mensagens)
         if container_id:
