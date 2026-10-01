@@ -1167,6 +1167,26 @@ def _debug_instrumentar_portal(corpo: dict = Body(...)):
     except Exception:
         return {"erro": traceback.format_exc(), "log": log}
 
+@app.post("/_debug-concluir-portal-auto")
+def _debug_concluir_portal_auto(corpo: dict = Body(...)):
+    """TEMPORÁRIO — o teste ao vivo com a Sofia Pinto já abriu a fase
+    "orcamento" com sucesso via _debug-instrumentar-portal, mas sem passar
+    por _tentar_atualizar_portal (por isso sem o comentário no Basecamp
+    nem o registo de dedup). Fecha só esse passo final, uma vez."""
+    import db as db_mod
+    card_id = corpo["card_id"]
+    comment_id = corpo["comment_id"]
+    fase_titulo = corpo["fase_titulo"]
+    projeto = corpo.get("projeto") or "@ Interior Guider"
+    doc_id = corpo["documento_id"]
+    app_url = os.environ["ALMA_APP_URL"].rstrip("/")
+    link = f"{app_url}/documentos-gerados/{doc_id}"
+    comentario = (f"Portal atualizado automaticamente — a fase \"{fase_titulo}\" já está "
+                 f"disponível para a cliente validar: {link}\n\n— Alma")
+    basecamp.comentar(card_id, comentario, projeto=projeto)
+    db_mod.registar_portal_documento_processado(comment_id, card_id)
+    return {"ok": True, "comentario": comentario}
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
