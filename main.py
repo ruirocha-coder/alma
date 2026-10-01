@@ -1091,19 +1091,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-pdfs-card")
-def _debug_pdfs_card(comments_url: str):
-    """TEMPORÁRIO — lista os PDFs anexados num card, por data (mais
-    recente primeiro), para corrigir manualmente o portal da Sofia Pinto.
-    Remover depois."""
-    return basecamp.listar_pdfs_anexados_por_data(comments_url)
-
-@app.get("/_debug-extrair-apresentacao")
-def _debug_extrair_apresentacao(download_url: str):
-    """TEMPORÁRIO — extrai a imagem de capa + o PDF em base64 do
-    documento de Apresentação do Projeto, para corrigir manualmente o
-    portal da Sofia Pinto. Remover depois."""
-    return portal_projeto._extrair_imagem_apresentacao_pdf(download_url)
 
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
