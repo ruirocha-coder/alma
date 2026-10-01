@@ -21,11 +21,11 @@ import db
 from tools import planeamento_serracao as ps
 
 CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros"]
-# valores corrigidos (pedido explícito do Rui, 2026-10-02 — os antigos
-# 2600/2500/3100/2350/2550 estavam com a escala errada) + duas opções
-# novas com diâmetro marcado ("⌀16"), por isso texto e não número puro —
-# ver nota na migração de toro_cmp para TEXT, em db.py.
-TORO_CMP_PRESETS = ["260", "250", "310", "235", "255", "255 ⌀16", "235 ⌀16"]
+# valores corrigidos (pedido explícito do Rui, 2026-10-04) — guardados como
+# texto, não número, para poder vir a ter opções que não sejam um número
+# puro (ex: com diâmetro) — ver nota na migração de toro_cmp para TEXT, em
+# db.py.
+TORO_CMP_PRESETS = ["255", "264", "310", "235"]
 TORO_TIPOS = {"IN", "MT"}
 
 # QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
@@ -219,9 +219,9 @@ def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp
     return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
 
 def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indice_toros: float = None) -> dict:
-    # cmp é texto, não número (ver TORO_CMP_PRESETS — há opções como "255
-    # ⌀16" que não são um número puro); só o índice tem de ser validado
-    # como número positivo.
+    # cmp é texto, não número (ver TORO_CMP_PRESETS — pode vir a ter opções
+    # que não sejam um número puro, ex: com diâmetro); só o índice tem de
+    # ser validado como número positivo.
     erro = _validar_numero_positivo("índice de toros", indice_toros)
     if erro:
         return {"erro": erro}
@@ -521,7 +521,7 @@ const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; retur
 const $=s=>document.querySelector(s);
 const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros"];
 const LANES=["Por atribuir",...CHARRIOTS];
-const TORO_PRESETS=["260","250","310","235","255","255 ⌀16","235 ⌀16"];
+const TORO_PRESETS=["255","264","310","235"];
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
    explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
