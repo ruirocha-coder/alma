@@ -1091,6 +1091,13 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-pdfs-card")
+def _debug_pdfs_card(comments_url: str):
+    """TEMPORÁRIO — lista os PDFs anexados num card, por data (mais
+    recente primeiro), para corrigir manualmente o portal da Sofia Pinto.
+    Remover depois."""
+    return basecamp.listar_pdfs_anexados_por_data(comments_url)
+
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
