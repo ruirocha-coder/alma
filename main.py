@@ -1035,6 +1035,35 @@ def verificar_portais_projeto_agora():
     threading.Thread(target=verificar_portais_projeto.correr_verificacao_diaria_portais, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-testar-portal-auto")
+def _debug_testar_portal_auto(corpo: dict = Body(...)):
+    """TEMPORÁRIO — diagnóstico da automação de atualização do portal, passo
+    a passo, sem engolir exceções, para perceber porque o caso real da
+    Sofia Pinto não está a reabrir a fase do orçamento."""
+    import traceback
+    import db as db_mod
+    card_id = corpo["card_id"]
+    passos = {}
+    try:
+        passos["existe_portal"] = db_mod.existe_portal_card_id(card_id)
+        comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+        pdfs = basecamp.listar_pdfs_anexados_por_data(comments_url)
+        passos["pdfs_top5"] = pdfs[:5]
+        from agents.responder_basecamp import _PALAVRA_CHAVE_FASE_PORTAL
+        from agents.verificar_portais_projeto import _comment_id_de_url
+        for pdf in pdfs[:5]:
+            nomes = basecamp._normalizar(pdf.get("ficheiro") or "")
+            bate = any(palavra in nomes for palavra in _PALAVRA_CHAVE_FASE_PORTAL)
+            cid = _comment_id_de_url(pdf.get("comentario_url"))
+            ja_processado = db_mod.portal_documento_ja_processado(cid) if cid else None
+            passos.setdefault("por_pdf", []).append({
+                "ficheiro": pdf.get("ficheiro"), "nomes_normalizado": nomes,
+                "bate_keyword": bate, "comment_id": cid, "ja_processado": ja_processado,
+            })
+    except Exception:
+        passos["erro"] = traceback.format_exc()
+    return passos
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
