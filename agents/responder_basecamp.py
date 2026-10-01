@@ -1,4 +1,4 @@
-import re, traceback
+import json, os, re, traceback
 from bs4 import BeautifulSoup
 from persona import PERSONA
 from agents.base import correr_agente, TOOLS_COMUNS, INSTRUCAO_INTERNET
@@ -117,6 +117,117 @@ def _tem_imagem_anexada(alvo_completo: dict, comentarios: list) -> bool:
         nomes.extend(c.get("anexos") or [])
     return any(nome.lower().endswith(_EXTENSOES_IMAGEM) for nome in nomes)
 
+# palavras-chave (já sem acentos, minúsculas) que identificam o documento de
+# cada fase do portal — mesma convenção de nomes descrita em
+# tools/portal_projeto.gerar_portal_projeto ("NOMES PADRONIZADOS dos PDFs").
+# honorários fica de fora: essa fase está sempre aberta desde o início,
+# nunca "prevista", por isso nunca precisa de ser "aberta" por um documento
+# novo.
+_PALAVRA_CHAVE_FASE_PORTAL = ("conceito psicoestetico", "apresentacao", "orcamento")
+
+MISSAO_ATUALIZAR_PORTAL = PERSONA + """
+
+Modo atual: automação silenciosa, sem ninguém à espera de resposta — um
+documento PDF novo apareceu num comentário de um card do Basecamp que já
+tem um portal de acompanhamento ativo (ver tools/portal_projeto.py) para
+uma cliente do Interior Guider. Ninguém vai ler nenhum texto que escrevas
+aqui; a única forma de produzires algum efeito é chamando ferramentas.
+
+A tua tarefa, passo a passo:
+1. Chama obter_portal_atual com o id do card indicado abaixo. Se devolver
+   {"existe": false}, não faças mais nada (não devia acontecer, já foi
+   confirmado antes de te chamarem, mas mais vale verificar).
+2. Olha para as fases do portal devolvido que estão "prevista" (ainda por
+   abrir) — a fase "honorarios" nunca está "prevista", ignora-a sempre.
+   Usa listar_pdfs_anexados_por_data (e lê o conteúdo com
+   ler_anexos_registo_basecamp se o nome do ficheiro não for claro
+   sozinho) para perceberes se o(s) documento(s) novo(s) indicado(s)
+   abaixo é mesmo o que falta para abrir alguma dessas fases:
+   - fase "conceito" precisa do PDF "Conceito Psicoestético".
+   - fase "projeto" precisa do PDF de "Apresentação" do projeto.
+   - fase "orcamento" precisa do PDF de "Orçamento", com o valor final
+     COM IVA confirmado por teres mesmo lido esse valor no documento —
+     nunca calculado, estimado, nem copiado de outra fase.
+3. Só se o documento novo corresponder claramente a uma fase "prevista":
+   chama gerar_portal_projeto outra vez, repetindo EXATAMENTE todos os
+   campos do portal que obter_portal_atual devolveu (cliente, validade,
+   honorários, ambientes, documentos, fases já validadas com a mesma
+   data) — nunca inventes nem omitas nada disso — e muda só essa fase
+   para "aguarda". NUNCA uses o estado "validada" aqui, mesmo que o
+   documento pareça confirmar tudo — validar uma fase só pode acontecer
+   com um clique real da cliente no botão do portal, nunca por esta via.
+4. Se o documento novo não corresponder a nenhuma fase "prevista" (ex: é
+   um comprovativo de pagamento, uma fatura, uma planta técnica, uma
+   versão de um documento cuja fase já está aberta ou validada), não
+   chames gerar_portal_projeto — simplesmente não faças mais nada.
+
+Nunca uses nenhuma ferramenta de comunicação (publicar_mural, memorizar
+factos, etc.) — isto não é uma conversa, e ninguém vai mencionar-te de
+volta. Limita-te às ferramentas de leitura do Basecamp e do portal
+indicadas acima."""
+
+def _tentar_atualizar_portal(card_id: int, titulo_card: str, projeto: str,
+                             pdfs_novos: list, comment_id) -> None:
+    """Núcleo partilhado entre o webhook (reação quase imediata a um
+    comentário novo) e o reforço diário (ver
+    agents/verificar_portais_projeto.py) — pedido explícito do Rui
+    (2026-10-02): as fases do portal de acompanhamento devem abrir-se
+    sozinhas à medida que os documentos certos vão aparecendo no card,
+    sem ninguém ter de pedir à Alma para o fazer. `pdfs_novos` é uma
+    lista de {"ficheiro": nome}; `comment_id` identifica o comentário de
+    origem, para nunca processar o mesmo duas vezes (partilhado entre as
+    duas vias, ver db.portal_documento_ja_processado).
+
+    Nunca promove uma fase a "validada" sozinha — gerar_portal_projeto
+    recusa-se mesmo a isso em código (ver portal_projeto.py); esta função
+    só pode abrir uma fase "prevista" para "aguarda". Falha em silêncio
+    (nunca propaga exceção) — isto corre sempre em segundo plano, nunca
+    pode impedir o resto do processamento do evento."""
+    try:
+        if not pdfs_novos or not card_id or not comment_id:
+            return
+        if not db.existe_portal_card_id(card_id):
+            return
+        nomes = basecamp._normalizar(" ".join(p.get("ficheiro") or "" for p in pdfs_novos))
+        if not any(palavra in nomes for palavra in _PALAVRA_CHAVE_FASE_PORTAL):
+            return
+        if db.portal_documento_ja_processado(comment_id):
+            return
+
+        comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+        contexto = f"""Card do Basecamp: {titulo_card or '(sem título)'}
+Id do card: {card_id}
+Url dos comentários deste card (usa este exato valor em
+listar_pdfs_anexados_por_data/procurar_anexo_em_comentarios — nunca
+inventes outro a partir só do id): {comments_url}
+Ficheiro(s) PDF anexado(s) no comentário novo que despoletou isto:
+{', '.join(p.get('ficheiro') or '(sem nome)' for p in pdfs_novos)}"""
+
+        antes = db.obter_documento_gerado_por_card_id(card_id)
+        correr_agente(MISSAO_ATUALIZAR_PORTAL, TOOLS_COMUNS, [{"role": "user", "content": contexto}],
+                     "Alma (automação do portal)", origem="basecamp", projeto_mural=projeto or "Gestão")
+        db.registar_portal_documento_processado(comment_id, card_id)
+
+        depois = db.obter_documento_gerado_por_card_id(card_id)
+        if not depois or not antes or antes["conteudo_markdown"] == depois["conteudo_markdown"]:
+            print(f"[responder_basecamp] portal do card {card_id} verificado, sem alteração")
+            return
+        fases_antes = {f["id"]: f["estado"] for f in json.loads(antes["conteudo_markdown"])["projeto"]["fases"]}
+        fases_depois = {f["id"]: f["estado"] for f in json.loads(depois["conteudo_markdown"])["projeto"]["fases"]}
+        nomes_fases = {"honorarios": "Honorários", "conceito": "Conceito", "projeto": "Projeto", "orcamento": "Orçamento"}
+        abertas = [nomes_fases.get(fid, fid) for fid, estado in fases_depois.items()
+                  if estado != "prevista" and fases_antes.get(fid) == "prevista"]
+        if not abertas:
+            return
+        app_url = os.environ["ALMA_APP_URL"].rstrip("/")
+        link = f"{app_url}/documentos-gerados/{depois['id']}"
+        comentario = (f"Portal atualizado automaticamente — a fase \"{' e '.join(abertas)}\" já está "
+                     f"disponível para a cliente validar: {link}\n\n— Alma")
+        basecamp.comentar(card_id, comentario, projeto=projeto)
+        print(f"[responder_basecamp] portal do card {card_id} atualizado, fase(s) aberta(s): {abertas}")
+    except Exception:
+        print(f"[responder_basecamp] ERRO ao tentar atualizar o portal do card {card_id}: {traceback.format_exc()}")
+
 def processar_evento_webhook(payload: dict):
     """Reage a um evento de webhook do Basecamp (comentário criado, ou tarefa/card
     criado/atualizado) que mencione a Alma pelo nome — lê o contexto e responde."""
@@ -156,6 +267,16 @@ def _processar(payload: dict):
         evento_id = recording.get("id")
         texto_bruto = recording.get("content") or ""
         alvo = recording.get("parent") or {}
+        # reage a um documento novo mesmo sem nenhuma menção à Alma (ver
+        # _tentar_atualizar_portal) — independente do fluxo de resposta a
+        # menções abaixo, que continua a exigir a palavra "alma" no texto.
+        pdfs_novos = [{"ficheiro": a.get("filename") or a.get("name")}
+                     for a in (recording.get("content_attachments") or [])
+                     if a.get("content_type") == "application/pdf"]
+        if pdfs_novos and alvo.get("type") == "Kanban::Card" and alvo.get("id"):
+            _tentar_atualizar_portal(alvo["id"], alvo.get("title"),
+                                     (recording.get("bucket") or {}).get("name") or "",
+                                     pdfs_novos, evento_id)
     else:
         # menção dentro do próprio card/tarefa (título ou descrição), não numa resposta
         evento_id = recording.get("id")

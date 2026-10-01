@@ -19,7 +19,8 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_anual_cargas_toros, logistica_entregas,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
-                    mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos)
+                    mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
+                    verificar_portais_projeto)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas
 from db import inicializar_schema
 inicializar_schema()
@@ -46,6 +47,15 @@ scheduler.add_job(reuniao.limpar_reunioes_antigas, "cron", hour=4, minute=0)
 # momento em que corre ser sempre o ano que está mesmo a terminar
 scheduler.add_job(resumo_anual_cargas_toros.correr_resumo_anual_cargas_toros, "cron",
                   month=12, day=31, hour=22, minute=0)
+# reforço diário dos portais de projeto (Interior Guider) — pedido
+# explícito do Rui (2026-10-02): reabrir sozinha uma fase "prevista" assim
+# que o documento certo aparecer num comentário, sem ninguém ter de pedir;
+# o webhook já tenta isto quase em tempo real (ver
+# agents/responder_basecamp._tentar_atualizar_portal), isto é só a rede de
+# segurança para quando um webhook se perde — todos os dias às 6h, antes de
+# tudo o resto, para qualquer fase aberta por aqui já aparecer atualizada
+# nos resumos do resto do dia.
+scheduler.add_job(verificar_portais_projeto.correr_verificacao_diaria_portais, "cron", hour=6, minute=0)
 # monitorização de logística (projeto Entregas): todos os dias antes das 9h
 scheduler.add_job(logistica_entregas.correr_monitorizacao_logistica, "cron", hour=7, minute=30)
 # sugestão semanal de logística (Mural "Programação", projeto Entregas),
@@ -1016,6 +1026,14 @@ def diagnostico_avaliacoes_cargas_toros(ano: int = None):
     ano_resolvido = ano or date.today().year
     avaliacoes = avaliacoes_cargas_toros_ano(ano_resolvido)
     return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
+
+@app.post("/portais-projeto/verificar")
+def verificar_portais_projeto_agora():
+    """Dispara já o reforço diário dos portais de projeto (Interior
+    Guider), em segundo plano — ver
+    agents/verificar_portais_projeto.correr_verificacao_diaria_portais."""
+    threading.Thread(target=verificar_portais_projeto.correr_verificacao_diaria_portais, daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():

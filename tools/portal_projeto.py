@@ -877,6 +877,24 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
     return resultado
 
 
+def obter_portal_atual(card_id: int) -> dict:
+    """Devolve o portal de acompanhamento já gerado para este card, tal
+    como está gravado agora (cliente, honorários, ambientes, documentos,
+    e cada fase com o seu estado "validada"/"aguarda"/"prevista") — usa
+    isto SEMPRE antes de chamares gerar_portal_projeto outra vez para um
+    card que já pode ter portal (ex: para abrir uma fase nova quando
+    aparece o documento certo), para nunca teres de adivinhar valores já
+    confirmados antes nem arriscares perder algo por esquecimento (um
+    ambiente, uma imagem, uma fase já validada). Devolve {"existe": False}
+    se este card ainda não tiver nenhum portal gerado — nesse caso, usa
+    gerar_portal_projeto normalmente, a partir do zero."""
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"existe": False}
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    return {"existe": True, "projeto": projeto}
+
+
 _COLUNA_RECOMENDACOES = "Triagem"
 _PROJETO_RECOMENDACOES = "@ Interior Guider"
 _RESPONSAVEL_RECOMENDACOES = "Beatriz Barbosa"
@@ -1075,6 +1093,25 @@ TOOLS_PORTAL_PROJETO = [
             },
             "required": ["card_id", "cliente", "validade", "honorarios_total", "honorarios_total_com_iva",
                         "honorarios_linhas", "ambientes", "fases_estado"]
+        }
+    },
+    {
+        "name": "obter_portal_atual",
+        "description": (
+            "Devolve o portal de acompanhamento já gerado para um card (se existir), tal como está "
+            "gravado agora — cliente, honorários, ambientes, documentos, e cada fase com o seu estado "
+            "atual. Chama isto SEMPRE antes de gerar_portal_projeto para um card que já possa ter "
+            "portal (ex: quando aparece um documento novo e só é preciso abrir uma fase), para nunca "
+            "teres de adivinhar valores já confirmados nem arriscares perder algo por esquecimento "
+            "(um ambiente, uma imagem, ou sobretudo uma fase já validada pela cliente). Devolve "
+            "{\"existe\": false} se não houver nenhum portal para este card ainda."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "card_id": {"type": "integer", "description": "id numérico do card do Basecamp"}
+            },
+            "required": ["card_id"]
         }
     }
 ]

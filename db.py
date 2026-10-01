@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS basecamp_eventos_processados (
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
+-- dedup à parte de basecamp_eventos_processados (pedido explícito do Rui,
+-- 2026-10-02): um comentário com um documento novo pode não mencionar a
+-- Alma nenhuma vez, por isso nunca passa pela tabela acima — ver
+-- agents/responder_basecamp._tentar_atualizar_portal (webhook) e
+-- agents/verificar_portais_projeto (reforço diário), que partilham este
+-- mesmo registo para nunca tentarem o mesmo comentário duas vezes.
+CREATE TABLE IF NOT EXISTS portal_documentos_processados (
+    comment_id BIGINT PRIMARY KEY,
+    card_id BIGINT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
 -- mapeamento id da Agenda (Schedule) do Basecamp, projeto Entregas -> id do
 -- evento no Google Calendar (ver tools/google_calendar.py e
 -- agents/sincronizacao_calendario.py) — sincronização unidirecional
@@ -1943,6 +1955,36 @@ def registar_evento_processado(comment_id: int, resposta: str):
                 (comment_id, resposta)
             )
         conn.commit()
+
+def portal_documento_ja_processado(comment_id: int) -> bool:
+    """Evita tentar atualizar o portal duas vezes a partir do mesmo
+    comentário (o webhook e o reforço diário, ver
+    agents/responder_basecamp._tentar_atualizar_portal, partilham este
+    registo)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM portal_documentos_processados WHERE comment_id = %s", (comment_id,))
+            return cur.fetchone() is not None
+
+def registar_portal_documento_processado(comment_id: int, card_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO portal_documentos_processados (comment_id, card_id)
+                   VALUES (%s, %s) ON CONFLICT (comment_id) DO NOTHING""",
+                (comment_id, card_id)
+            )
+        conn.commit()
+
+def existe_portal_card_id(card_id: int) -> bool:
+    """Verificação leve (sem carregar o HTML/PDF todo) de se já existe um
+    portal gerado para este card — usada para decidir, por cada
+    comentário novo no Basecamp, se vale sequer a pena considerar
+    atualizar o portal (ver agents/responder_basecamp.py)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM documentos_gerados WHERE card_id = %s AND formato = 'html'", (card_id,))
+            return cur.fetchone() is not None
 
 def mapeamentos_calendario_google() -> dict:
     """Todo o mapeamento atual entrada da Agenda do Basecamp -> evento do

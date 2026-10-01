@@ -518,6 +518,7 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "obter_conteudo_documento_gerado": lambda id: documentos_gerados.obter_conteudo_documento_gerado(
             utilizador, id),
         "gerar_portal_projeto": lambda **kwargs: portal_projeto.gerar_portal_projeto(utilizador, **kwargs),
+        "obter_portal_atual": lambda card_id: portal_projeto.obter_portal_atual(card_id),
     }
     return system, tools_completas, funcoes_utilizador
 
