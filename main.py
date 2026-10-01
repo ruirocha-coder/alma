@@ -1084,7 +1084,11 @@ def _debug_card(card_id: int, projeto: str = "@ Interior Guider"):
     """TEMPORÁRIO — mostra um card do Basecamp para ler o contacto real
     da cliente (telemóvel/email) a partir das notas, ao regenerar os
     restantes portais com o novo template. Remover depois."""
-    return basecamp.obter_card(card_id, projeto)
+    try:
+        return basecamp.obter_card(card_id, projeto)
+    except Exception as exc:
+        import traceback
+        return {"erro": str(exc), "trace": traceback.format_exc()}
 
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
