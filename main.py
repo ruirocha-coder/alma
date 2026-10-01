@@ -1120,6 +1120,53 @@ def _debug_medir_prompt_portal(corpo: dict = Body(...)):
         "maiores_tools": por_tool,
     }
 
+@app.post("/_debug-instrumentar-portal")
+def _debug_instrumentar_portal(corpo: dict = Body(...)):
+    """TEMPORÁRIO — repete o loop de correr_agente manualmente, ronda a
+    ronda, registando o tamanho de cada tool_result, para descobrir qual
+    chamada está a fazer o prompt rebentar os 10 milhões de tokens."""
+    import json as json_mod, traceback
+    from agents.base import _preparar, TOOLS_COMUNS, MAX_TOKENS_RESPOSTA, client, _executar_tool_uses
+    from agents.responder_basecamp import MISSAO_ATUALIZAR_PORTAL
+    card_id = corpo["card_id"]
+    pdfs_novos = corpo["pdfs_novos"]
+    titulo_card = corpo.get("titulo_card")
+    projeto = corpo.get("projeto") or "@ Interior Guider"
+    comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+    contexto = (f"Card do Basecamp: {titulo_card or '(sem título)'}\n"
+                f"Id do card: {card_id}\n"
+                f"Url dos comentários deste card: {comments_url}\n"
+                f"Ficheiro(s) PDF anexado(s) no comentário novo que despoletou isto:\n"
+                + ", ".join(p.get("ficheiro") or "(sem nome)" for p in pdfs_novos))
+    system, tools_completas, funcoes_utilizador = _preparar(
+        MISSAO_ATUALIZAR_PORTAL, TOOLS_COMUNS, "Alma (automação do portal)", "basecamp", projeto)
+    mensagens = [{"role": "user", "content": contexto}]
+    log = []
+    try:
+        for ronda in range(1, 11):
+            tamanho_mensagens = len(json_mod.dumps(mensagens, ensure_ascii=False, default=str))
+            log.append({"ronda": ronda, "tamanho_mensagens_bytes": tamanho_mensagens})
+            if tamanho_mensagens > 3_000_000:
+                log.append({"abortado": "tamanho excessivo antes da chamada"})
+                break
+            resposta = client.messages.create(model="claude-sonnet-4-6", max_tokens=MAX_TOKENS_RESPOSTA,
+                                              system=system, tools=tools_completas, messages=mensagens)
+            tool_uses = [b for b in resposta.content if b.type == "tool_use"]
+            log.append({"ronda": ronda, "stop_reason": resposta.stop_reason,
+                       "tool_calls": [{"nome": b.name, "input": b.input} for b in tool_uses]})
+            if resposta.stop_reason != "tool_use":
+                log.append({"texto_final": "".join(b.text for b in resposta.content if b.type == "text")})
+                break
+            mensagens.append({"role": "assistant", "content": resposta.content})
+            resultados, _ = _executar_tool_uses(resposta.content, funcoes_utilizador)
+            for r in resultados:
+                log.append({"ronda": ronda, "tool_result_bytes": len(r["content"]),
+                          "tool_result_preview": r["content"][:300]})
+            mensagens.append({"role": "user", "content": resultados})
+        return {"log": log}
+    except Exception:
+        return {"erro": traceback.format_exc(), "log": log}
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
