@@ -1064,6 +1064,37 @@ def _debug_testar_portal_auto(corpo: dict = Body(...)):
         passos["erro"] = traceback.format_exc()
     return passos
 
+@app.post("/_debug-forcar-atualizar-portal")
+def _debug_forcar_atualizar_portal(corpo: dict = Body(...)):
+    """TEMPORÁRIO — chama a mesma missão que _tentar_atualizar_portal usaria,
+    mas sem o try/except que esconde a exceção real, para diagnosticar ao
+    vivo porque o caso da Sofia Pinto não está a mudar nada."""
+    import traceback
+    import db as db_mod
+    from agents.responder_basecamp import MISSAO_ATUALIZAR_PORTAL
+    from agents.base import correr_agente, TOOLS_COMUNS
+    card_id = corpo["card_id"]
+    pdfs_novos = corpo["pdfs_novos"]
+    titulo_card = corpo.get("titulo_card")
+    projeto = corpo.get("projeto") or "@ Interior Guider"
+    try:
+        comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+        contexto = (f"Card do Basecamp: {titulo_card or '(sem título)'}\n"
+                    f"Id do card: {card_id}\n"
+                    f"Url dos comentários deste card: {comments_url}\n"
+                    f"Ficheiro(s) PDF anexado(s) no comentário novo que despoletou isto:\n"
+                    + ", ".join(p.get("ficheiro") or "(sem nome)" for p in pdfs_novos))
+        antes = db_mod.obter_documento_gerado_por_card_id(card_id)
+        resposta = correr_agente(MISSAO_ATUALIZAR_PORTAL, TOOLS_COMUNS,
+                                 [{"role": "user", "content": contexto}],
+                                 "Alma (automação do portal)", origem="basecamp",
+                                 projeto_mural=projeto)
+        depois = db_mod.obter_documento_gerado_por_card_id(card_id)
+        mudou = bool(antes and depois and antes["conteudo_markdown"] != depois["conteudo_markdown"])
+        return {"ok": True, "resposta_llm": resposta, "mudou": mudou}
+    except Exception:
+        return {"erro": traceback.format_exc()}
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
