@@ -1079,14 +1079,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-baixar-base64")
-def _debug_baixar_base64(url: str):
-    """TEMPORÁRIO — descarrega um ficheiro do Basecamp e devolve-o em
-    base64, para embutir no template do portal. Remover depois."""
-    import base64
-    bruto = basecamp._get_bytes(url)
-    return {"tamanho": len(bruto), "base64": base64.b64encode(bruto).decode("ascii")}
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
