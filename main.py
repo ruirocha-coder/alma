@@ -1095,6 +1095,31 @@ def _debug_forcar_atualizar_portal(corpo: dict = Body(...)):
     except Exception:
         return {"erro": traceback.format_exc()}
 
+@app.post("/_debug-medir-prompt-portal")
+def _debug_medir_prompt_portal(corpo: dict = Body(...)):
+    """TEMPORÁRIO — mede o tamanho do system prompt e das tools antes de
+    sequer chamar a API, para perceber onde está o rebentamento de
+    10 milhões de tokens visto em _debug-forcar-atualizar-portal."""
+    import json as json_mod
+    from agents.base import _preparar, TOOLS_COMUNS
+    from agents.responder_basecamp import MISSAO_ATUALIZAR_PORTAL
+    system, tools_completas, _ = _preparar(
+        MISSAO_ATUALIZAR_PORTAL, TOOLS_COMUNS, "Alma (automação do portal)",
+        "basecamp", corpo.get("projeto") or "@ Interior Guider")
+    system_json = json_mod.dumps(system, ensure_ascii=False, default=str)
+    tools_json = json_mod.dumps(tools_completas, ensure_ascii=False, default=str)
+    por_tool = sorted(
+        [{"nome": t.get("name"), "tamanho": len(json_mod.dumps(t, ensure_ascii=False, default=str))}
+         for t in tools_completas],
+        key=lambda x: -x["tamanho"]
+    )[:10]
+    return {
+        "system_bytes": len(system_json),
+        "tools_bytes": len(tools_json),
+        "num_tools": len(tools_completas),
+        "maiores_tools": por_tool,
+    }
+
 @app.post("/logistica/monitorizar")
 def monitorizar_logistica_agora():
     """Dispara já a monitorização de logística (projeto Entregas), em
