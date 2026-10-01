@@ -1079,19 +1079,13 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-vault-uploads")
-def _debug_vault_uploads(projeto: str):
-    """TEMPORÁRIO — lista os uploads (ficheiros) no Vault de um projeto,
-    para localizar a imagem "Simbolo X - vermelho IG.png". Remover
-    depois."""
-    import httpx as _httpx
-    bucket_id, vault_id = basecamp._resolver_vault(projeto)
-    r = _httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}.json",
-                   headers=basecamp._headers(), timeout=30)
-    r.raise_for_status()
-    raiz = r.json()
-    uploads = basecamp._get_paginado(raiz["uploads_url"])
-    return uploads
+@app.get("/_debug-baixar-base64")
+def _debug_baixar_base64(url: str):
+    """TEMPORÁRIO — descarrega um ficheiro do Basecamp e devolve-o em
+    base64, para embutir no template do portal. Remover depois."""
+    import base64
+    bruto = basecamp._get_bytes(url)
+    return {"tamanho": len(bruto), "base64": base64.b64encode(bruto).decode("ascii")}
 
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
