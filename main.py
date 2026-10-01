@@ -1079,16 +1079,6 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-card/{card_id}")
-def _debug_card(card_id: int, projeto: str = "@ Interior Guider"):
-    """TEMPORÁRIO — verifica se um card_id ainda resolve no Basecamp
-    (sem redireccionar para outro id), para os outros portais. Remover
-    depois."""
-    try:
-        return basecamp.obter_card(card_id, projeto)
-    except Exception as exc:
-        return {"erro": str(exc)}
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
