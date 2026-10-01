@@ -1027,6 +1027,63 @@ def diagnostico_avaliacoes_cargas_toros(ano: int = None):
     avaliacoes = avaliacoes_cargas_toros_ano(ano_resolvido)
     return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
 
+@app.post("/_debug-reverter-fase-portal")
+def _debug_reverter_fase_portal(corpo: dict = Body(...)):
+    """TEMPORÁRIO — reverte um erro real, 2026-10-01: abrir_fase_portal
+    abriu a fase "orcamento" da Sofia Pinto sem a fase "projeto" anterior
+    estar "validada" (regra de sequência que a função ainda não tinha),
+    usando além disso um PDF "Produtos" que não é o documento "Orçamento
+    Projeto IG" exigido pela convenção de nomes já documentada. Volta a
+    pôr a fase indicada como estava antes (prevista, sem valor nem
+    documento), sem tocar em mais nada."""
+    import json as json_mod
+    import db as db_mod
+    card_id = corpo["card_id"]
+    fase = corpo["fase"]
+    registo = db_mod.obter_documento_gerado_por_card_id(card_id)
+    projeto = json_mod.loads(registo["conteudo_markdown"])["projeto"]
+    alvo = next(f for f in projeto["fases"] if f["id"] == fase)
+    alvo["estado"] = "prevista"
+    alvo["data"] = None
+    if fase == "orcamento":
+        projeto["valorProduto"] = None
+        projeto["documentos"]["orcamento"] = None
+    elif fase == "projeto":
+        projeto["projetoImagem"] = None
+        projeto["documentos"]["apresentacao"] = None
+    elif fase == "conceito":
+        projeto["conceito"]["imagem"] = None
+        projeto["documentos"]["conceito"] = None
+
+    honorarios_linhas = [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
+                         for l in projeto["honorarios"]["linhas"]]
+    fases_estado = {f["id"]: ({"estado": f["estado"], "data": f["data"]} if f.get("data")
+                              else {"estado": f["estado"]}) for f in projeto["fases"]}
+    contacto_cliente = projeto.get("clienteContacto") or {}
+    resultado = portal_projeto._construir_e_gravar(
+        "correção manual (Rui)", card_id, projeto["cliente"], projeto["validade"],
+        projeto["honorarios"]["total"], honorarios_linhas, projeto["ambientes"], fases_estado,
+        projeto.get("valorProduto"), projeto["conceito"].get("imagem"), projeto["conceito"].get("materiais"),
+        projeto["conceito"].get("leitura"), projeto["documentos"].get("apresentacao"),
+        projeto["documentos"].get("orcamento"), projeto["documentos"].get("conceito"),
+        projeto.get("projetoImagem"), projeto["documentos"].get("honorarios"),
+        contacto_cliente.get("telefone"), contacto_cliente.get("email"))
+
+    apagado = None
+    texto_comentario_errado = corpo.get("texto_comentario_errado")
+    if texto_comentario_errado:
+        import httpx
+        comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+        comentarios = basecamp.ler_comentarios(comments_url)
+        alvo_comentario = next((c for c in reversed(comentarios)
+                                if texto_comentario_errado in (c.get("conteudo") or "")), None)
+        if alvo_comentario:
+            r = httpx.put(f"{basecamp._base_url()}/buckets/{corpo['bucket_id']}/recordings/"
+                         f"{alvo_comentario['id']}/status/trashed.json", headers=basecamp._headers(), timeout=30)
+            r.raise_for_status()
+            apagado = alvo_comentario["id"]
+    return {"ok": True, "url": resultado["url"], "comentario_apagado": apagado}
+
 @app.post("/portais-projeto/verificar")
 def verificar_portais_projeto_agora():
     """Dispara já o reforço diário dos portais de projeto (Interior

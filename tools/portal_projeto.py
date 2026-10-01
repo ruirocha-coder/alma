@@ -932,8 +932,12 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
 
     Recusa-se a fazer nada se a fase já não estiver "prevista" (ex: já
     está "aguarda" ou "validada" — validar só pode acontecer com um
-    clique real da cliente no portal, nunca por aqui), ou se faltar o que
-    essa fase precisa."""
+    clique real da cliente no portal, nunca por aqui), se a fase ANTERIOR
+    ainda não estiver "validada" (as fases abrem sempre em sequência:
+    honorários -> conceito -> projeto -> orçamento — bug real, 2026-10-01:
+    esta função abriu "orcamento" da Sofia Pinto com "projeto" ainda só
+    "aguarda", nunca validado pela cliente), ou se faltar o que essa fase
+    precisa."""
     if fase not in ("conceito", "projeto", "orcamento"):
         return {"erro": f"fase desconhecida: {fase!r}"}
 
@@ -945,6 +949,14 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
     alvo = next(f for f in projeto["fases"] if f["id"] == fase)
     if alvo["estado"] != "prevista":
         return {"erro": f"a fase \"{fase}\" já não está \"prevista\" (está \"{alvo['estado']}\") — nada a fazer"}
+
+    ids_fases = [f["id"] for f in _FASES_DEF]
+    anterior_id = ids_fases[ids_fases.index(fase) - 1]
+    anterior = next(f for f in projeto["fases"] if f["id"] == anterior_id)
+    if anterior["estado"] != "validada":
+        return {"erro": (f"a fase anterior \"{anterior_id}\" ainda não está \"validada\" (está "
+                         f"\"{anterior['estado']}\") — as fases só abrem em sequência, depois da cliente "
+                         f"validar a anterior no portal; não posso abrir \"{fase}\" ainda")}
 
     conceito_imagem = projeto["conceito"].get("imagem")
     conceito_materiais = projeto["conceito"].get("materiais")

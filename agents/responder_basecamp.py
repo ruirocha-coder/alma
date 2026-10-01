@@ -159,22 +159,39 @@ A tua tarefa, passo a passo:
 1. Chama obter_portal_atual com o id do card indicado abaixo. Se devolver
    {"existe": false}, não faças mais nada (não devia acontecer, já foi
    confirmado antes de te chamarem, mas mais vale verificar).
-2. Olha para as fases do resumo devolvido que estão "prevista" (ainda por
-   abrir) — a fase "honorarios" nunca está "prevista", ignora-a sempre.
-   Usa listar_pdfs_anexados_por_data (e lê o conteúdo com
-   ler_anexos_registo_basecamp se o nome do ficheiro não for claro
-   sozinho) só para os PDFs novos indicados abaixo, para perceberes se
-   é mesmo o que falta para abrir alguma dessas fases:
-   - fase "conceito" precisa do PDF "Conceito Psicoestético".
-   - fase "projeto" precisa do PDF de "Apresentação" do projeto.
-   - fase "orcamento" precisa do PDF de "Orçamento", com o valor final
-     COM IVA confirmado por teres mesmo lido esse valor no documento —
-     nunca calculado, estimado, nem copiado de outra fase. Se houver mais
-     do que um PDF de orçamento novo no mesmo comentário (ex: variantes
-     diferentes), usa sempre o que NÃO tiver indicação de ser uma
-     alternativa/variante (ex: "LOW COST") — esse é só para a cliente
-     comparar, nunca o valor final a abrir a fase.
-3. Só se o documento novo corresponder claramente a uma fase "prevista":
+2. A fase a abrir é sempre a PRIMEIRA (pela ordem honorários -> conceito ->
+   projeto -> orçamento) que ainda está "prevista" — nunca uma mais à
+   frente, mesmo que o documento pareça corresponder a essa: a fase
+   anterior tem de estar "validada" primeiro (abrir_fase_portal recusa-se
+   a isso sozinho, mas não vale a pena sequer tentar se já sabes que a
+   anterior não está "validada" no resumo que obter_portal_atual
+   devolveu). A fase "honorarios" nunca está "prevista", ignora-a sempre.
+
+   Identifica o documento SÓ pelo NOME DO FICHEIRO, seguindo à letra a
+   convenção já estabelecida (nunca pelo conteúdo pareceres "parecido" —
+   isto já correu mal uma vez, 2026-10-01: um ficheiro "Produtos..."
+   com "ORÇ" no nome foi tratado como se fosse o orçamento, sem ser):
+   - fase "conceito" precisa de um PDF cujo nome contenha "Conceito
+     Psicoestético" (nome padrão: "Conceito Psicoestético IG_[Cliente]").
+   - fase "projeto" precisa de um PDF cujo nome contenha "Apresentação"
+     (nome padrão: "Apresentação Projeto IG_[Cliente]") — nunca um PDF
+     cujo nome tenha outra palavra principal (ex: "Produtos", "Orçamento")
+     mesmo que também contenha "Apresentação" por acaso.
+   - fase "orcamento" precisa de um PDF cujo nome tenha como palavra
+     PRINCIPAL "Orçamento" (nome padrão: "Orçamento Projeto IG_[Cliente]")
+     — nunca um PDF cujo nome seja principalmente outra coisa (ex:
+     "P3.Residencial_Produtos..." mesmo que tenha "ORÇ" ou uma data lá
+     dentro algures: isso é uma lista de produtos/proposta, não o
+     documento de orçamento final). Na dúvida sobre se o nome bate
+     mesmo com a convenção, trata como "não corresponde" (passo 4).
+     Só depois de confirmares pelo NOME que é mesmo o documento certo é
+     que lês o conteúdo (ler_anexos_registo_basecamp) para confirmares o
+     valor final COM IVA — nunca calculado, estimado, nem copiado de
+     outra fase. Se houver mais do que um PDF de orçamento novo com o
+     nome certo no mesmo comentário (ex: variantes), usa sempre o que
+     NÃO tiver indicação de ser uma alternativa (ex: "LOW COST").
+3. Só se o documento novo corresponder claramente, pelo NOME, a essa
+   fase:
    chama abrir_fase_portal com o card_id, a fase, e o download_url desse
    PDF (tal como veio de listar_pdfs_anexados_por_data — nunca um
    download_url obtido de outro lado); para a fase "orcamento" passa
