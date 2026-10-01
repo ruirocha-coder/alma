@@ -144,7 +144,7 @@ def estado_planeamento_entradas() -> dict:
             # para distinguir produtos também aqui (senão ficam todos
             # cinzentos); é só consulta, escolhe-se sempre na outra página.
             "cor": agendamento["cor"],
-            "dia_entrada": _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
+            "dia_entrada": extra.get("dia_entrada_manual") or _calcular_dia_entrada(agendamento["dia_inicio"], em_continuo),
             "em_continuo": em_continuo,
             "charriots": extra.get("charriots") or [],
             "largura_dias": extra.get("largura_dias_visual") or 1,
@@ -230,6 +230,19 @@ def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indic
     if tipo is not None and tipo not in TORO_TIPOS:
         return {"erro": f"tipo de toro desconhecido: {tipo!r} — usa \"IN\" ou \"MT\""}
     return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo, indice_toros)
+
+def definir_dia_entrada(basecamp_card_id: int, dia_entrada: str = None) -> dict:
+    """Grava um dia de entrada à mão (pedido explícito do Rui, 2026-10-04:
+    deixar arrastar um card na horizontal para outra coluna de dia, com
+    confirmação no cliente antes de gravar) — passa a ter prioridade sobre
+    o calculado a partir do início da produção (ver _calcular_dia_entrada).
+    `dia_entrada` None volta ao cálculo automático."""
+    if dia_entrada is not None:
+        try:
+            date.fromisoformat(dia_entrada)
+        except ValueError:
+            return {"erro": "dia_entrada inválido — tem de ser AAAA-MM-DD"}
+    return db.definir_dia_entrada_manual(basecamp_card_id, dia_entrada)
 
 def definir_em_continuo(basecamp_card_id: int, em_continuo: bool) -> dict:
     """Marca/desmarca "Em contínuo" (ver _calcular_dia_entrada) para uma OF
@@ -708,9 +721,7 @@ $("#next").onclick=()=>step(1);
 $("#hoje").onclick=()=>{ view.start=Math.max(HOJE,0); render(); };
 window.addEventListener("resize",render);
 
-/* ---------- arrastar entre lanes (só vertical — o dia é sempre calculado,
-   nunca se arrasta para outro dia; ver tools/planeamento_entradas
-   ._calcular_dia_entrada) ---------- */
+/* ---------- arrastar entre lanes/dias ---------- */
 let drag=null, resize=null;
 $("#lanes").addEventListener("pointerdown",e=>{
   const rh=e.target.closest(".rsz-h"), rv=e.target.closest(".rsz-v");
@@ -724,7 +735,7 @@ $("#lanes").addEventListener("pointerdown",e=>{
   }
   const b=e.target.closest(".blk"); if(!b) return;
   const it=item(+b.dataset.id); if(!it) return;
-  drag={el:b,it,y0:e.clientY,moveu:false};
+  drag={el:b,it,x0:e.clientX,y0:e.clientY,gsIni:it.gs,moveu:false};
   b.setPointerCapture(e.pointerId); e.preventDefault();
 });
 $("#lanes").addEventListener("pointermove",e=>{
@@ -746,9 +757,9 @@ $("#lanes").addEventListener("pointermove",e=>{
     return;
   }
   if(!drag) return;
-  const dy=e.clientY-drag.y0;
-  if(Math.abs(dy)>6){ drag.moveu=true; drag.el.classList.add("drag"); }
-  if(drag.moveu) drag.el.style.transform=`translateY(${dy}px)`;
+  const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
+  if(Math.abs(dx)>6||Math.abs(dy)>6){ drag.moveu=true; drag.el.classList.add("drag"); }
+  if(drag.moveu) drag.el.style.transform=`translate(${dx}px,${dy}px)`;
 });
 $("#lanes").addEventListener("pointerup",e=>{
   if(resize){
@@ -777,24 +788,36 @@ $("#lanes").addEventListener("pointerup",e=>{
     return;
   }
   if(!drag) return;
-  const {el,it,moveu}=drag;
+  const {el,it,moveu,gsIni,x0}=drag;
   el.classList.remove("drag"); el.style.transform="";
   drag=null;
   if(!moveu) return; // clique simples sem arrastar — não faz nada sozinho
   const r=$("#lanes").getBoundingClientRect();
   const novaLane=laneDeY(e.clientY-r.top);
+  const novoGs=clamp(gsIni+Math.round((e.clientX-x0)/DAY),0,MASTER.length-1);
   // arrastar substitui sempre por um único charriot (ainda que a OF
   // estivesse em vários ao mesmo tempo — ver caixas de seleção na ficha
   // ou o manípulo rsz-v para marcar mais que um sem substituir).
   const novosCharriots = novaLane===0 ? null : [CHARRIOTS[novaLane-1]];
   const atuais = it.charriots||[];
-  const semMudanca = (novosCharriots===null && atuais.length===0) ||
-    (novosCharriots && atuais.length===1 && atuais[0]===novosCharriots[0]);
-  if(semMudanca){ renderLanes(); return; }
-  const anterior=it.charriots;
-  it.charriots=novosCharriots;
+  const laneMudou = !((novosCharriots===null && atuais.length===0) ||
+    (novosCharriots && atuais.length===1 && atuais[0]===novosCharriots[0]));
+  const diaMudou = novoGs!==gsIni;
+  if(!laneMudou && !diaMudou){ renderLanes(); return; }
+  // mudar de dia (pedido explícito do Rui, 2026-10-04): passa a ser
+  // possível, mas sempre com confirmação — ver definir_dia_entrada em
+  // tools/planeamento_entradas.py (o dia de início da produção, na outra
+  // página, nunca é tocado por isto).
+  if(diaMudou && !confirm(`Vais mudar o dia de entrada de ${MASTER[gsIni].iso} para ${MASTER[novoGs].iso}. Tens a certeza?`)){
+    renderLanes();
+    return;
+  }
+  const anteriorCharriots=it.charriots, gsAnterior=it.gs;
+  if(laneMudou) it.charriots=novosCharriots;
+  if(diaMudou) it.gs=novoGs;
   renderLanes();
-  atribuirServidor(it, anterior);
+  if(laneMudou) atribuirServidor(it, anteriorCharriots);
+  if(diaMudou) definirDiaEntradaServidor(it, gsAnterior);
 });
 /* pedido explícito do Rui (2026-10-02): apesar de aqui não haver segunda
    tabela para alinhar (ver planeamento de linhas/logística, onde o clique
@@ -814,6 +837,16 @@ async function atribuirServidor(it, anterior){
     if(d.erro){ alert(d.erro); it.charriots=anterior; renderLanes(); return; }
     log("local",`"${it.titulo}" atribuída a ${(it.charriots&&it.charriots.length)?it.charriots.join(" + "):"por atribuir"}`);
   }catch(e){ alert("Falhou a guardar: "+e); it.charriots=anterior; renderLanes(); }
+}
+async function definirDiaEntradaServidor(it, gsAnterior){
+  try{
+    const r=await fetch("/planeamento-entradas/dia-entrada",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({basecamp_card_id:it.id,dia_entrada:MASTER[it.gs].iso})});
+    const d=await r.json();
+    if(d.erro){ alert(d.erro); it.gs=gsAnterior; renderLanes(); return; }
+    log("local",`"${it.titulo}" com entrada movida para ${MASTER[it.gs].iso}`);
+  }catch(e){ alert("Falhou a guardar: "+e); it.gs=gsAnterior; renderLanes(); }
 }
 async function definirLarguraServidor(it, anterior){
   try{
@@ -890,9 +923,13 @@ function openSheet(id){
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
-      <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="number" min="0" step="0.1" value="${it.wipCmp??""}" list="histWipCmp"></div>
-      <div class="miniField"><label>Lar</label><input id="fWipLar" type="number" min="0" step="0.1" value="${it.wipLar??""}" list="histWipLar"></div>
-      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="number" min="0" step="0.1" value="${it.wipEsp??""}" list="histWipEsp"></div>
+      <!-- type="text" + inputmode="decimal" (não type="number"), pedido explícito do Rui
+           (2026-10-04): tablets reais não deixavam escrever nestes campos — bug conhecido
+           do Safari/iOS com input[type=number][list] (datalist), que não abre teclado
+           nenhum nalguns aparelhos. Mantém o teclado numérico e as sugestões do datalist. -->
+      <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="text" inputmode="decimal" value="${it.wipCmp??""}" list="histWipCmp"></div>
+      <div class="miniField"><label>Lar</label><input id="fWipLar" type="text" inputmode="decimal" value="${it.wipLar??""}" list="histWipLar"></div>
+      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="text" inputmode="decimal" value="${it.wipEsp??""}" list="histWipEsp"></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="number" min="0" step="0.01" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
     </div>
@@ -901,7 +938,7 @@ function openSheet(id){
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><select id="fToroCmp">${toroCmpOptionsHtml(it.toroCmp)}</select></div>
       <div class="miniField" id="fToroCmpOutroWrap" style="${(toroEhPreset||it.toroCmp==null)?"display:none":""}">
-        <label>Valor</label><input id="fToroCmpOutro" type="number" min="0" step="1" value="${toroOutroValor}" list="histToroCmp"></div>
+        <label>Valor</label><input id="fToroCmpOutro" type="text" inputmode="decimal" value="${toroOutroValor}" list="histToroCmp"></div>
       <div class="miniField"><label>Tipo</label><select id="fToroTipo">
         <option value="" ${!it.toroTipo?"selected":""}>—</option>
         <option value="IN"${it.toroTipo==="IN"?" selected":""}>IN</option>

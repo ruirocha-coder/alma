@@ -880,6 +880,18 @@ def planeamento_entradas_produzido(corpo: dict = Body(...)):
     resultado = planeamento_entradas.definir_produzido(basecamp_card_id, bool(corpo.get("produzido")))
     return JSONResponse(resultado)
 
+@app.post("/planeamento-entradas/dia-entrada")
+def planeamento_entradas_dia_entrada(corpo: dict = Body(...)):
+    """Dia de entrada à mão, ao arrastar um card para outra coluna de dia
+    — ver tools/planeamento_entradas.definir_dia_entrada."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.definir_dia_entrada(basecamp_card_id, corpo.get("dia_entrada"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —

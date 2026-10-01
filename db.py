@@ -498,6 +498,15 @@ ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS produzido BOO
 -- que já tinham NUMERIC, sem perder os valores já lá guardados. Idempotente
 -- — corre em todos os arranques, sem custo depois da 1ª vez (já fica TEXT).
 ALTER TABLE entradas_charriot_ecos_largos ALTER COLUMN toro_cmp TYPE TEXT USING toro_cmp::text;
+
+-- dia_entrada_manual (pedido explícito do Rui, 2026-10-04): ao arrastar um
+-- card na horizontal para outra coluna de dia, fica aqui gravado um dia de
+-- entrada à mão, que passa a ter prioridade sobre o calculado a partir do
+-- início da produção (ver _calcular_dia_entrada em
+-- tools/planeamento_entradas.py) — NULL = continua a usar o cálculo
+-- automático, como sempre foi. Nunca mexe no dia de início da produção
+-- (Planeamento Produção), só no dia mostrado nesta página.
+ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS dia_entrada_manual DATE;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1166,7 +1175,8 @@ def entradas_charriot_ecos_largos() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT basecamp_card_id, charriots, wip_cmp, wip_lar, wip_esp, toro_cmp, toro_tipo,
-                          indice_toros, indice_wip, em_continuo, largura_dias_visual, produzido
+                          indice_toros, indice_wip, em_continuo, largura_dias_visual, produzido,
+                          dia_entrada_manual
                    FROM entradas_charriot_ecos_largos"""
             )
             return [{
@@ -1182,7 +1192,24 @@ def entradas_charriot_ecos_largos() -> list[dict]:
                 "em_continuo": l["em_continuo"],
                 "largura_dias_visual": l["largura_dias_visual"],
                 "produzido": bool(l["produzido"]),
+                "dia_entrada_manual": l["dia_entrada_manual"].isoformat() if l["dia_entrada_manual"] else None,
             } for l in cur.fetchall()]
+
+def definir_dia_entrada_manual(basecamp_card_id: int, dia_entrada_manual: str = None) -> dict:
+    """Grava (ou limpa, se None) um dia de entrada à mão para uma OF da
+    página "Planeamento de Entradas" — ver nota em dia_entrada_manual na
+    migração acima. Usado ao arrastar um card para outra coluna de dia."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, dia_entrada_manual)
+                   VALUES (%s, %s)
+                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
+                       dia_entrada_manual = EXCLUDED.dia_entrada_manual, atualizado_em = now()""",
+                (basecamp_card_id, dia_entrada_manual)
+            )
+        conn.commit()
+    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 
 def atribuir_charriots_entrada(basecamp_card_id: int, charriots: list = None) -> dict:
     """Atribui (substitui) a lista de charriots de uma OF na página
