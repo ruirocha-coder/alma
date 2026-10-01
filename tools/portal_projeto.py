@@ -878,21 +878,138 @@ def validar_fase_portal(card_id: int, fase: str) -> dict:
 
 
 def obter_portal_atual(card_id: int) -> dict:
-    """Devolve o portal de acompanhamento já gerado para este card, tal
-    como está gravado agora (cliente, honorários, ambientes, documentos,
-    e cada fase com o seu estado "validada"/"aguarda"/"prevista") — usa
-    isto SEMPRE antes de chamares gerar_portal_projeto outra vez para um
-    card que já pode ter portal (ex: para abrir uma fase nova quando
-    aparece o documento certo), para nunca teres de adivinhar valores já
-    confirmados antes nem arriscares perder algo por esquecimento (um
-    ambiente, uma imagem, uma fase já validada). Devolve {"existe": False}
-    se este card ainda não tiver nenhum portal gerado — nesse caso, usa
+    """Devolve um resumo leve do portal de acompanhamento já gerado para
+    este card (se existir): cliente, referência, e cada fase com o seu
+    estado atual ("validada"/"aguarda"/"prevista") e se já tem o
+    documento/imagem dela guardado. NUNCA inclui o conteúdo pesado em si
+    (imagens em base64, PDFs) — não precisas disso para decidir se um
+    documento novo deve abrir alguma fase; usa abrir_fase_portal para
+    isso, nunca gerar_portal_projeto outra vez. Bug real, 2026-10-02:
+    uma versão anterior desta função devolvia o portal completo, incluindo
+    todas as imagens embutidas — ao ler isso, o pedido seguinte à API
+    chegou aos 10 milhões de tokens (o máximo é 1 milhão) só para "repetir"
+    de volta o que já lá estava. Devolve {"existe": False} se este card
+    ainda não tiver nenhum portal gerado — nesse caso, usa
     gerar_portal_projeto normalmente, a partir do zero."""
     registo = db.obter_documento_gerado_por_card_id(card_id)
     if not registo or registo["formato"] != "html":
         return {"existe": False}
     projeto = json.loads(registo["conteudo_markdown"])["projeto"]
-    return {"existe": True, "projeto": projeto}
+    fases = [{"id": f["id"], "titulo": f["titulo"], "estado": f["estado"], "data": f.get("data")}
+             for f in projeto["fases"]]
+    return {
+        "existe": True, "ref": projeto["ref"], "cliente": projeto["cliente"],
+        "fases": fases,
+        "tem_imagem_conceito": bool(projeto["conceito"].get("imagem")),
+        "tem_documento_apresentacao": bool(projeto["documentos"].get("apresentacao")),
+        "tem_documento_orcamento": bool(projeto["documentos"].get("orcamento")),
+        "tem_documento_honorarios": bool(projeto["documentos"].get("honorarios")),
+    }
+
+
+def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
+                      valor_produto: float = None, valor_produto_com_iva: bool = False) -> dict:
+    """Reabre UMA fase "prevista" (ainda por abrir) de um portal já
+    gerado, passando-a a "aguarda" — sem tocares em mais nada do portal
+    (cliente, honorários, outras fases, outros ambientes ficam exatamente
+    como estavam, lidos diretamente do registo já guardado, nunca
+    inventados nem repetidos por ti). `download_url` é o do PDF novo que
+    confirmaste corresponder à fase (tal como veio de
+    listar_pdfs_anexados_por_data — nunca um download_url obtido de outro
+    lado); a extração da imagem/documento fica inteiramente em código, só
+    recebes aqui um url, nunca precisas de base64 (bug real, 2026-10-02:
+    uma versão anterior obrigava-te a reler e repetir o portal inteiro,
+    incluindo imagens já existentes em base64 — isso sozinho esgotou o
+    limite de tokens de um pedido, chegou aos 10 milhões, o máximo é 1
+    milhão).
+
+    - fase "conceito": passa download_url do PDF "Conceito Psicoestético".
+    - fase "projeto": passa download_url do PDF de "Apresentação".
+    - fase "orcamento": passa download_url do PDF de "Orçamento" E
+      valor_produto (o valor final, COM IVA, que tu própria leste no
+      documento — nunca calculado, estimado, nem copiado de outra fase)
+      E valor_produto_com_iva=True a confirmar isso mesmo.
+
+    Recusa-se a fazer nada se a fase já não estiver "prevista" (ex: já
+    está "aguarda" ou "validada" — validar só pode acontecer com um
+    clique real da cliente no portal, nunca por aqui), ou se faltar o que
+    essa fase precisa."""
+    if fase not in ("conceito", "projeto", "orcamento"):
+        return {"erro": f"fase desconhecida: {fase!r}"}
+
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"erro": f"não há nenhum portal gerado para o card {card_id}"}
+
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    alvo = next(f for f in projeto["fases"] if f["id"] == fase)
+    if alvo["estado"] != "prevista":
+        return {"erro": f"a fase \"{fase}\" já não está \"prevista\" (está \"{alvo['estado']}\") — nada a fazer"}
+
+    conceito_imagem = projeto["conceito"].get("imagem")
+    conceito_materiais = projeto["conceito"].get("materiais")
+    conceito_leitura = projeto["conceito"].get("leitura")
+    documento_conceito = projeto["documentos"].get("conceito")
+    documento_apresentacao = projeto["documentos"].get("apresentacao")
+    projeto_imagem = projeto.get("projetoImagem")
+    documento_orcamento = projeto["documentos"].get("orcamento")
+    valor_produto_final = projeto.get("valorProduto")
+    ambientes = projeto["ambientes"]
+
+    if fase == "conceito":
+        if not download_url:
+            return {"erro": "falta o download_url do PDF \"Conceito Psicoestético\""}
+        resultado_imagens = _extrair_imagens_conceito_pdf(download_url)
+        if "erro" in resultado_imagens:
+            return {"erro": f"não consegui extrair a imagem do conceito: {resultado_imagens['erro']}"}
+        paginas = resultado_imagens["paginas"]
+        conceito_imagem = paginas[0]["imagem_base64"]
+        documento_conceito = resultado_imagens["pdf_base64"]
+        imagens_por_ambiente = {_normalizar_texto(p["titulo"]): p["imagem_base64"]
+                                for p in paginas if p["titulo"]}
+
+        def _imagem_ambiente(nome):
+            nome_norm = _normalizar_texto(nome)
+            for titulo_norm, imagem in imagens_por_ambiente.items():
+                if titulo_norm in nome_norm or nome_norm in titulo_norm:
+                    return imagem
+            return None
+        ambientes = [{"nome": a["nome"], "nota": a["nota"],
+                     "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem")} for a in ambientes]
+    elif fase == "projeto":
+        if not download_url:
+            return {"erro": "falta o download_url do PDF de \"Apresentação\""}
+        resultado = _extrair_imagem_apresentacao_pdf(download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de apresentação: {resultado['erro']}"}
+        documento_apresentacao = resultado["pdf_base64"]
+        projeto_imagem = resultado["imagem_base64"]
+    elif fase == "orcamento":
+        if not download_url:
+            return {"erro": "falta o download_url do PDF de \"Orçamento\""}
+        if valor_produto is None or not valor_produto_com_iva:
+            return {"erro": ("valor_produto (com IVA, lido mesmo do documento) e "
+                             "valor_produto_com_iva=True são obrigatórios para abrir a fase \"orcamento\"")}
+        resultado = _baixar_pdf_base64(download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de orçamento: {resultado['erro']}"}
+        documento_orcamento = resultado["pdf_base64"]
+        valor_produto_final = valor_produto
+
+    alvo["estado"] = "aguarda"
+    alvo["data"] = None
+    honorarios_linhas = [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
+                         for l in projeto["honorarios"]["linhas"]]
+    fases_estado = {f["id"]: ({"estado": f["estado"], "data": f["data"]} if f.get("data")
+                              else {"estado": f["estado"]}) for f in projeto["fases"]}
+    contacto_cliente = projeto.get("clienteContacto") or {}
+    resultado = _construir_e_gravar(
+        "Alma (automação do portal)", card_id, projeto["cliente"], projeto["validade"],
+        projeto["honorarios"]["total"], honorarios_linhas, ambientes, fases_estado,
+        valor_produto_final, conceito_imagem, conceito_materiais, conceito_leitura,
+        documento_apresentacao, documento_orcamento, documento_conceito, projeto_imagem,
+        projeto["documentos"].get("honorarios"), contacto_cliente.get("telefone"), contacto_cliente.get("email"))
+    return {"ok": True, "fase": fase, "novo_estado": "aguarda", "url": resultado["url"]}
 
 
 _COLUNA_RECOMENDACOES = "Triagem"
@@ -1098,13 +1215,11 @@ TOOLS_PORTAL_PROJETO = [
     {
         "name": "obter_portal_atual",
         "description": (
-            "Devolve o portal de acompanhamento já gerado para um card (se existir), tal como está "
-            "gravado agora — cliente, honorários, ambientes, documentos, e cada fase com o seu estado "
-            "atual. Chama isto SEMPRE antes de gerar_portal_projeto para um card que já possa ter "
-            "portal (ex: quando aparece um documento novo e só é preciso abrir uma fase), para nunca "
-            "teres de adivinhar valores já confirmados nem arriscares perder algo por esquecimento "
-            "(um ambiente, uma imagem, ou sobretudo uma fase já validada pela cliente). Devolve "
-            "{\"existe\": false} se não houver nenhum portal para este card ainda."
+            "Devolve um resumo leve (nunca as imagens/documentos em si, só se já existem ou não) do "
+            "portal de acompanhamento já gerado para um card, se existir — cliente, referência, e cada "
+            "fase com o seu estado atual. Chama isto para veres que fases já estão abertas/validadas "
+            "antes de decidires se um documento novo deve abrir alguma. Devolve {\"existe\": false} se "
+            "não houver nenhum portal para este card ainda."
         ),
         "input_schema": {
             "type": "object",
@@ -1112,6 +1227,35 @@ TOOLS_PORTAL_PROJETO = [
                 "card_id": {"type": "integer", "description": "id numérico do card do Basecamp"}
             },
             "required": ["card_id"]
+        }
+    },
+    {
+        "name": "abrir_fase_portal",
+        "description": (
+            "Reabre uma fase \"prevista\" (ainda por abrir) de um portal já gerado, passando-a a "
+            "\"aguarda\" — sem precisares de passar nenhum outro campo do portal de volta (cliente, "
+            "honorários, imagens, etc. ficam exatamente como já estavam, lidos diretamente do que já "
+            "está gravado). Passa só o download_url do PDF novo (tal como veio de "
+            "listar_pdfs_anexados_por_data) — a extração da imagem/documento fica em código, nunca "
+            "precisas de base64. Para a fase \"orcamento\" é também obrigatório valor_produto (o valor "
+            "final, com IVA, que leste mesmo no documento) e valor_produto_com_iva=true. Usa isto para "
+            "abrir uma fase quando confirmares que o documento certo já está no card — nunca uses "
+            "gerar_portal_projeto para isso. Recusa-se se a fase já não estiver \"prevista\"."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "card_id": {"type": "integer", "description": "id numérico do card do Basecamp"},
+                "fase": {"type": "string", "enum": ["conceito", "projeto", "orcamento"],
+                         "description": "qual fase abrir — nunca \"honorarios\", que nunca está \"prevista\""},
+                "download_url": {"type": "string",
+                                 "description": "download_url do PDF novo, tal como veio de listar_pdfs_anexados_por_data"},
+                "valor_produto": {"type": "number",
+                                  "description": "só para fase \"orcamento\": o valor final, COM IVA, lido no documento"},
+                "valor_produto_com_iva": {"type": "boolean",
+                                          "description": "só para fase \"orcamento\": true a confirmar que valor_produto já inclui IVA"}
+            },
+            "required": ["card_id", "fase", "download_url"]
         }
     }
 ]

@@ -145,20 +145,21 @@ IMPORTANTE sobre o alcance desta tarefa — só precisas do comentário novo
 indicado abaixo, NUNCA do histórico todo do card: já sabes exatamente
 quais são os PDFs novos e o url dos comentários deste card. Chama
 listar_pdfs_anexados_por_data no máximo UMA vez (só para obteres o
-comentario_url de cada PDF indicado) e ler_anexos_registo_basecamp no
-máximo UMA vez por PDF novo indicado — nunca em PDFs antigos, nem a
-percorrer outros comentários "só para confirmar": se depois de ler só os
-PDFs novos indicados ainda tiveres dúvida (ex: duas versões do mesmo
-documento, uma "LOW COST" e outra não, sem forma de saber qual decidir),
-trata isso como "não corresponde claramente" (passo 4) e não faças mais
-nada — mais vale a fase ficar por abrir mais um dia (o reforço diário
-volta a tentar) do que a automação ficar presa a explorar o card inteiro.
+comentario_url/download_url de cada PDF indicado) e
+ler_anexos_registo_basecamp no máximo UMA vez por PDF novo indicado —
+nunca em PDFs antigos, nem a percorrer outros comentários "só para
+confirmar": se depois de ler só os PDFs novos indicados ainda tiveres
+dúvida (ex: duas versões do mesmo documento, uma "LOW COST" e outra não,
+sem forma de saber qual decidir), trata isso como "não corresponde
+claramente" (passo 4) e não faças mais nada — mais vale a fase ficar por
+abrir mais um dia (o reforço diário volta a tentar) do que a automação
+ficar presa a explorar o card inteiro.
 
 A tua tarefa, passo a passo:
 1. Chama obter_portal_atual com o id do card indicado abaixo. Se devolver
    {"existe": false}, não faças mais nada (não devia acontecer, já foi
    confirmado antes de te chamarem, mas mais vale verificar).
-2. Olha para as fases do portal devolvido que estão "prevista" (ainda por
+2. Olha para as fases do resumo devolvido que estão "prevista" (ainda por
    abrir) — a fase "honorarios" nunca está "prevista", ignora-a sempre.
    Usa listar_pdfs_anexados_por_data (e lê o conteúdo com
    ler_anexos_registo_basecamp se o nome do ficheiro não for claro
@@ -174,17 +175,16 @@ A tua tarefa, passo a passo:
      alternativa/variante (ex: "LOW COST") — esse é só para a cliente
      comparar, nunca o valor final a abrir a fase.
 3. Só se o documento novo corresponder claramente a uma fase "prevista":
-   chama gerar_portal_projeto outra vez, repetindo EXATAMENTE todos os
-   campos do portal que obter_portal_atual devolveu (cliente, validade,
-   honorários, ambientes, documentos, fases já validadas com a mesma
-   data) — nunca inventes nem omitas nada disso — e muda só essa fase
-   para "aguarda". NUNCA uses o estado "validada" aqui, mesmo que o
-   documento pareça confirmar tudo — validar uma fase só pode acontecer
-   com um clique real da cliente no botão do portal, nunca por esta via.
+   chama abrir_fase_portal com o card_id, a fase, e o download_url desse
+   PDF (tal como veio de listar_pdfs_anexados_por_data — nunca um
+   download_url obtido de outro lado); para a fase "orcamento" passa
+   também valor_produto e valor_produto_com_iva=true. Nunca chames
+   gerar_portal_projeto aqui — essa é só para criar um portal novo a
+   partir do zero, nunca para abrir uma fase de um já existente.
 4. Se o documento novo não corresponder a nenhuma fase "prevista" (ex: é
    um comprovativo de pagamento, uma fatura, uma planta técnica, uma
    versão de um documento cuja fase já está aberta ou validada), não
-   chames gerar_portal_projeto — simplesmente não faças mais nada.
+   chames abrir_fase_portal — simplesmente não faças mais nada.
 
 Nunca uses nenhuma ferramenta de comunicação (publicar_mural, memorizar
 factos, etc.) — isto não é uma conversa, e ninguém vai mencionar-te de

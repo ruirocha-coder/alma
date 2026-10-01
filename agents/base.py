@@ -532,6 +532,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
             utilizador, id),
         "gerar_portal_projeto": lambda **kwargs: portal_projeto.gerar_portal_projeto(utilizador, **kwargs),
         "obter_portal_atual": lambda card_id: portal_projeto.obter_portal_atual(card_id),
+        "abrir_fase_portal": lambda card_id, fase, download_url=None, valor_produto=None, valor_produto_com_iva=False: (
+            portal_projeto.abrir_fase_portal(card_id, fase, download_url, valor_produto, valor_produto_com_iva)),
     }
     return system, tools_completas, funcoes_utilizador
 
