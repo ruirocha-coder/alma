@@ -911,8 +911,15 @@ function openSheet(id){
       Pode marcar mais que um charriot ao mesmo tempo (ex: a produzir em simultâneo no Charriot 1 e no
       Charriot 2) — nenhum marcado fica "por atribuir".</div>
 
+    <!-- todos os campos numéricos desta ficha usam type="text" + inputmode
+         (nunca type="number"), pedido explícito do Rui (2026-10-04):
+         tablets reais não deixavam escrever nalguns destes campos — bug
+         conhecido do Safari/iOS com input[type=number] (sobretudo quando
+         combinado com um datalist, mas visto também sem ele, incluindo com
+         um teclado físico ligado) — type="text"+inputmode dá o mesmo
+         teclado numérico sem esse problema. -->
     <div class="frow"><label>Duração na tabela (dias)</label>
-      <input id="fLarguraDias" type="number" min="1" max="${LARGURA_DIAS_MAX}" step="1"
+      <input id="fLarguraDias" type="text" inputmode="numeric"
         style="width:70px;flex:0 0 auto" value="${it.larguraDias||1}"></div>
 
     <div class="frow"><label class="destaque">Em contínuo</label>
@@ -923,14 +930,10 @@ function openSheet(id){
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
-      <!-- type="text" + inputmode="decimal" (não type="number"), pedido explícito do Rui
-           (2026-10-04): tablets reais não deixavam escrever nestes campos — bug conhecido
-           do Safari/iOS com input[type=number][list] (datalist), que não abre teclado
-           nenhum nalguns aparelhos. Mantém o teclado numérico e as sugestões do datalist. -->
       <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="text" inputmode="decimal" value="${it.wipCmp??""}" list="histWipCmp"></div>
       <div class="miniField"><label>Lar</label><input id="fWipLar" type="text" inputmode="decimal" value="${it.wipLar??""}" list="histWipLar"></div>
       <div class="miniField"><label>Esp</label><input id="fWipEsp" type="text" inputmode="decimal" value="${it.wipEsp??""}" list="histWipEsp"></div>
-      <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="number" min="0" step="0.01" value="${it.indiceWip}"></div>
+      <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="text" inputmode="decimal" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
     </div>
 
@@ -944,7 +947,7 @@ function openSheet(id){
         <option value="IN"${it.toroTipo==="IN"?" selected":""}>IN</option>
         <option value="MT"${it.toroTipo==="MT"?" selected":""}>MT</option>
       </select></div>
-      <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="number" min="0" step="0.01" value="${it.indiceToros}"></div>
+      <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="text" inputmode="decimal" value="${it.indiceToros}"></div>
       <div class="miniField"><label>QTD Toros</label><b id="fQtdToros" class="mono" style="align-self:center">—</b></div>
     </div>
     ${datalistHtml("histWipCmp",historico.wip_cmp)}

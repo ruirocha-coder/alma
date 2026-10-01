@@ -574,6 +574,7 @@ def inicializar_schema():
             cur.execute(SEED_LINHAS_PRODUCAO_ECOS_LARGOS)
             cur.execute(SEED_CORES_ESTADO_ECOS_LARGOS)
         conn.commit()
+    seed_feriados_fixos_portugal()
 
 def guardar_mensagem(utilizador: str, sessao: str, papel: str, conteudo: str, agente: str = None):
     with get_conn() as conn:
@@ -1273,6 +1274,39 @@ def feriados_ecos_largos() -> list[str]:
         with conn.cursor() as cur:
             cur.execute("SELECT dia FROM feriados_ecos_largos ORDER BY dia")
             return [r["dia"].isoformat() for r in cur.fetchall()]
+
+# feriados nacionais fixos de Portugal (data sempre igual todos os anos —
+# nunca os móveis, como Carnaval, Sexta-feira Santa ou Corpo de Deus, que
+# dependem da Páscoa e mudam de ano para ano).
+FERIADOS_FIXOS_PORTUGAL = [
+    (1, 1, "Ano Novo"),
+    (4, 25, "Dia da Liberdade"),
+    (5, 1, "Dia do Trabalhador"),
+    (6, 10, "Dia de Portugal"),
+    (8, 15, "Assunção de Nossa Senhora"),
+    (10, 5, "Implantação da República"),
+    (11, 1, "Todos os Santos"),
+    (12, 1, "Restauração da Independência"),
+    (12, 8, "Imaculada Conceição"),
+    (12, 25, "Natal"),
+]
+
+def seed_feriados_fixos_portugal(ano_inicio: int = 2025, ano_fim: int = 2031):
+    """Pré-preenche os feriados nacionais fixos de Portugal nos quadros da
+    Ecos Largos, para nunca serem esquecidos (pedido explícito do Rui,
+    2026-10-04) — chamado a cada arranque (ver inicializar_schema).
+    Idempotente: nunca sobrescreve um feriado já marcado (ex: se a equipa
+    tiver mudado o motivo à mão, ou marcado um feriado móvel à parte)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for ano in range(ano_inicio, ano_fim + 1):
+                for mes, dia, motivo in FERIADOS_FIXOS_PORTUGAL:
+                    cur.execute(
+                        """INSERT INTO feriados_ecos_largos (dia, motivo) VALUES (%s, %s)
+                           ON CONFLICT (dia) DO NOTHING""",
+                        (f"{ano:04d}-{mes:02d}-{dia:02d}", motivo)
+                    )
+        conn.commit()
 
 def definir_feriado(dia: str, feriado: bool, motivo: str = None) -> dict:
     """Marca/desmarca um dia como feriado nos quadros da Ecos Largos — só

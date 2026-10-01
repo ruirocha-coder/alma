@@ -2312,7 +2312,10 @@ function openSheet(id,somenteLeitura){
     ${corpo}
     <div class="kv"><span>Coluna no Basecamp</span><b>${c.coluna||"—"}</b></div>
     <div class="kv"><span>Prazo no Basecamp</span><b>${c.prazo||"sem prazo"}</b></div>
-    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" value="${c.volume||""}" placeholder="ex: 30" ${dis}></div>
+    <!-- type="text"+inputmode="decimal", não type="number" (pedido explícito do Rui,
+         2026-10-04): bug conhecido do Safari/iOS em tablets que não deixava escrever
+         em campos input[type=number]. -->
+    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="text" inputmode="decimal" value="${c.volume||""}" placeholder="ex: 30" ${dis}></div>
     <div class="frow"><label>Madeira</label><select id="fMad" ${dis}>
       <option value="">Não especificado</option>
       <option value="seca"${c.madeira==="seca"?" selected":""}>Seca</option>
@@ -2721,7 +2724,7 @@ function openForm(){
     <h3>Criar encomenda</h3>
     <div class="frow"><label>Cliente</label><input id="fCli" placeholder="Ex: Casa Cerne"></div>
     <div class="frow"><label>Peça</label><input id="fTt" placeholder="Ex: Soalho carvalho 22mm"></div>
-    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="number" min="0.1" step="0.1" placeholder="Ex: 30"></div>
+    <div class="frow"><label>Volume (m³)</label><input id="fVol" type="text" inputmode="decimal" placeholder="Ex: 30"></div>
     <div class="frow"><label>Madeira</label><select id="fMadeira">
       <option value="">Não especificado</option>
       <option value="seca">Seca</option>
