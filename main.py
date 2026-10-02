@@ -970,6 +970,17 @@ def park_in_limites(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
 
+@app.post("/park-in/importar-historico")
+def park_in_importar_historico():
+    """Importa para o Park In todas as avaliações de qualidade já
+    guardadas (ver tools/parkin.importar_historico_avaliacoes) — pedido
+    do Rui (2026-10-02): o stock não devia começar vazio, devia refletir
+    logo os talões já dados à Alma antes do Park In existir. Idempotente
+    (nunca duplica um talão já importado), por isso pode voltar a
+    chamar-se mais tarde para apanhar avaliações novas feitas só pelo
+    chat, sem passar pelo botão Entrada."""
+    return parkin.importar_historico_avaliacoes()
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —

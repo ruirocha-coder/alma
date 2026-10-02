@@ -290,9 +290,9 @@ CREATE TABLE IF NOT EXISTS parkin_entradas (
     data DATE NOT NULL,
     matricula TEXT,
     guia_req TEXT,
-    tipo TEXT NOT NULL,              -- 'IN' | 'MT'
-    comprimento NUMERIC NOT NULL,    -- metros, ex: 2.35
-    espessura TEXT NOT NULL,         -- 'normal' | 'fina'
+    tipo TEXT,                       -- 'IN' | 'MT' — NULL = artigo desconhecido (ver importar_historico_avaliacoes)
+    comprimento NUMERIC,             -- metros, ex: 2.35
+    espessura TEXT,                  -- 'normal' | 'fina'
     peso_bruto_kg NUMERIC,
     tara_kg NUMERIC,
     peso_liquido_kg NUMERIC NOT NULL,
@@ -451,6 +451,14 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
 -- pelo número do talão sem ter de analisar o texto livre da avaliação.
 -- NULL em registos antigos (antes desta coluna existir).
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS indice_igqc NUMERIC;
+-- importação do histórico anterior ao Park In (ver
+-- tools/parkin.importar_historico_avaliacoes, pedido explícito do Rui,
+-- 2026-10-02): a maioria das avaliações antigas não preservou o código
+-- completo do produto do talão, por isso tipo/comprimento/espessura ficam
+-- NULL ("artigo desconhecido") nesses casos — nunca inventados.
+ALTER TABLE parkin_entradas ALTER COLUMN tipo DROP NOT NULL;
+ALTER TABLE parkin_entradas ALTER COLUMN comprimento DROP NOT NULL;
+ALTER TABLE parkin_entradas ALTER COLUMN espessura DROP NOT NULL;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS utilizador TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS conteudo_markdown TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DEFAULT 'pdf';
@@ -1098,12 +1106,13 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fornecedor, quantidade, data_carga, talao, avaliacao, indice_igqc, criado_em
+                """SELECT id, fornecedor, quantidade, data_carga, talao, avaliacao, indice_igqc, criado_em
                    FROM avaliacoes_cargas_toros
                    WHERE ano = %s ORDER BY criado_em ASC""",
                 (ano,)
             )
             return [{
+                "id": l["id"],
                 "fornecedor": l["fornecedor"],
                 "quantidade": l["quantidade"],
                 "data_carga": l["data_carga"],
@@ -2277,6 +2286,16 @@ def guardar_entrada_parkin(talao: str, fornecedor: str, data, tipo: str, comprim
             id_gerado = cur.fetchone()["id"]
         conn.commit()
     return id_gerado
+
+def talaoes_parkin_existentes() -> set:
+    """Todos os nºs de talão já registados como entrada no Park In — usado
+    por importar_historico_avaliacoes (tools/parkin.py) para nunca
+    duplicar um talão já lá existente (seja de um registo manual ou de
+    uma importação anterior)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT talao FROM parkin_entradas")
+            return {l["talao"] for l in cur.fetchall()}
 
 def entradas_parkin_com_saldo(tipo: str, comprimento: float, espessura: str) -> list[dict]:
     """Entradas deste artigo exato com saldo > 0, da mais antiga para a

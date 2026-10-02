@@ -51,7 +51,16 @@ def _categoria_de_indice(indice: float) -> str:
     return "Fraca"
 
 
+_ARTIGO_DESCONHECIDO = "desconhecido"
+
+
 def _chave_artigo(tipo: str, comprimento: float, espessura: str) -> str:
+    """"desconhecido" quando falta algum dos três — caso real do histórico
+    importado (ver importar_historico_avaliacoes), nunca de um registo
+    feito pela foto do talão (aí os três vêm sempre preenchidos ou a
+    entrada nem chega a gravar-se, ver registar_entrada)."""
+    if tipo is None or comprimento is None or espessura is None:
+        return _ARTIGO_DESCONHECIDO
     return f"{tipo}|{comprimento}|{espessura}"
 
 
@@ -131,25 +140,49 @@ def _interpretar_produto(produto: str) -> dict:
     return {"tipo": tipo, "comprimento": comprimento, "espessura": espessura, "erro": None}
 
 
-_RE_PERCENTAGEM_AVALIACAO = re.compile(r"Percentagem[:\*\s]*.*?(\d{1,3}(?:[.,]\d+)?)\s*%", re.IGNORECASE)
+# faixas do manual (ver LIMIAR_BOA/LIMIAR_MEDIA) tal como os nomes que a
+# própria avaliação já escreve ("Classificação Final: Aceitável (60-74%)")
+# — ler o NOME da faixa é mais fiável do que tentar ler só um número
+# (confirmado contra os 225 registos reais de 2026: cobertura de 71% só
+# pelo nome da faixa, contra 64% só pela palavra "Percentagem"), por isso
+# tenta sempre o nome primeiro.
+_RE_BANDA_CLASSIFICACAO = re.compile(
+    r"Classifica[cç][aã]o\s*(?:[Ff]inal)?[:\*\s]*\**\s*(Excelente|Boa|Aceit[aá]vel|Fraca|Rejei[cç][aã]o)",
+    re.IGNORECASE)
+_RE_PERCENTAGEM_GENERICA = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*%")
+_BANDA_PARA_CATEGORIA = {"excelente": "Boa", "boa": "Boa", "aceitavel": "Media", "fraca": "Fraca", "rejeicao": "Fraca"}
 
 
-def _extrair_percentagem_de_texto(avaliacao_texto: str):
-    """Fallback para avaliações antigas (anteriores à coluna indice_igqc):
-    lê a percentagem a partir da linha "Percentagem:" do texto já escrito
-    pela avaliação, em vez de tentar reavaliar a carga sem as fotos
-    originais da madeira (que o Park In não tem — só a foto do talão).
-    Best-effort: se o texto não seguir o formato esperado, devolve None,
-    nunca inventa um número."""
+def _indice_e_categoria_de_texto(avaliacao_texto: str):
+    """Deduz (indice, categoria) de uma avaliação de qualidade já escrita
+    (ver agents/qualidade_toros_ecos_largos) — usado como fallback para
+    avaliações antigas sem indice_igqc numérico guardado (ou nunca
+    guardado, no caso do histórico anterior ao Park In — ver
+    importar_historico_avaliacoes), em vez de tentar reavaliar a carga
+    sem as fotos originais da madeira (que o Park In não tem aqui, só a
+    foto do talão). Tenta primeiro o NOME da faixa que a própria avaliação
+    já escreveu; só se não encontrar é que procura uma percentagem solta
+    perto de "Classificação"/"IGQC". Best-effort: devolve (None, None) se
+    não conseguir ler nada, nunca inventa um valor."""
     if not avaliacao_texto:
-        return None
-    m = _RE_PERCENTAGEM_AVALIACAO.search(avaliacao_texto)
-    if not m:
-        return None
-    try:
-        return float(m.group(1).replace(",", "."))
-    except ValueError:
-        return None
+        return None, None
+    m = _RE_BANDA_CLASSIFICACAO.search(avaliacao_texto)
+    if m:
+        banda = m.group(1).lower()
+        banda = banda.replace("á", "a").replace("ã", "a").replace("ç", "c")
+        return None, _BANDA_PARA_CATEGORIA.get(banda)
+    idx = avaliacao_texto.lower().find("classifica")
+    if idx < 0:
+        idx = avaliacao_texto.lower().find("igqc")
+    janela = avaliacao_texto[max(0, idx - 200):idx + 200] if idx >= 0 else avaliacao_texto
+    m2 = _RE_PERCENTAGEM_GENERICA.search(janela) or _RE_PERCENTAGEM_GENERICA.search(avaliacao_texto)
+    if m2:
+        try:
+            indice = float(m2.group(1).replace(",", "."))
+            return indice, _categoria_de_indice(indice)
+        except ValueError:
+            pass
+    return None, None
 
 
 def _resolver_data(data_str: str):
@@ -210,23 +243,23 @@ def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None)
     fornecedor = (campos.get("fornecedor") or "").strip() or "(fornecedor não identificado)"
     data_resolvida = _resolver_data(campos.get("data"))
 
-    indice = None
+    indice, categoria = None, None
     avaliacao = db.avaliacao_carga_toros_por_talao(talao)
     if avaliacao and avaliacao.get("indice_igqc") is not None:
         indice = float(avaliacao["indice_igqc"])
+        categoria = _categoria_de_indice(indice)
     elif avaliacao and avaliacao.get("avaliacao"):
         # já avaliado antes de indice_igqc existir como coluna — lê a
-        # percentagem do texto em vez de reavaliar sem as fotos da
-        # madeira (que não temos aqui, só a foto do talão), e guarda o
-        # valor lido para os próximos lookups não precisarem de repetir
-        # este parsing.
-        indice = _extrair_percentagem_de_texto(avaliacao["avaliacao"])
+        # categoria do texto em vez de reavaliar sem as fotos da madeira
+        # (que não temos aqui, só a foto do talão); guarda o índice
+        # numérico, quando houver, para os próximos lookups não
+        # precisarem de repetir este parsing.
+        indice, categoria = _indice_e_categoria_de_texto(avaliacao["avaliacao"])
         if indice is not None:
             db.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
-    if indice is None:
+    if categoria is None:
         indice = _avaliar_qualidade_inline(bruto, content_type, talao, fornecedor)
-
-    categoria = _categoria_de_indice(indice)
+        categoria = _categoria_de_indice(indice)
     id_gerado = db.guardar_entrada_parkin(
         talao=talao, fornecedor=fornecedor, data=data_resolvida,
         tipo=interpretado["tipo"], comprimento=interpretado["comprimento"], espessura=interpretado["espessura"],
@@ -241,6 +274,117 @@ def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None)
         resultado["aviso"] = ("a entrada ficou registada, mas ainda sem categoria de qualidade — não foi "
                               "possível avaliar esta carga automaticamente")
     return resultado
+
+
+_RE_PRODUTO_LINHA = re.compile(r"Produto:\**\s*([^\n]+)", re.IGNORECASE)
+_RE_PESO_LIQUIDO_TEXTO = re.compile(r"Peso l[ií]quido:?\**\s*([\d.,]+)\s*k?g", re.IGNORECASE)
+_RE_MATRICULA_TEXTO = re.compile(r"Matr[ií]cula:?\**\s*([A-Z0-9\-]+)", re.IGNORECASE)
+
+
+def _parse_peso_kg(texto: str):
+    """Lê um peso em kg de texto livre, tolerando tanto "11850 kg" como
+    "13.000 kg" (separador de milhares em pt-PT) — nunca inventa um
+    valor, devolve None se não encontrar nada parecido com um peso."""
+    if not texto:
+        return None
+    m = re.search(r"([\d.,]+)\s*k?g", texto, re.IGNORECASE)
+    if not m:
+        return None
+    bruto = m.group(1).replace(".", "").replace(",", ".")
+    try:
+        return float(bruto)
+    except ValueError:
+        return None
+
+
+def _analisar_avaliacao_historica(avaliacao_texto: str) -> dict:
+    """Tenta reconstruir os campos do Park In a partir do texto de uma
+    avaliação de qualidade já guardada — usado só por
+    importar_historico_avaliacoes, nunca para uma entrada nova (essa lê
+    sempre a foto do talão diretamente, muito mais fiável). tipo/
+    comprimento/espessura ficam None quando o texto não os preserva — a
+    maioria dos casos antigos, porque o resumo de qualidade normalmente
+    não guardava o código completo do produto do talão (ex: ficava só
+    "Madeira Pinho 2,35" em vez de "006-IN - MADEIRA PINHO 2,35 16
+    ACIMA") — nunca inventados aqui."""
+    m_prod = _RE_PRODUTO_LINHA.search(avaliacao_texto)
+    produto_linha = m_prod.group(1) if m_prod else ""
+    interpretado = _interpretar_produto(produto_linha) if produto_linha else {
+        "tipo": None, "comprimento": None, "espessura": None}
+
+    m_peso = _RE_PESO_LIQUIDO_TEXTO.search(avaliacao_texto)
+    peso_kg = _parse_peso_kg(m_peso.group(1)) if m_peso else None
+
+    m_matricula = _RE_MATRICULA_TEXTO.search(avaliacao_texto)
+    matricula = m_matricula.group(1) if m_matricula else None
+
+    return {"tipo": interpretado["tipo"], "comprimento": interpretado["comprimento"],
+           "espessura": interpretado["espessura"], "peso_kg": peso_kg, "matricula": matricula}
+
+
+def importar_historico_avaliacoes(anos: list = None) -> dict:
+    """Importa para o Park In todas as avaliações de qualidade já
+    guardadas (ver agents/qualidade_toros_ecos_largos) — pedido explícito
+    do Rui (2026-10-02): o stock não devia começar vazio, devia refletir
+    logo todos os talões já dados à Alma. tipo/comprimento/espessura
+    ficam "desconhecido" (ver _chave_artigo) quando o texto da avaliação
+    não os preserva — nunca inventados; mesmo assim entram no stock total
+    e nas categorias de qualidade, só não entram corretamente
+    classificados em "stock por artigo" (decisão explícita do Rui,
+    2026-10-02: confirmado contra os dados reais, isto acontece em ~95%
+    dos registos antigos, porque o resumo de qualidade não preservava o
+    código completo do produto do talão). Nunca duplica um talão já
+    existente no Park In, por omissão procura em todos os anos desde
+    2025."""
+    anos = anos or list(range(2025, date.today().year + 1))
+    ja_existentes = db.talaoes_parkin_existentes()
+    processados_agora = set()
+    importados, sem_peso, sem_qualidade, ja_existiam = [], [], [], []
+
+    for ano in anos:
+        for a in db.avaliacoes_cargas_toros_ano(ano):
+            talao = (a.get("talao") or "").strip()
+            if not talao:
+                continue
+            if talao in ja_existentes or talao in processados_agora:
+                ja_existiam.append(talao)
+                continue
+
+            avaliacao_texto = a.get("avaliacao") or ""
+            peso_kg = _parse_peso_kg(a.get("quantidade"))
+            info = _analisar_avaliacao_historica(avaliacao_texto)
+            if not peso_kg:
+                peso_kg = info["peso_kg"]
+            if not peso_kg:
+                sem_peso.append(talao)
+                continue
+
+            indice = float(a["indice_igqc"]) if a.get("indice_igqc") is not None else None
+            categoria = _categoria_de_indice(indice) if indice is not None else None
+            if categoria is None:
+                indice_texto, categoria = _indice_e_categoria_de_texto(avaliacao_texto)
+                if indice is None and indice_texto is not None:
+                    indice = indice_texto
+                    db.definir_indice_igqc_avaliacao(a["id"], indice)
+            if categoria is None:
+                sem_qualidade.append(talao)
+                continue
+
+            try:
+                data_resolvida = datetime.strptime((a.get("data_carga") or "").strip(), "%Y-%m-%d").date()
+            except ValueError:
+                data_resolvida = date.today()
+
+            db.guardar_entrada_parkin(
+                talao=talao, fornecedor=a.get("fornecedor") or "(fornecedor não identificado)",
+                data=data_resolvida, tipo=info["tipo"], comprimento=info["comprimento"],
+                espessura=info["espessura"], peso_liquido_kg=peso_kg, matricula=info["matricula"],
+                indice_igqc=indice, categoria_qualidade=categoria, registado_por="importação do histórico")
+            processados_agora.add(talao)
+            importados.append(talao)
+
+    return {"importados": len(importados), "sem_peso_legivel": sem_peso,
+           "sem_qualidade_legivel": sem_qualidade, "ja_existiam": len(ja_existiam)}
 
 
 def _saldo_disponivel(tipo: str, comprimento: float, espessura: str) -> float:
@@ -382,7 +526,7 @@ def stock_por_artigo() -> list[dict]:
         saldo = float(e["saldo_kg"] or 0)
         if saldo <= 1e-6:
             continue
-        comprimento = float(e["comprimento"])
+        comprimento = float(e["comprimento"]) if e["comprimento"] is not None else None
         chave = _chave_artigo(e["tipo"], comprimento, e["espessura"])
         a = _bucket(chave, e["tipo"], comprimento, e["espessura"])
         if e["categoria_qualidade"] in a["por_categoria_kg"]:
@@ -686,7 +830,8 @@ function renderStockArtigo(){
   if(!lista.length){ el.innerHTML = '<div class="vazio">Ainda sem stock registado.</div>'; return; }
   el.innerHTML = lista.map(a => `
     <div class="artigo-row">
-      <div class="titulo"><span>${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}</span>
+      <div class="titulo"><span>${a.artigo==="desconhecido" ? "Artigo desconhecido (histórico sem essa informação)"
+        : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`}</span>
         <span class="tot mono">${t(a.total_kg)}</span></div>
       ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg)}
     </div>
@@ -790,7 +935,8 @@ $("#bCorrecaoGuardar").onclick = async () => {
 function renderLimites(){
   const linhas = [{chave:"total", rotulo:"Stock total", lim:DADOS.stock_total}]
     .concat(DADOS.stock_por_artigo.map(a => ({chave:a.artigo,
-      rotulo:`${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`, lim:a})));
+      rotulo: a.artigo==="desconhecido" ? "Artigo desconhecido"
+        : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`, lim:a})));
   $("#limitesLista").innerHTML = linhas.map(l => `
     <div class="frow"><label>${l.rotulo}</label>
       <span style="display:flex;gap:6px">
