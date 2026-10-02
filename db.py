@@ -451,6 +451,16 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
 -- pelo número do talão sem ter de analisar o texto livre da avaliação.
 -- NULL em registos antigos (antes desta coluna existir).
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS indice_igqc NUMERIC;
+-- pedido explícito do Rui, 2026-10-02 (depois de ver o histórico
+-- importado para o Park In quase todo sem artigo conhecido): a avaliação
+-- de qualidade passa a guardar SEMPRE o artigo completo do talão (tipo
+-- IN/MT, comprimento, espessura normal/fina), estruturado, nunca só
+-- dentro do texto livre — para nunca mais se perder esta informação daqui
+-- para a frente. NULL em registos antigos, sempre preenchido nos novos
+-- (ver agents/qualidade_toros_ecos_largos).
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS tipo TEXT;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS comprimento NUMERIC;
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS espessura TEXT;
 -- importação do histórico anterior ao Park In (ver
 -- tools/parkin.importar_historico_avaliacoes, pedido explícito do Rui,
 -- 2026-10-02): a maioria das avaliações antigas não preservou o código
@@ -1063,14 +1073,17 @@ def contexto_global() -> str:
 
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, ano: int,
                                   quantidade: str = None, data_carga: str = None, talao: str = None,
-                                  indice_igqc: float = None):
+                                  indice_igqc: float = None, tipo: str = None, comprimento: float = None,
+                                  espessura: str = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO avaliacoes_cargas_toros
-                   (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc)
+                   (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc,
+                    tipo, comprimento, espessura)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc,
+                 tipo, comprimento, espessura)
             )
         conn.commit()
 
@@ -1084,7 +1097,7 @@ def avaliacao_carga_toros_por_talao(talao: str) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, fornecedor, avaliacao, indice_igqc, criado_em
+                """SELECT id, fornecedor, avaliacao, indice_igqc, tipo, comprimento, espessura, criado_em
                    FROM avaliacoes_cargas_toros
                    WHERE talao = %s ORDER BY criado_em DESC LIMIT 1""",
                 (talao,)
@@ -1106,7 +1119,8 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, fornecedor, quantidade, data_carga, talao, avaliacao, indice_igqc, criado_em
+                """SELECT id, fornecedor, quantidade, data_carga, talao, avaliacao, indice_igqc,
+                          tipo, comprimento, espessura, criado_em
                    FROM avaliacoes_cargas_toros
                    WHERE ano = %s ORDER BY criado_em ASC""",
                 (ano,)
@@ -1119,6 +1133,9 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
                 "talao": l["talao"],
                 "avaliacao": l["avaliacao"],
                 "indice_igqc": l["indice_igqc"],
+                "tipo": l["tipo"],
+                "comprimento": float(l["comprimento"]) if l["comprimento"] is not None else None,
+                "espessura": l["espessura"],
                 "registado_em": l["criado_em"].date().isoformat(),
             } for l in cur.fetchall()]
 
@@ -2411,32 +2428,31 @@ def definir_limite_parkin(chave: str, minimo_kg: float = None, maximo_kg: float 
             )
         conn.commit()
 
-def top_qualidade_fornecedores_parkin(limite: int = 3) -> dict:
-    """Média do índice IGQC por fornecedor (só entradas com índice
-    conhecido) — {"melhores": [...], "piores": [...]}, calculado em SQL
-    (AVG), nunca somado à mão. Com poucos fornecedores no total, os dois
-    grupos podem repetir nomes — é o retrato real, não um bug."""
+def entradas_parkin_qualidade_e_fornecedor() -> list[dict]:
+    """Fornecedor + índice IGQC de cada entrada com índice conhecido —
+    base para tools/parkin.top_qualidade, que agrupa por nome de
+    fornecedor NORMALIZADO (nunca o texto exato aqui em SQL: o mesmo
+    fornecedor aparece escrito de formas diferentes ao longo do tempo —
+    com/sem código, maiúsculas, acentos — e agrupar pelo texto exato
+    duplicava-o em "top qualidade")."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fornecedor, AVG(indice_igqc) AS media, COUNT(*) AS n
-                   FROM parkin_entradas WHERE indice_igqc IS NOT NULL
-                   GROUP BY fornecedor ORDER BY media DESC"""
+                "SELECT fornecedor, indice_igqc FROM parkin_entradas WHERE indice_igqc IS NOT NULL"
             )
-            linhas = [{"fornecedor": l["fornecedor"], "media": round(float(l["media"]), 1), "n": l["n"]}
-                     for l in cur.fetchall()]
-    return {"melhores": linhas[:limite], "piores": list(reversed(linhas[-limite:]))}
+            return [{"fornecedor": l["fornecedor"], "indice_igqc": float(l["indice_igqc"])}
+                   for l in cur.fetchall()]
 
-def top_entradas_fornecedores_parkin(dias: int = 30, limite: int = 5) -> list[dict]:
-    """Fornecedores com mais entregas nos últimos `dias` dias, com
-    quantidade total e nº de entregas — ordenado por quantidade desc."""
+def entradas_parkin_desde(dias: int) -> list[dict]:
+    """Fornecedor + peso líquido de cada entrada dos últimos `dias` dias —
+    base para tools/parkin.top_entradas (mesma razão de agrupar por nome
+    normalizado em Python, não aqui em SQL — ver entradas_parkin_qualidade_e_fornecedor)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fornecedor, COUNT(*) AS entregas, SUM(peso_liquido_kg) AS total_kg
-                   FROM parkin_entradas WHERE data >= (CURRENT_DATE - %s * interval '1 day')
-                   GROUP BY fornecedor ORDER BY total_kg DESC LIMIT %s""",
-                (dias, limite)
+                """SELECT fornecedor, peso_liquido_kg FROM parkin_entradas
+                   WHERE data >= (CURRENT_DATE - %s * interval '1 day')""",
+                (dias,)
             )
-            return [{"fornecedor": l["fornecedor"], "entregas": l["entregas"], "total_kg": float(l["total_kg"])}
+            return [{"fornecedor": l["fornecedor"], "peso_liquido_kg": float(l["peso_liquido_kg"] or 0)}
                    for l in cur.fetchall()]

@@ -479,7 +479,8 @@ TOOLS_MANUAL_QUALIDADE_TOROS = [
 # datas não se confiam ao modelo, ver tools/ecos_largos._resolver_data.
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: str = None,
                                   data_carga: str = None, talao: str = None,
-                                  indice_igqc: float = None) -> dict:
+                                  indice_igqc: float = None, tipo: str = None,
+                                  comprimento: float = None, espessura: str = None) -> dict:
     """Guarda o registo de uma avaliação de qualidade de uma carga de
     toros, associado ao ano corrente — fica disponível para perguntas
     futuras (em qualquer conversa) sobre o histórico de avaliações, e
@@ -494,10 +495,14 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     (número do talão) ficam de fora se não forem mencionados — não
     inventes valores para eles. `indice_igqc` é a percentagem final do
     IGQC (0-100) que já calculaste no passo 3 da avaliação — passa-a
-    também aqui, como número, nunca só dentro do texto de `avaliacao`: é
-    o que o Park In (gestão de stock de toros) usa para saber a categoria
-    de qualidade de uma carga pelo número do talão, sem ter de analisar
-    texto livre."""
+    também aqui, como número, nunca só dentro do texto de `avaliacao`.
+    `tipo`/`comprimento`/`espessura` são o artigo completo do talão (ver
+    missão) — pedido explícito do Rui (2026-10-02): guardar isto sempre,
+    estruturado, nunca só dentro do texto livre, para nunca mais se
+    perder esta informação (histórico anterior a isto ficou sem ela,
+    porque o resumo de qualidade não a preservava de forma fiável). É o
+    que o Park In (gestão de stock de toros) usa para classificar/somar
+    uma carga pelo número do talão, sem ter de analisar texto livre."""
     ano = date.today().year
     # coerção defensiva: o schema da tool já pede strings, mas o modelo por
     # vezes devolve um número (ex: quantidade=11850) — psycopg não converte
@@ -509,15 +514,25 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
         indice_igqc = float(indice_igqc) if indice_igqc is not None else None
     except (TypeError, ValueError):
         indice_igqc = None
+    try:
+        comprimento = float(comprimento) if comprimento is not None else None
+    except (TypeError, ValueError):
+        comprimento = None
+    tipo = str(tipo).strip().upper() if tipo else None
+    if tipo not in ("IN", "MT"):
+        tipo = None
+    espessura = str(espessura).strip().lower() if espessura else None
+    if espessura not in ("normal", "fina"):
+        espessura = None
     db.guardar_avaliacao_carga_toros(
         str(fornecedor) if fornecedor else "(fornecedor não identificado)",
         str(avaliacao), ano,
         quantidade=str(quantidade) if quantidade is not None else None,
         data_carga=str(data_carga) if data_carga is not None else None,
         talao=str(talao) if talao is not None else None,
-        indice_igqc=indice_igqc)
+        indice_igqc=indice_igqc, tipo=tipo, comprimento=comprimento, espessura=espessura)
     print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano} "
-         f"indice_igqc={indice_igqc!r}")
+         f"indice_igqc={indice_igqc!r} tipo={tipo!r} comprimento={comprimento!r} espessura={espessura!r}")
     return {"guardado": True, "ano": ano}
 
 def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> dict:
@@ -551,7 +566,10 @@ TOOLS_AVALIACOES_CARGAS_TOROS = [
                 "quantidade": {"type": "string", "description": "peso/quantidade da carga, se for mencionado"},
                 "data_carga": {"type": "string", "description": "data da carga, se for mencionada"},
                 "talao": {"type": "string", "description": "número do talão, se for mencionado"},
-                "indice_igqc": {"type": "number", "description": "a percentagem final do IGQC (0-100) calculada no passo 3 da avaliação — passa-a sempre que a avaliação chegar a esse passo, como número, mesmo já estando também escrita dentro do texto de `avaliacao`"}
+                "indice_igqc": {"type": "number", "description": "a percentagem final do IGQC (0-100) calculada no passo 3 da avaliação — passa-a sempre que a avaliação chegar a esse passo, como número, mesmo já estando também escrita dentro do texto de `avaliacao`"},
+                "tipo": {"type": "string", "enum": ["IN", "MT"], "description": "o código do tipo de produto do talão (normalmente logo a seguir ao nº do produto, ex: \"006-IN\" -> \"IN\") — passa sempre que estiver legível no talão"},
+                "comprimento": {"type": "number", "description": "o comprimento em metros do campo \"Produto\" do talão (ex: \"MADEIRA PINHO 2,35\" -> 2.35) — passa sempre que estiver legível no talão"},
+                "espessura": {"type": "string", "enum": ["normal", "fina"], "description": "\"fina\" se o campo \"Produto\" do talão tiver o sufixo \"ACIMA\" (ex: \"16 ACIMA\"), senão \"normal\" — passa sempre que o talão tiver essa indicação"}
             },
             "required": ["fornecedor", "avaliacao"]
         }

@@ -155,6 +155,19 @@ o texto que a pessoa escreveu:
   (60%)" -> indice_igqc=60). É o que o Park In (gestão de stock de toros)
   usa para saber a categoria de qualidade de uma carga pelo número do
   talão, sem ter de voltar a analisar o texto da avaliação.
+- tipo, comprimento, espessura: o artigo completo do talão, lido do
+  campo "Produto" (ex: "006-IN - MADEIRA PINHO 2,35 16 ACIMA") — pedido
+  explícito do Rui (2026-10-02): guarda isto SEMPRE que o talão estiver
+  legível, nunca só dentro do texto de avaliacao (histórico anterior a
+  isto perdeu-se por essa razão — o resumo da avaliação simplificava
+  para só "Madeira Pinho 2,35", sem o código completo, e as fotos não
+  ficam guardadas para reconstruir depois). A espécie é sempre Pinho,
+  por isso não é preciso campo próprio para ela.
+  - tipo: o código logo a seguir ao nº do produto (ex: "006-IN" -> "IN");
+    só pode ser "IN" ou "MT".
+  - comprimento: o número em metros a seguir a "MADEIRA PINHO" (ex: "2,35").
+  - espessura: "fina" se tiver o sufixo "ACIMA" (ex: "16 ACIMA"), senão
+    "normal" — nunca "fina" sem esse sufixo estar mesmo presente.
 Só deixes um campo de fora se o tiveres mesmo procurado (na mensagem E em
 todas as fotos/transcrições) e não estiver em lado nenhum — não inventes
 valores, mas também não desistas cedo demais só porque a pessoa não os

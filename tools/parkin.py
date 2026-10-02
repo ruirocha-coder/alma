@@ -16,7 +16,7 @@
 # do MESMO artigo com saldo — cada kg que sai carrega consigo a categoria
 # de qualidade exata de onde veio, nunca uma aproximação (ver _aplicar_fifo
 # e a tabela parkin_depletions, partilhada pelas duas, para auditoria).
-import base64, io, re
+import base64, io, re, unicodedata
 from datetime import date, datetime
 import anthropic
 import db
@@ -407,7 +407,17 @@ def importar_historico_avaliacoes(anos: list = None) -> dict:
 
             avaliacao_texto = a.get("avaliacao") or ""
             peso_kg = _parse_peso_kg(a.get("quantidade"))
-            info = _analisar_avaliacao_historica(avaliacao_texto)
+            # pedido do Rui (2026-10-02): a avaliação já guarda o artigo
+            # de forma estruturada desde que isto foi corrigido (ver
+            # agents/qualidade_toros_ecos_largos) — usa sempre essas
+            # colunas quando vierem preenchidas, só cai no parsing de
+            # texto (menos fiável) para registos anteriores a essa
+            # correção, onde ainda não existem.
+            if a.get("tipo") and a.get("comprimento") is not None and a.get("espessura"):
+                info = {"tipo": a["tipo"], "comprimento": a["comprimento"], "espessura": a["espessura"],
+                       "peso_kg": None, "matricula": None}
+            else:
+                info = _analisar_avaliacao_historica(avaliacao_texto)
             if not peso_kg:
                 peso_kg = info["peso_kg"]
             if not peso_kg:
@@ -614,12 +624,69 @@ def stock_por_artigo() -> list[dict]:
     return resultado
 
 
+_RE_CODIGO_FORNECEDOR = re.compile(r"^\s*\d+\s*[-–]\s*")
+
+
+def _normalizar_fornecedor(nome: str) -> str:
+    """Chave de agrupamento tolerante a diferenças de como o mesmo
+    fornecedor foi escrito ao longo do tempo (com/sem código à frente,
+    maiúsculas, acentos) — ex: "018 - UNIMADEIRAS" e "Unimadeiras" têm de
+    contar como o mesmo fornecedor. Só para AGRUPAR, nunca para mostrar —
+    ver top_qualidade/top_entradas, que escolhem sempre o nome mais
+    usado para mostrar."""
+    sem_codigo = _RE_CODIGO_FORNECEDOR.sub("", nome or "")
+    sem_acentos = unicodedata.normalize("NFKD", sem_codigo).encode("ascii", "ignore").decode()
+    return sem_acentos.strip().lower()
+
+
+def _agrupar_por_fornecedor(linhas: list, campo: str) -> dict:
+    """Agrupa `linhas` (cada uma com "fornecedor" e `campo`) pelo nome
+    normalizado — devolve {chave: {"nome": nome_mais_frequente,
+    "valores": [...]}}."""
+    grupos = {}
+    for l in linhas:
+        chave = _normalizar_fornecedor(l["fornecedor"])
+        g = grupos.setdefault(chave, {"nomes": {}, "valores": []})
+        g["nomes"][l["fornecedor"]] = g["nomes"].get(l["fornecedor"], 0) + 1
+        g["valores"].append(l[campo])
+    return grupos
+
+
+def top_qualidade(limite: int = 3) -> dict:
+    """Média do índice IGQC por fornecedor (só entradas com índice
+    conhecido), agrupado por nome normalizado (ver _normalizar_fornecedor)
+    — {"melhores": [...], "piores": [...]}. Com poucos fornecedores no
+    total, os dois grupos podem repetir nomes — é o retrato real, não um
+    bug."""
+    grupos = _agrupar_por_fornecedor(db.entradas_parkin_qualidade_e_fornecedor(), "indice_igqc")
+    linhas = []
+    for g in grupos.values():
+        nome = max(g["nomes"], key=g["nomes"].get)
+        media = sum(g["valores"]) / len(g["valores"])
+        linhas.append({"fornecedor": nome, "media": round(media, 1), "n": len(g["valores"])})
+    linhas.sort(key=lambda x: -x["media"])
+    return {"melhores": linhas[:limite], "piores": list(reversed(linhas[-limite:]))}
+
+
+def top_entradas(dias: int = 30, limite: int = 5) -> list[dict]:
+    """Fornecedores com mais entregas nos últimos `dias` dias, agrupado
+    por nome normalizado — quantidade total e nº de entregas, ordenado
+    por quantidade desc."""
+    grupos = _agrupar_por_fornecedor(db.entradas_parkin_desde(dias), "peso_liquido_kg")
+    linhas = []
+    for g in grupos.values():
+        nome = max(g["nomes"], key=g["nomes"].get)
+        linhas.append({"fornecedor": nome, "entregas": len(g["valores"]), "total_kg": round(sum(g["valores"]), 1)})
+    linhas.sort(key=lambda x: -x["total_kg"])
+    return linhas[:limite]
+
+
 def dados_dashboard(dias_top_entradas: int = 30) -> dict:
     return {
         "stock_total": stock_total(),
         "stock_por_artigo": stock_por_artigo(),
-        "top_qualidade": db.top_qualidade_fornecedores_parkin(3),
-        "top_entradas": db.top_entradas_fornecedores_parkin(dias_top_entradas, 5),
+        "top_qualidade": top_qualidade(3),
+        "top_entradas": top_entradas(dias_top_entradas, 5),
     }
 
 
