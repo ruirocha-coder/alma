@@ -13,7 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado, get_conn)
+                eliminar_documento_gerado)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -947,30 +947,6 @@ async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
-
-@app.post("/_debug-apagar-entrada-parkin")
-def _debug_apagar_entrada_parkin(ids: str):
-    """Temporário: apaga entradas de teste do Park In por id (lista separada
-    por vírgulas) — usado para limpar contaminações de testes de curl com
-    imagens em branco, que o modelo de visão por vezes "alucina" como
-    sendo um talão real já existente em vez de falhar. Remover depois de
-    usar."""
-    apagados = []
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            for id_txt in ids.split(","):
-                id = int(id_txt)
-                cur.execute("SELECT saldo_kg, peso_liquido_kg FROM parkin_entradas WHERE id = %s", (id,))
-                row = cur.fetchone()
-                if not row:
-                    continue
-                if float(row["saldo_kg"]) != float(row["peso_liquido_kg"]):
-                    return {"erro": f"entrada {id} já tem saldo consumido, não é seguro apagar às cegas"}
-                cur.execute("DELETE FROM parkin_depletions WHERE entrada_id = %s", (id,))
-                cur.execute("DELETE FROM parkin_entradas WHERE id = %s", (id,))
-                apagados.append(id)
-        conn.commit()
-    return {"ok": True, "apagados": apagados}
 
 @app.post("/park-in/saida")
 async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
