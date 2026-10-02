@@ -948,6 +948,23 @@ async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
+@app.get("/_debug-entradas-parkin-por-talao")
+def _debug_entradas_parkin_por_talao(talao: str):
+    """Temporário: lista as entradas do Park In com este nº de talão —
+    usado para confirmar que não ficou nenhuma duplicada de um teste
+    anterior. Remover depois de usar."""
+    from db import get_conn as _get_conn
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, peso_liquido_kg, saldo_kg, categoria_qualidade,
+                          registado_por, criado_em
+                   FROM parkin_entradas WHERE talao = %s ORDER BY id""",
+                (talao,)
+            )
+            linhas = cur.fetchall()
+    return {"total": len(linhas), "linhas": [dict(l) | {"criado_em": str(l["criado_em"])} for l in linhas]}
+
 @app.post("/park-in/saida")
 async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
     """Regista saídas em lote — uma foto de talão por carga consumida (ver
