@@ -581,6 +581,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
      fácil demais de carregar sem querer. */
   .btn.verde{color:var(--green);border-color:var(--green)}
   .btn.verde.ativo{background:var(--green);color:#fff;font-weight:600}
+  /* "Fazer Buffer" (pedido explícito do Rui, 2026-10-04) — mesmo verde
+     escuro do título do card duplicado, para se perceber de imediato que
+     é o botão que o cria. */
+  .btn.buffer{color:#1B5E20;border-color:#1B5E20}
+  .btn.buffer:hover{background:#1B5E20;color:#fff}
   .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;
     padding:9px 0;border-top:1px solid var(--line)}
   .frow label{color:var(--dim);font-size:14px;flex:0 0 auto}
@@ -1231,7 +1236,7 @@ function openSheet(id){
       <button class="btn verde${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
       ${it.buffer
         ? `<button class="btn" id="btnApagarBuffer">Apagar Buffer</button>`
-        : `<button class="btn" id="btnFazerBuffer">Fazer Buffer</button>`}
+        : `<button class="btn buffer" id="btnFazerBuffer">Fazer Buffer</button>`}
       <button class="btn primary" id="guardar">Guardar</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
