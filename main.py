@@ -1084,6 +1084,16 @@ def diagnostico_logistica_entregas():
     a divergir)."""
     return logistica_entregas.diagnostico_cards_regiao()
 
+@app.get("/_debug-procurar-wip-lotes")
+def _debug_procurar_wip_lotes():
+    """Temporário: procura a tabela "WIP Lotes" referida pelo Rui (campos
+    Esp/Nº Fiadas do planeamento de entrada) — documentos e card tables.
+    Remover depois de usar."""
+    docs = documentos_empresa.procurar_documentos_empresa("wip")
+    docs += documentos_empresa.procurar_documentos_empresa("lotes")
+    tabelas = [t.get("title") for t in basecamp._card_tables_ativos(forcar=True)]
+    return {"documentos": docs, "card_tables": tabelas}
+
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():
     """Diagnóstico: mostra exatamente o que a conta da Alma vê no Basecamp
