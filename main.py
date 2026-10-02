@@ -903,6 +903,41 @@ def planeamento_entradas_dia_entrada(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/planeamento-entradas/buffer/criar")
+def planeamento_entradas_buffer_criar(corpo: dict = Body(...)):
+    """Botão "Fazer Buffer": duplica um card real num novo card
+    independente — ver tools/planeamento_entradas.criar_buffer."""
+    basecamp_card_id = corpo.get("basecamp_card_id")
+    if not basecamp_card_id:
+        return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
+    resultado = planeamento_entradas.criar_buffer(basecamp_card_id)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-entradas/buffer/guardar")
+def planeamento_entradas_buffer_guardar(corpo: dict = Body(...)):
+    """Grava a ficha completa de um card "Buffer" já criado — ver
+    tools/planeamento_entradas.guardar_buffer."""
+    id = corpo.get("id")
+    if not id:
+        return JSONResponse({"erro": "falta indicar id"}, status_code=400)
+    resultado = planeamento_entradas.guardar_buffer(
+        id, corpo.get("charriots"), corpo.get("largura_dias"), corpo.get("wip_cmp"), corpo.get("wip_esp"),
+        corpo.get("indice_wip"), corpo.get("n_lotes"), corpo.get("toro_cmp"), corpo.get("toro_tipo"),
+        corpo.get("indice_toros"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/planeamento-entradas/buffer/apagar")
+def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
+    """Apaga um card "Buffer" — ver tools/planeamento_entradas.apagar_buffer."""
+    id = corpo.get("id")
+    if not id:
+        return JSONResponse({"erro": "falta indicar id"}, status_code=400)
+    return JSONResponse(planeamento_entradas.apagar_buffer(id))
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos

@@ -62,23 +62,47 @@ _PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
 def _eh_quadradilho(titulo: str) -> bool:
     return not bool(_PADRAO_OF.search(titulo or ""))
 
-def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_mm):
-    """Nº de lotes (pedido explícito do Rui, 2026-10-04): volume real de
-    um lote = comprimento x (largura fixa x 0,7) x nº de fiadas x
-    espessura (cmp/lar/esp em mm, convertidos para metros aqui) — fiadas
-    vêm sempre da tabela "WIP Lotes" pela espessura escolhida (ver
-    FIADAS_POR_ESPESSURA); nº de lotes = QTD Wip a dividir por esse
-    volume. None sempre que faltar algum dos dados ou a espessura não
-    bater com nenhuma linha da tabela."""
-    if qtd_wip_m3 is None or wip_cmp_mm is None or wip_esp_mm is None:
+def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
+    """Volume real de um lote WIP, em m³: comprimento x (largura fixa x
+    0,7) x nº de fiadas x espessura (cmp/lar/esp em mm, convertidos para
+    metros aqui) — fiadas vêm sempre da tabela "WIP Lotes" pela espessura
+    escolhida (ver FIADAS_POR_ESPESSURA). None sempre que faltar algum dos
+    dados ou a espessura não bater com nenhuma linha da tabela."""
+    if wip_cmp_mm is None or wip_esp_mm is None:
         return None
     fiadas = FIADAS_POR_ESPESSURA.get(round(float(wip_esp_mm)))
     if fiadas is None:
         return None
-    volume_lote = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
-    if volume_lote <= 0:
+    volume = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
+    return volume if volume > 0 else None
+
+def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_mm):
+    """Nº de lotes (pedido explícito do Rui, 2026-10-04) = QTD Wip a
+    dividir pelo volume real de um lote (ver _volume_real_lote). None
+    sempre que faltar algum dos dados."""
+    volume_lote = _volume_real_lote(wip_cmp_mm, wip_esp_mm)
+    if qtd_wip_m3 is None or volume_lote is None:
         return None
     return round(qtd_wip_m3 / volume_lote)
+
+def _calcular_wip_e_toros_de_lotes(n_lotes, wip_cmp_mm, wip_esp_mm, indice_wip, indice_toros):
+    """Inverso de _calcular_n_lotes — usado pelo card "Buffer" (pedido
+    explícito do Rui, 2026-10-04): a partir de um Nº de lotes escrito à
+    mão, calcula QTD Wip (m³) = nº de lotes x volume real de um lote, e
+    QTD Toros (m³) a partir de um volume "implícito" (QTD Wip ÷
+    indice_wip) vezes indice_toros — a mesma relação volume→QTD Wip/QTD
+    Toros de uma OF normal, só a trabalhar ao contrário a partir do Nº de
+    lotes em vez do volume real da OF. Devolve (qtd_wip_m3, qtd_toros_m3),
+    cada um None sempre que faltar algum dos dados necessários."""
+    volume_lote = _volume_real_lote(wip_cmp_mm, wip_esp_mm)
+    if n_lotes is None or volume_lote is None:
+        return None, None
+    qtd_wip_m3 = round(n_lotes * volume_lote, 2)
+    qtd_toros_m3 = None
+    if indice_wip:
+        volume_implicito = qtd_wip_m3 / indice_wip
+        qtd_toros_m3 = round(volume_implicito * indice_toros, 2) if indice_toros else None
+    return qtd_wip_m3, qtd_toros_m3
 
 def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     """Dia em que os troncos desta OF entram no charriot.
@@ -171,6 +195,48 @@ def estado_planeamento_entradas() -> dict:
             "indice_toros": indice_toros,
             "qtd_toros_m3": round(volume * indice_toros, 2) if volume is not None else None,
         })
+
+    # cards "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplicados
+    # independentes de um card real, com o Nº de lotes escrito à mão em vez
+    # de calculado a partir do volume da OF — ver criar_buffer/guardar_buffer
+    # e db.buffers_entrada_ecos_largos. Juntam-se aqui ao mesmo quadro, com
+    # basecamp_card_id negativo (nunca colide com um id real) e "buffer":
+    # True, para o frontend saber a distinguir (título a verde escuro).
+    cards_por_id = {c["id"]: c for c in cards_ativos}
+    for b in db.buffers_entrada_ecos_largos():
+        origem = cards_por_id.get(b["basecamp_card_id_origem"])
+        indice_wip = b["indice_wip"] if b["indice_wip"] is not None else INDICE_WIP_DEFAULT
+        indice_toros = b["indice_toros"] if b["indice_toros"] is not None else INDICE_TOROS_DEFAULT
+        qtd_wip_m3, qtd_toros_m3 = _calcular_wip_e_toros_de_lotes(
+            b["n_lotes"], b["wip_cmp"], b["wip_esp"], indice_wip, indice_toros)
+        entradas.append({
+            "basecamp_card_id": -b["id"],
+            "titulo": b["titulo"],
+            "url": origem["url"] if origem else None,
+            "coluna_basecamp": origem["estado"] if origem else None,
+            "linha": b["linha"],
+            "dia_inicio_producao": None,
+            "volume_m3": None,
+            "tipo_madeira": None,
+            "cor": b["cor"],
+            "dia_entrada": b["dia_entrada"],
+            "em_continuo": None,
+            "charriots": b["charriots"],
+            "largura_dias": b["largura_dias_visual"] or 1,
+            "produzido": b["produzido"],
+            "wip_cmp": b["wip_cmp"],
+            "wip_lar": WIP_LAR_FIXA,
+            "wip_esp": b["wip_esp"],
+            "indice_wip": indice_wip,
+            "qtd_wip_m3": qtd_wip_m3,
+            "n_lotes": b["n_lotes"],
+            "toro_cmp": b["toro_cmp"],
+            "toro_tipo": b["toro_tipo"],
+            "indice_toros": indice_toros,
+            "qtd_toros_m3": qtd_toros_m3,
+            "buffer": True,
+        })
+
     return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas(),
             "feriados": db.feriados_ecos_largos()}
 
@@ -178,12 +244,15 @@ def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
     """Atribui (substitui) os charriots de uma OF — pode estar em vários ao
     mesmo tempo (ex: Charriot 1 e 2 em simultâneo, pedido explícito do
     Rui, 2026-10-02), ou nenhum (None/lista vazia volta para "por
-    atribuir")."""
+    atribuir"). basecamp_card_id negativo = card "Buffer" (ver
+    criar_buffer) — mesmo gesto de arrastar, só muda a tabela de destino."""
     charriots = [c for c in (charriots or []) if c] or None
     if charriots is not None:
         desconhecidos = [c for c in charriots if c not in CHARRIOTS]
         if desconhecidos:
             return {"erro": f"charriot desconhecido: {desconhecidos[0]!r}"}
+    if basecamp_card_id < 0:
+        return db.atribuir_charriots_buffer(-basecamp_card_id, charriots)
     return db.atribuir_charriots_entrada(basecamp_card_id, charriots)
 
 LARGURA_DIAS_MAX = 14
@@ -192,7 +261,8 @@ def definir_largura_dias(basecamp_card_id: int, largura_dias) -> dict:
     """Só visual (pedido explícito do Rui, 2026-10-02): quantos dias um
     card ocupa na tabela, ao ser alargado pela borda direita — nunca mexe
     no dia real usado nos cálculos (ver _calcular_dia_entrada). None/1
-    volta ao tamanho normal (um dia)."""
+    volta ao tamanho normal (um dia). basecamp_card_id negativo = card
+    "Buffer" (ver criar_buffer)."""
     if largura_dias is None:
         largura_dias = 1
     try:
@@ -201,13 +271,18 @@ def definir_largura_dias(basecamp_card_id: int, largura_dias) -> dict:
         return {"erro": "largura em dias inválida"}
     if largura_dias < 1 or largura_dias > LARGURA_DIAS_MAX:
         return {"erro": f"largura em dias tem de estar entre 1 e {LARGURA_DIAS_MAX}"}
-    return db.definir_largura_dias_entrada(basecamp_card_id, largura_dias if largura_dias != 1 else None)
+    largura_dias = largura_dias if largura_dias != 1 else None
+    if basecamp_card_id < 0:
+        return db.definir_largura_dias_buffer(-basecamp_card_id, largura_dias)
+    return db.definir_largura_dias_entrada(basecamp_card_id, largura_dias)
 
 def definir_produzido(basecamp_card_id: int, produzido: bool) -> dict:
     """Marca/desmarca "Produzido" (pedido explícito do Rui, 2026-10-03) —
     só um marcador visual à mão (muda o fundo do card para verde), sem
     ligação ao estado real da OF no Basecamp nem a nenhum cálculo desta
-    página."""
+    página. basecamp_card_id negativo = card "Buffer" (ver criar_buffer)."""
+    if basecamp_card_id < 0:
+        return db.definir_produzido_buffer(-basecamp_card_id, bool(produzido))
     return db.definir_produzido_entrada(basecamp_card_id, bool(produzido))
 
 def _validar_numero_positivo(nome: str, valor):
@@ -246,17 +321,84 @@ def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indic
         return {"erro": f"tipo de toro desconhecido: {tipo!r} — usa \"IN\" ou \"MT\""}
     return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo, indice_toros)
 
+def criar_buffer(basecamp_card_id_origem: int) -> dict:
+    """Botão "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplica
+    um card real num novo card independente, copiando os valores atuais
+    (charriots, dia, WIP, Toro, cor, título) e arrancando com o Nº de
+    lotes já calculado nesse card (ou 1, se ainda não houver nenhum) — a
+    partir daqui, o Nº de lotes do duplicado escreve-se à mão (ver
+    guardar_buffer), e QTD Wip/QTD Toros recalculam-se sempre a partir
+    dele. Devolve o novo card já no formato de estado_planeamento_
+    entradas (basecamp_card_id negativo, "buffer": True)."""
+    estado = estado_planeamento_entradas()
+    origem = next((e for e in estado["entradas"] if e["basecamp_card_id"] == basecamp_card_id_origem), None)
+    if origem is None:
+        return {"erro": "card de origem não encontrado"}
+    novo_id = db.criar_buffer_entrada(
+        basecamp_card_id_origem=basecamp_card_id_origem,
+        titulo=origem["titulo"] + " (Buffer)",
+        linha=origem["linha"], cor=origem["cor"], dia_entrada=origem["dia_entrada"],
+        charriots=origem["charriots"], largura_dias_visual=origem["largura_dias"],
+        wip_cmp=origem["wip_cmp"], wip_esp=origem["wip_esp"], indice_wip=origem["indice_wip"],
+        n_lotes=origem["n_lotes"] or 1, toro_cmp=origem["toro_cmp"], toro_tipo=origem["toro_tipo"],
+        indice_toros=origem["indice_toros"])
+    novo_estado = estado_planeamento_entradas()
+    return next(e for e in novo_estado["entradas"] if e["basecamp_card_id"] == -novo_id)
+
+def guardar_buffer(id: int, charriots: list = None, largura_dias=None, wip_cmp: float = None,
+                   wip_esp: float = None, indice_wip: float = None, n_lotes: float = None,
+                   toro_cmp: str = None, toro_tipo: str = None, indice_toros: float = None) -> dict:
+    """Grava a ficha completa de um card "Buffer" já criado (ver
+    criar_buffer) — ao contrário de guardar_wip/guardar_toro, grava tudo
+    de uma vez, porque é um card próprio (não lê nada de uma OF real)."""
+    charriots = [c for c in (charriots or []) if c] or None
+    if charriots is not None:
+        desconhecidos = [c for c in charriots if c not in CHARRIOTS]
+        if desconhecidos:
+            return {"erro": f"charriot desconhecido: {desconhecidos[0]!r}"}
+    if largura_dias is None:
+        largura_dias = 1
+    try:
+        largura_dias = int(largura_dias)
+    except (TypeError, ValueError):
+        return {"erro": "largura em dias inválida"}
+    if largura_dias < 1 or largura_dias > LARGURA_DIAS_MAX:
+        return {"erro": f"largura em dias tem de estar entre 1 e {LARGURA_DIAS_MAX}"}
+    for nome, valor in (("comprimento (WIP)", wip_cmp), ("espessura (WIP)", wip_esp),
+                       ("índice de WIP", indice_wip), ("Nº de lotes", n_lotes),
+                       ("índice de toros", indice_toros)):
+        erro = _validar_numero_positivo(nome, valor)
+        if erro:
+            return {"erro": erro}
+    if wip_esp is not None and round(float(wip_esp)) not in FIADAS_POR_ESPESSURA:
+        return {"erro": f"espessura {wip_esp!r} não consta da tabela \"WIP Lotes\""}
+    if toro_cmp is not None and not str(toro_cmp).strip():
+        return {"erro": "comprimento do toro inválido"}
+    if toro_tipo is not None and toro_tipo not in TORO_TIPOS:
+        return {"erro": f"tipo de toro desconhecido: {toro_tipo!r} — usa \"IN\" ou \"MT\""}
+    return db.guardar_buffer_entrada(id, charriots, largura_dias if largura_dias != 1 else None,
+                                     wip_cmp, wip_esp, indice_wip, n_lotes, toro_cmp, toro_tipo, indice_toros)
+
+def apagar_buffer(id: int) -> dict:
+    """Apaga um card "Buffer" (ver criar_buffer) — nunca afeta a OF real de
+    onde foi duplicado."""
+    return db.apagar_buffer_entrada(id)
+
 def definir_dia_entrada(basecamp_card_id: int, dia_entrada: str = None) -> dict:
     """Grava um dia de entrada à mão (pedido explícito do Rui, 2026-10-04:
     deixar arrastar um card na horizontal para outra coluna de dia, com
     confirmação no cliente antes de gravar) — passa a ter prioridade sobre
     o calculado a partir do início da produção (ver _calcular_dia_entrada).
-    `dia_entrada` None volta ao cálculo automático."""
+    `dia_entrada` None volta ao cálculo automático. basecamp_card_id
+    negativo = card "Buffer" (ver criar_buffer) — aí é o único dia
+    guardado (não há nenhum cálculo automático de reserva)."""
     if dia_entrada is not None:
         try:
             date.fromisoformat(dia_entrada)
         except ValueError:
             return {"erro": "dia_entrada inválido — tem de ser AAAA-MM-DD"}
+    if basecamp_card_id < 0:
+        return db.definir_dia_entrada_buffer(-basecamp_card_id, dia_entrada)
     return db.definir_dia_entrada_manual(basecamp_card_id, dia_entrada)
 
 def definir_em_continuo(basecamp_card_id: int, em_continuo: bool) -> dict:
@@ -376,6 +518,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
      Guardar/Fechar — de propósito longe do card, para não ser fácil
      demais de carregar sem querer), muda o fundo do card para verde. */
   .blk.produzido{background:var(--green-bg)}
+  /* "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplicado
+     independente de um card, título a verde escuro para se distinguir
+     sempre à vista dos cards reais. */
+  .blk.buffer .ttText{color:#1B5E20}
   /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
      2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
      touch não há hover, por isso têm de já lá estar para se poderem tocar),
@@ -553,11 +699,31 @@ function fiadasPorEspessura(espMm){
   const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
   return linha ? linha[1] : null;
 }
-function calcularNLotes(qtdWipM3, wipCmpMm, wipEspMm){
+function volumeRealLote(wipCmpMm, wipEspMm){
   const fiadas=fiadasPorEspessura(wipEspMm);
-  if(qtdWipM3==null || wipCmpMm==null || wipEspMm==null || fiadas==null) return null;
-  const volumeLote=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*(wipEspMm/1000);
-  return volumeLote>0 ? Math.round(qtdWipM3/volumeLote) : null;
+  if(wipCmpMm==null || wipEspMm==null || fiadas==null) return null;
+  const v=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*(wipEspMm/1000);
+  return v>0 ? v : null;
+}
+/* inverso de calcularNLotes — usado pelo card "Buffer" (pedido explícito
+   do Rui, 2026-10-04): a partir de um Nº de lotes escrito à mão, calcula
+   QTD Wip/QTD Toros (m³), tal como tools/planeamento_entradas.
+   _calcular_wip_e_toros_de_lotes faz no servidor ao gravar. */
+function calcularWipEToroDeLotes(nLotes, wipCmpMm, wipEspMm, indiceWip, indiceToros){
+  const volumeLote=volumeRealLote(wipCmpMm, wipEspMm);
+  if(nLotes==null || volumeLote==null) return [null,null];
+  const qtdWip=Math.round(nLotes*volumeLote*100)/100;
+  let qtdToros=null;
+  if(indiceWip){
+    const volumeImplicito=qtdWip/indiceWip;
+    qtdToros=indiceToros ? Math.round(volumeImplicito*indiceToros*100)/100 : null;
+  }
+  return [qtdWip, qtdToros];
+}
+function calcularNLotes(qtdWipM3, wipCmpMm, wipEspMm){
+  const volumeLote=volumeRealLote(wipCmpMm, wipEspMm);
+  if(qtdWipM3==null || volumeLote==null) return null;
+  return Math.round(qtdWipM3/volumeLote);
 }
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
@@ -695,7 +861,7 @@ function renderLanes(){
       const linha=linhaPorId.get(e.id);
       const el=document.createElement("div");
       const temCharriot=e.charriots && e.charriots.length>0;
-      el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"");
+      el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"")+(e.buffer?" buffer":"");
       el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
       el.style.borderLeftColor=corProduto(e);
       const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
@@ -963,13 +1129,23 @@ function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.
 function recalcularQtd(it){
   const indiceWip=parseFloat($("#fIndiceWip").value);
   const indiceToros=parseFloat($("#fIndiceToros").value);
-  const qtdWip = (it.volume!=null && !isNaN(indiceWip)) ? Math.round(it.volume*indiceWip*100)/100 : null;
-  $("#fQtdWip").textContent = qtdWip!=null ? qtdWip+" m³" : "—";
-  $("#fQtdToros").textContent = (it.volume!=null && !isNaN(indiceToros)) ? (Math.round(it.volume*indiceToros*100)/100)+" m³" : "—";
   const wipCmp = $("#fWipCmp").value ? parseFloat($("#fWipCmp").value) : null;
   const wipEsp = $("#fWipEsp").value ? parseFloat($("#fWipEsp").value) : null;
   const fiadas = fiadasPorEspessura(wipEsp);
   $("#fFiadas").textContent = fiadas!=null ? fiadas : "—";
+  // card "Buffer" (pedido explícito do Rui, 2026-10-04): o Nº de lotes é
+  // escrito à mão (ver openSheet) — QTD Wip/QTD Toros recalculam-se a
+  // partir dele, ao contrário de um card normal, onde é o oposto.
+  if(it.buffer){
+    const nLotes = $("#fNLotes").value ? parseFloat($("#fNLotes").value) : null;
+    const [qtdWip, qtdToros] = calcularWipEToroDeLotes(nLotes, wipCmp, wipEsp, indiceWip, indiceToros);
+    $("#fQtdWip").textContent = qtdWip!=null ? qtdWip+" m³" : "—";
+    $("#fQtdToros").textContent = qtdToros!=null ? qtdToros+" m³" : "—";
+    return;
+  }
+  const qtdWip = (it.volume!=null && !isNaN(indiceWip)) ? Math.round(it.volume*indiceWip*100)/100 : null;
+  $("#fQtdWip").textContent = qtdWip!=null ? qtdWip+" m³" : "—";
+  $("#fQtdToros").textContent = (it.volume!=null && !isNaN(indiceToros)) ? (Math.round(it.volume*indiceToros*100)/100)+" m³" : "—";
   const nLotes = calcularNLotes(qtdWip, wipCmp, wipEsp);
   $("#fNLotes").textContent = nLotes!=null ? nLotes : "—";
 }
@@ -1008,11 +1184,12 @@ function openSheet(id){
       <input id="fLarguraDias" type="text" inputmode="numeric"
         style="width:70px;flex:0 0 auto" value="${it.larguraDias||1}"></div>
 
+    ${it.buffer ? "" : `
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
     <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
       Marcado: entra no charriot no mesmo dia do início da produção. Desmarcado: entra no dia anterior
-      (ou sábado, se isso cair a domingo).</div>
+      (ou sábado, se isso cair a domingo).</div>`}
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
@@ -1022,7 +1199,9 @@ function openSheet(id){
       <div class="miniField"><label>Fiadas</label><b id="fFiadas" class="mono" style="align-self:center">—</b></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="text" inputmode="decimal" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
-      <div class="miniField"><label>Nº lotes</label><b id="fNLotes" class="mono" style="align-self:center">—</b></div>
+      <div class="miniField"><label>Nº lotes</label>${it.buffer
+        ? `<input id="fNLotes" type="text" inputmode="numeric" style="width:60px" value="${it.nLotes??""}">`
+        : `<b id="fNLotes" class="mono" style="align-self:center">—</b>`}</div>
     </div>
 
     <label class="grupoLbl">Toro</label>
@@ -1048,8 +1227,11 @@ function openSheet(id){
 
     <div class="err" id="fErro"></div>
     <div class="acts" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
-      ${it.url?`<a class="btn" target="_blank" rel="noopener" href="${it.url}">Abrir card no Basecamp</a>`:""}
+      ${it.url?`<a class="btn" target="_blank" rel="noopener" href="${it.url}">Abrir ${it.buffer?"OF de origem":"card"} no Basecamp</a>`:""}
       <button class="btn verde${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
+      ${it.buffer
+        ? `<button class="btn" id="btnApagarBuffer">Apagar Buffer</button>`
+        : `<button class="btn" id="btnFazerBuffer">Fazer Buffer</button>`}
       <button class="btn primary" id="guardar">Guardar</button>
       <button class="btn" id="close">Fechar</button>
     </div>`;
@@ -1069,7 +1251,48 @@ function openSheet(id){
   $("#fIndiceToros").oninput=()=>recalcularQtd(it);
   $("#fWipCmp").onchange=()=>recalcularQtd(it);
   $("#fWipEsp").onchange=()=>recalcularQtd(it);
+  if(it.buffer) $("#fNLotes").oninput=()=>recalcularQtd(it);
   recalcularQtd(it);
+  if(it.buffer){
+    $("#btnApagarBuffer").onclick=async()=>{
+      if(!confirm(`Apagar o card "${it.titulo}"? Não pode ser desfeito.`)) return;
+      try{
+        const r=await fetch("/planeamento-entradas/buffer/apagar",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({id:Math.abs(it.id)})});
+        const d=await r.json();
+        if(d.erro){ $("#fErro").textContent=d.erro; return; }
+        entradas=entradas.filter(e=>e.id!==it.id);
+        log("local",`"${it.titulo}" apagado`);
+        closeSheet();
+        render();
+      }catch(e){ $("#fErro").textContent="Falhou a apagar: "+e; }
+    };
+  }else{
+    $("#btnFazerBuffer").onclick=async()=>{
+      try{
+        const r=await fetch("/planeamento-entradas/buffer/criar",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:it.id})});
+        const d=await r.json();
+        if(d.erro){ $("#fErro").textContent=d.erro; return; }
+        const novo={
+          id:d.basecamp_card_id, titulo:d.titulo, url:d.url, coluna:d.coluna_basecamp,
+          linha:d.linha, dataInicioProducao:d.dia_inicio_producao, volume:d.volume_m3, madeira:d.tipo_madeira, cor:d.cor,
+          gs:idxOf(d.dia_entrada), charriots:d.charriots||[], larguraDias:d.largura_dias||1,
+          produzido:!!d.produzido, emContinuo:!!d.em_continuo,
+          wipCmp:d.wip_cmp, wipLar:d.wip_lar, wipEsp:d.wip_esp,
+          indiceWip:d.indice_wip, qtdWip:d.qtd_wip_m3, nLotes:d.n_lotes,
+          toroCmp:d.toro_cmp, toroTipo:d.toro_tipo,
+          indiceToros:d.indice_toros, qtdToros:d.qtd_toros_m3,
+          buffer:!!d.buffer,
+        };
+        entradas.push(novo);
+        log("local",`"${novo.titulo}" criado a partir de "${it.titulo}"`);
+        closeSheet();
+        render();
+        openSheet(novo.id);
+      }catch(e){ $("#fErro").textContent="Falhou a criar o buffer: "+e; }
+    };
+  }
   $("#guardar").onclick=async()=>{
     $("#fErro").textContent="";
     const wipCmp=$("#fWipCmp").value?parseFloat($("#fWipCmp").value):null;
@@ -1083,9 +1306,26 @@ function openSheet(id){
     if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value||null; }
     else if($("#fToroCmp").value){ toroCmp=$("#fToroCmp").value; }
     const toroTipo=$("#fToroTipo").value||null;
-    const emContinuo=$("#fEmContinuo").checked;
     const charriots=Array.from(document.querySelectorAll(".fCharriot:checked")).map(x=>x.value);
     const larguraDias=Math.max(1,Math.min(LARGURA_DIAS_MAX,parseInt($("#fLarguraDias").value)||1));
+    // card "Buffer" (pedido explícito do Rui, 2026-10-04): grava tudo de
+    // uma vez (não é uma OF real, não há nada para ler de outro lado) —
+    // ver tools/planeamento_entradas.guardar_buffer.
+    if(it.buffer){
+      const nLotes=$("#fNLotes").value?parseFloat($("#fNLotes").value):null;
+      try{
+        const r=await fetch("/planeamento-entradas/buffer/guardar",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({id:Math.abs(it.id),charriots,largura_dias:larguraDias,wip_cmp:wipCmp,wip_esp:wipEsp,
+            indice_wip:indiceWip,n_lotes:nLotes,toro_cmp:toroCmp,toro_tipo:toroTipo,indice_toros:indiceToros})});
+        const d=await r.json();
+        if(d.erro){ $("#fErro").textContent=d.erro; return; }
+        log("local",`dados de "${it.titulo}" guardados`);
+        closeSheet();
+        await carregar();
+      }catch(e){ $("#fErro").textContent="Falhou a guardar: "+e; }
+      return;
+    }
+    const emContinuo=$("#fEmContinuo").checked;
     try{
       if(JSON.stringify(charriots)!==JSON.stringify(it.charriots||[])){
         const r0=await fetch("/planeamento-entradas/atribuir",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -1147,6 +1387,7 @@ async function carregar(){
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3, nLotes:e.n_lotes,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,
       indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
+      buffer:!!e.buffer,
     })).filter(e=>e.gs>=0);
     historico=d.historico||historico;
     FERIADOS=new Set(d.feriados||[]);

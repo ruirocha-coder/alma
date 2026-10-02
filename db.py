@@ -630,6 +630,39 @@ ALTER TABLE entradas_charriot_ecos_largos ALTER COLUMN toro_cmp TYPE TEXT USING 
 -- automático, como sempre foi. Nunca mexe no dia de início da produção
 -- (Planeamento Produção), só no dia mostrado nesta página.
 ALTER TABLE entradas_charriot_ecos_largos ADD COLUMN IF NOT EXISTS dia_entrada_manual DATE;
+
+-- "Fazer Buffer" (pedido explícito do Rui, 2026-10-04, página "Planeamento
+-- de Entradas"): duplica um card existente num novo card independente, que
+-- já não corresponde a nenhuma OF real do Basecamp — por isso precisa do
+-- seu próprio registo (título, linha, cor, dia, charriots, largura visual,
+-- produzido), ao contrário de entradas_charriot_ecos_largos, que só guarda
+-- o que é extra a uma OF real (tudo o resto lê-se sempre dela). O Nº de
+-- lotes passa a ser escrito à mão (n_lotes), em vez de calculado a partir
+-- do volume da OF — QTD Wip/QTD Toros recalculam-se sempre a partir dele
+-- (nunca se guardam, mesma filosofia de entradas_charriot_ecos_largos —
+-- ver tools/planeamento_entradas.dados_buffer). O id é exposto ao
+-- frontend como negativo (-id), para nunca colidir com um basecamp_card_id
+-- real (sempre positivo) no mesmo quadro.
+CREATE TABLE IF NOT EXISTS buffers_entrada_ecos_largos (
+    id SERIAL PRIMARY KEY,
+    basecamp_card_id_origem BIGINT NOT NULL,
+    titulo TEXT NOT NULL,
+    linha TEXT,
+    cor TEXT,
+    dia_entrada DATE,
+    charriots TEXT[],
+    largura_dias_visual INTEGER,
+    produzido BOOLEAN NOT NULL DEFAULT false,
+    wip_cmp NUMERIC,
+    wip_esp NUMERIC,
+    indice_wip NUMERIC,
+    n_lotes NUMERIC,
+    toro_cmp TEXT,
+    toro_tipo TEXT,
+    indice_toros NUMERIC,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1541,6 +1574,132 @@ def definir_em_continuo_entrada(basecamp_card_id: int, em_continuo: bool) -> dic
             )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+
+def buffers_entrada_ecos_largos() -> list[dict]:
+    """Todos os cards "Fazer Buffer" já criados (ver criar_buffer_entrada)
+    — duplicados independentes de um card real, usados pelo Planeamento de
+    Entradas (tools/planeamento_entradas.py) para os juntar aos cards reais
+    no mesmo quadro."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, basecamp_card_id_origem, titulo, linha, cor, dia_entrada, charriots,
+                          largura_dias_visual, produzido, wip_cmp, wip_esp, indice_wip, n_lotes,
+                          toro_cmp, toro_tipo, indice_toros
+                   FROM buffers_entrada_ecos_largos"""
+            )
+            return [{
+                "id": l["id"],
+                "basecamp_card_id_origem": l["basecamp_card_id_origem"],
+                "titulo": l["titulo"],
+                "linha": l["linha"],
+                "cor": l["cor"],
+                "dia_entrada": l["dia_entrada"].isoformat() if l["dia_entrada"] else None,
+                "charriots": l["charriots"] or [],
+                "largura_dias_visual": l["largura_dias_visual"],
+                "produzido": bool(l["produzido"]),
+                "wip_cmp": float(l["wip_cmp"]) if l["wip_cmp"] is not None else None,
+                "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
+                "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
+                "n_lotes": float(l["n_lotes"]) if l["n_lotes"] is not None else None,
+                "toro_cmp": l["toro_cmp"],
+                "toro_tipo": l["toro_tipo"],
+                "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
+            } for l in cur.fetchall()]
+
+def criar_buffer_entrada(basecamp_card_id_origem: int, titulo: str, linha: str, cor: str, dia_entrada: str,
+                         charriots: list, largura_dias_visual: int, wip_cmp: float, wip_esp: float,
+                         indice_wip: float, n_lotes: float, toro_cmp: str, toro_tipo: str,
+                         indice_toros: float) -> int:
+    """Duplica um card da página "Planeamento de Entradas" (botão "Fazer
+    Buffer", pedido explícito do Rui, 2026-10-04) — copia os campos do
+    card de origem, menos o Nº de lotes, que passa a ser escrito à mão a
+    partir daqui. Devolve o id novo (sempre exposto ao frontend como
+    negativo, nunca colide com um basecamp_card_id real)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO buffers_entrada_ecos_largos
+                   (basecamp_card_id_origem, titulo, linha, cor, dia_entrada, charriots, largura_dias_visual,
+                    wip_cmp, wip_esp, indice_wip, n_lotes, toro_cmp, toro_tipo, indice_toros)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (basecamp_card_id_origem, titulo, linha, cor, dia_entrada, charriots or None, largura_dias_visual,
+                 wip_cmp, wip_esp, indice_wip, n_lotes, toro_cmp, toro_tipo, indice_toros)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def guardar_buffer_entrada(id: int, charriots: list = None, largura_dias_visual: int = None,
+                           wip_cmp: float = None, wip_esp: float = None, indice_wip: float = None,
+                           n_lotes: float = None, toro_cmp: str = None, toro_tipo: str = None,
+                           indice_toros: float = None) -> dict:
+    """Atualiza um card "Buffer" já criado — ver criar_buffer_entrada."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE buffers_entrada_ecos_largos SET
+                       charriots = %s, largura_dias_visual = %s, wip_cmp = %s, wip_esp = %s,
+                       indice_wip = %s, n_lotes = %s, toro_cmp = %s, toro_tipo = %s, indice_toros = %s,
+                       atualizado_em = now()
+                   WHERE id = %s""",
+                (charriots or None, largura_dias_visual, wip_cmp, wip_esp, indice_wip, n_lotes,
+                 toro_cmp, toro_tipo, indice_toros, id)
+            )
+        conn.commit()
+    return {"guardado": True, "id": id}
+
+def definir_produzido_buffer(id: int, produzido: bool) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE buffers_entrada_ecos_largos SET produzido = %s, atualizado_em = now() WHERE id = %s",
+                (produzido, id)
+            )
+        conn.commit()
+    return {"guardado": True, "id": id}
+
+def apagar_buffer_entrada(id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM buffers_entrada_ecos_largos WHERE id = %s", (id,))
+        conn.commit()
+    return {"apagado": True, "id": id}
+
+# as três funções seguintes só mudam UM campo de cada vez (ao contrário de
+# guardar_buffer_entrada, que grava a ficha toda) — usadas pelos mesmos
+# gestos de arrastar/alargar/produzido já existentes para um card normal
+# (ver tools/planeamento_entradas.py), agora também válidos num card
+# "Buffer" (pedido explícito do Rui, 2026-10-04).
+def atribuir_charriots_buffer(id: int, charriots: list = None) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE buffers_entrada_ecos_largos SET charriots = %s, atualizado_em = now() WHERE id = %s",
+                (charriots or None, id)
+            )
+        conn.commit()
+    return {"guardado": True, "id": id}
+
+def definir_largura_dias_buffer(id: int, largura_dias: int = None) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE buffers_entrada_ecos_largos SET largura_dias_visual = %s, atualizado_em = now() WHERE id = %s",
+                (largura_dias, id)
+            )
+        conn.commit()
+    return {"guardado": True, "id": id}
+
+def definir_dia_entrada_buffer(id: int, dia_entrada: str = None) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE buffers_entrada_ecos_largos SET dia_entrada = %s, atualizado_em = now() WHERE id = %s",
+                (dia_entrada, id)
+            )
+        conn.commit()
+    return {"guardado": True, "id": id}
 
 def logistica_carregamentos_ecos_largos() -> list[dict]:
     """Todos os duplicados de carregamento/logística — ver
