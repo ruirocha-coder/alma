@@ -247,113 +247,52 @@ def _resolver_data(data_str: str):
         return date.today()
 
 
-def registar_entrada_stream(fotos: list, registado_por: str = None):
-    """Versão em stream de registo de entrada no Park In — a do talão de
-    pesagem (obrigatória, identificada tentando ler cada foto até
-    encontrar uma com talão/produto legíveis) e, idealmente, foto(s) da
-    própria carga de madeira, para a avaliação de qualidade poder ser
-    feita com a mesma informação visual que o chat já usa (só o talão não
-    chega para avaliar o estado da madeira em si). `fotos` é uma lista de
-    (bruto, content_type).
+UTILIZADOR_CHAT_PARKIN = "Balança Ecos Largos"
 
-    Em vez de correr a avaliação de qualidade da mesma MISSÃO usada no
-    chat (agents/qualidade_toros_ecos_largos) em bloco e só mostrar o
-    resultado tudo de uma vez no fim (como esta função fazia antes),
-    agora usa responder_stream e vai devolvendo o relatório a aparecer
-    progressivamente, exatamente como no chat normal — pedido explícito
-    do Rui (2026-10-02): não queria ter de abrir nada para ver o
-    relatório, nem que a avaliação "pareça" demorada por ficar à espera
-    às cegas atrás de um spinner. Import feito aqui dentro (não no topo
-    do módulo) de propósito: mantém tools/ não dependente de agents/ no
-    caminho normal de arranque, só quando mesmo é preciso.
 
-    Gera eventos: {"delta": texto} (pedaço de relatório), {"a_processar":
-    True} (sinal de vida, sem texto novo), {"erro": msg} (falha, pára
-    aqui sem gravar nada), {"done": True, **resultado} (sucesso, já com a
-    entrada gravada)."""
-    if not fotos:
-        yield {"erro": "falta pelo menos uma foto (o talão de pesagem)"}
-        return
+def garantir_perfil_chat_parkin():
+    """Garante que UTILIZADOR_CHAT_PARKIN já tem perfil guardado (upsert
+    idempotente, seguro a chamar sempre no arranque) — sem isto, a
+    primeira mensagem desta identidade cairia no acolhimento (perguntas
+    de boas-vindas) em vez de ir direta ao agente de qualidade de toros,
+    porque main.py só salta o acolhimento depois de perfil_existe() dar
+    True. `empresa="ecos_largos"` é o que faz orchestrator.encaminhar
+    decidir por escolher_agente_ecos_largos, que por sua vez escolhe
+    sempre qualidade_toros_ecos_largos quando a mensagem traz fotos
+    anexadas — exatamente o que o popup "Nova entrada" do Park In faz."""
+    db.guardar_perfil(
+        UTILIZADOR_CHAT_PARKIN, papel="Operador de balança (Park In)",
+        estilo_resposta="direto ao essencial", formato="texto corrido",
+        decisao="recomendação fechada",
+        dificuldades="avaliar a qualidade de cargas de toros a partir do talão de pesagem",
+        empresa="ecos_largos")
 
-    campos = None
-    for bruto, content_type in fotos:
-        tentativa = _extrair_campos_talao(bruto, content_type)
-        if "erro" not in tentativa and tentativa.get("talao") and tentativa.get("produto"):
-            campos = tentativa
-            break
-    if campos is None:
-        yield {"erro": "não consegui reconhecer um talão de pesagem em nenhuma destas fotos"}
-        return
 
-    talao = str(campos.get("talao") or "").strip()
-    if not talao:
-        yield {"erro": "não consegui ler o número do talão nesta foto"}
-        return
-
-    interpretado = _interpretar_produto(campos.get("produto") or "")
-    if interpretado["erro"]:
-        yield {"erro": interpretado["erro"]}
-        return
-
-    peso_liquido = campos.get("peso_liquido_kg")
-    if not peso_liquido:
-        yield {"erro": "não consegui ler o peso líquido neste talão"}
-        return
-
-    fornecedor = (campos.get("fornecedor") or "").strip() or "(fornecedor não identificado)"
-    data_resolvida = _resolver_data(campos.get("data"))
-
-    indice, categoria = None, None
-    avaliacao = db.avaliacao_carga_toros_por_talao(talao)
-    if avaliacao and avaliacao.get("indice_igqc") is not None:
-        indice = float(avaliacao["indice_igqc"])
-        categoria = _categoria_de_indice(indice)
-        if avaliacao.get("avaliacao"):
-            yield {"delta": avaliacao["avaliacao"]}
-    elif avaliacao and avaliacao.get("avaliacao"):
-        # já avaliado antes de indice_igqc existir como coluna — lê a
-        # categoria do texto em vez de reavaliar sem as fotos da madeira
-        # (que não temos aqui, só a foto do talão); guarda o índice
-        # numérico, quando houver, para os próximos lookups não
-        # precisarem de repetir este parsing.
-        indice, categoria = _indice_e_categoria_de_texto(avaliacao["avaliacao"])
-        if indice is not None:
-            db.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
-        yield {"delta": avaliacao["avaliacao"]}
-
-    if categoria is None:
-        from agents import qualidade_toros_ecos_largos
-        transcricoes = [f"[Foto {i}]\n{visao.descrever_imagem(bruto, content_type)}"
-                        for i, (bruto, content_type) in enumerate(fotos, start=1)]
-        contexto = ("[Fotos anexadas, já transcritas abaixo]\n\n" + "\n\n".join(transcricoes)
-                   + f"\n\nNº do talão (já confirmado, usa exatamente este valor): {talao}\n"
-                   + (f"Fornecedor (já confirmado): {fornecedor}\n" if fornecedor else "")
-                   + "\nAvalia a qualidade desta carga de toros.")
-        try:
-            for pedaco in qualidade_toros_ecos_largos.responder_stream(
-                    "Park In (registo automático)", [{"role": "user", "content": contexto}]):
-                yield {"a_processar": True} if pedaco is None else {"delta": pedaco}
-        except Exception as e:
-            print(f"[parkin] falhou a avaliação de qualidade em stream do talão {talao!r}: {e!r}")
-        avaliacao_final = db.avaliacao_carga_toros_por_talao(talao)
-        if avaliacao_final and avaliacao_final.get("indice_igqc") is not None:
-            indice = float(avaliacao_final["indice_igqc"])
-            categoria = _categoria_de_indice(indice)
-
+def registar_entrada_a_partir_de_avaliacao(talao: str, fornecedor: str, data_carga: str,
+                                           tipo: str, comprimento: float, espessura: str,
+                                           peso_liquido_kg: float, matricula: str = None,
+                                           guia_req: str = None, peso_bruto_kg: float = None,
+                                           tara_kg: float = None, indice_igqc: float = None,
+                                           registado_por: str = None) -> dict:
+    """Regista uma entrada no Park In diretamente a partir dos campos já
+    extraídos por uma avaliação de qualidade concluída (ver
+    tools/ecos_largos.guardar_avaliacao_carga_toros, chamada
+    automaticamente de lá) — ao contrário do antigo fluxo de "Nova
+    entrada" do Park In, não lê nenhuma foto aqui: os valores já vêm
+    todos prontos da avaliação, que usa a mesma missão/ferramentas do
+    chat normal (agora também o próprio popup "Nova entrada" do Park In,
+    pedido explícito do Rui, 2026-10-02). Nunca duplica: se este talão já
+    tiver uma entrada registada, não faz nada (devolve ok=False)."""
+    if talao in db.talaoes_parkin_existentes():
+        return {"ok": False, "motivo": f"já existe uma entrada no Park In para o talão {talao}"}
+    categoria = _categoria_de_indice(indice_igqc) if indice_igqc is not None else None
     id_gerado = db.guardar_entrada_parkin(
-        talao=talao, fornecedor=fornecedor, data=data_resolvida,
-        tipo=interpretado["tipo"], comprimento=interpretado["comprimento"], espessura=interpretado["espessura"],
-        peso_liquido_kg=float(peso_liquido), matricula=campos.get("matricula"), guia_req=campos.get("guia_req"),
-        peso_bruto_kg=campos.get("peso_bruto_kg"), tara_kg=campos.get("tara_kg"),
-        indice_igqc=indice, categoria_qualidade=categoria, registado_por=registado_por)
-
-    resultado = {"ok": True, "id": id_gerado, "talao": talao, "fornecedor": fornecedor,
-                "artigo": _chave_artigo(interpretado["tipo"], interpretado["comprimento"], interpretado["espessura"]),
-                "peso_liquido_kg": float(peso_liquido), "indice_igqc": indice, "categoria_qualidade": categoria}
-    if categoria is None:
-        resultado["aviso"] = ("a entrada ficou registada, mas ainda sem categoria de qualidade — não foi "
-                              "possível avaliar esta carga automaticamente")
-    yield {"done": True, **resultado}
+        talao=talao, fornecedor=fornecedor, data=_resolver_data(data_carga),
+        tipo=tipo, comprimento=comprimento, espessura=espessura,
+        peso_liquido_kg=float(peso_liquido_kg), matricula=matricula, guia_req=guia_req,
+        peso_bruto_kg=peso_bruto_kg, tara_kg=tara_kg,
+        indice_igqc=indice_igqc, categoria_qualidade=categoria, registado_por=registado_por)
+    return {"ok": True, "id": id_gerado, "talao": talao, "categoria_qualidade": categoria}
 
 
 _RE_PRODUTO_LINHA = re.compile(r"Produto:\**\s*([^\n]+)", re.IGNORECASE)
@@ -813,14 +752,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="veil" id="veil"></div>
 
-<div class="sheet" id="sheetEntrada">
+<div class="sheet" id="sheetEntrada" style="width:min(560px,calc(100vw - 32px));display:flex;flex-direction:column;max-height:min(680px,calc(100vh - 32px))">
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Nova entrada</h3>
-  <p class="sub" style="margin:0 0 12px">Foto do talão de pesagem da balança, e também fotos da própria carga (necessárias para avaliar a qualidade) — escolhe todas de uma vez.</p>
-  <input type="file" id="fEntradaFotos" accept="image/*" multiple>
-  <div class="acts">
-    <button class="btn" data-close>Cancelar</button>
-    <button class="btn primary" id="bEntradaGuardar">Guardar</button>
+  <p class="sub" style="margin:0 0 10px">É mesmo a Alma, tal como no chat — anexa a foto do talão de pesagem e da própria carga (uma de cada vez ou várias juntas) e envia.</p>
+  <div id="entradaChat" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;min-height:100px"></div>
+  <div id="entradaAnexos" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+    <input type="file" id="fEntradaFotos" accept="image/*" multiple style="display:none">
+    <input type="file" id="fEntradaCamera" accept="image/*" capture="environment" style="display:none">
+    <button class="btn" type="button" id="bEntradaAnexar" title="Escolher fotos" style="padding:8px 12px">📎</button>
+    <button class="btn" type="button" id="bEntradaCamera" title="Tirar foto" style="padding:8px 12px">📷</button>
+    <input type="text" id="entradaTexto" placeholder="(opcional) alguma nota…" style="flex:1;min-width:0">
+    <button class="btn primary" id="bEntradaGuardar">Enviar</button>
   </div>
   <div id="entradaMsg"></div>
 </div>
@@ -1008,7 +952,47 @@ function fecharSheets(){ $("#veil").classList.remove("on");
 $("#veil").onclick = fecharSheets;
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = fecharSheets);
 
-$("#bAbrirEntrada").onclick = () => { $("#entradaMsg").innerHTML=""; $("#fEntradaFotos").value=""; abrirSheet("#sheetEntrada"); };
+let entradaAnexos = [];
+let entradaSessao = null;
+function renderEntradaAnexos(){
+  $("#entradaAnexos").innerHTML = "";
+  entradaAnexos.forEach((f, i) => {
+    const chip = document.createElement("div");
+    chip.style.cssText = "display:flex;align-items:center;gap:4px;background:#f1f1f1;border-radius:14px;padding:4px 8px;font-size:13px";
+    chip.innerHTML = `<span>📎 ${f.name}</span>`;
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.textContent = "✕"; rm.style.cssText = "border:none;background:none;cursor:pointer";
+    rm.onclick = () => { entradaAnexos.splice(i,1); renderEntradaAnexos(); };
+    chip.appendChild(rm);
+    $("#entradaAnexos").appendChild(chip);
+  });
+}
+function receberFotosEntrada(lista, input){
+  for(const f of lista) entradaAnexos.push(f);
+  input.value = "";
+  renderEntradaAnexos();
+}
+$("#bEntradaAnexar").onclick = () => $("#fEntradaFotos").click();
+$("#bEntradaCamera").onclick = () => $("#fEntradaCamera").click();
+$("#fEntradaFotos").addEventListener("change", () => receberFotosEntrada($("#fEntradaFotos").files, $("#fEntradaFotos")));
+$("#fEntradaCamera").addEventListener("change", () => receberFotosEntrada($("#fEntradaCamera").files, $("#fEntradaCamera")));
+
+function bolhaEntrada(papel){
+  const b = document.createElement("div");
+  b.style.cssText = papel === "user"
+    ? "align-self:flex-end;background:#eef2ff;border-radius:12px;padding:8px 12px;max-width:85%;white-space:pre-wrap"
+    : "align-self:flex-start;background:#f5f5f5;border-radius:12px;padding:8px 12px;max-width:95%;white-space:pre-wrap";
+  $("#entradaChat").appendChild(b);
+  $("#entradaChat").scrollTop = $("#entradaChat").scrollHeight;
+  return b;
+}
+
+$("#bAbrirEntrada").onclick = () => {
+  $("#entradaMsg").innerHTML = ""; $("#entradaChat").innerHTML = ""; $("#entradaTexto").value = "";
+  entradaAnexos = []; entradaSessao = "park-in-" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+  renderEntradaAnexos();
+  abrirSheet("#sheetEntrada");
+};
 $("#bAbrirSaida").onclick = () => { $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value=""; abrirSheet("#sheetSaida"); };
 $("#bAbrirCorrecao").onclick = () => { $("#correcaoMsg").innerHTML=""; abrirSheet("#sheetCorrecao"); };
 $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites"); };
@@ -1020,19 +1004,25 @@ $("#cQuantidade").addEventListener("input", () => {
 });
 
 $("#bEntradaGuardar").onclick = async () => {
-  const fs = $("#fEntradaFotos").files;
-  if(!fs.length){ $("#entradaMsg").innerHTML = '<div class="err">Escolhe a foto do talão e da carga.</div>'; return; }
+  if(!entradaAnexos.length){ $("#entradaMsg").innerHTML = '<div class="err">Anexa pelo menos a foto do talão.</div>'; return; }
+  const texto = $("#entradaTexto").value;
+  $("#entradaMsg").innerHTML = "";
   $("#bEntradaGuardar").disabled = true;
-  $("#entradaMsg").innerHTML = '<div class="sub" id="entradaEstado">A ler o talão…</div>'+
-    '<div id="entradaRelatorio" class="sub" style="white-space:pre-wrap;margin-top:8px"></div>';
-  const estadoEl = $("#entradaEstado"), relatorioEl = $("#entradaRelatorio");
+
+  const userBolha = bolhaEntrada("user");
+  userBolha.textContent = (texto ? texto + "\n" : "") + entradaAnexos.map(f => "📎 " + f.name).join("\n");
+
   const fd = new FormData();
-  for(const f of fs) fd.append("ficheiros", f);
-  let texto = "";
+  fd.append("mensagem", texto); fd.append("sessao", entradaSessao);
+  for(const f of entradaAnexos) fd.append("ficheiros", f);
+  entradaAnexos = []; $("#entradaTexto").value = ""; renderEntradaAnexos();
+
   // consome a resposta por SSE tal como o chat normal (ver static/index.html,
-  // consumirStreamSSE) — o relatório de qualidade vai aparecendo a ser
-  // escrito em vez de ficar à espera às cegas atrás de um spinner até
-  // estar tudo pronto (pedido explícito do Rui, 2026-10-02).
+  // consumirStreamSSE) — é mesmo o chat da Alma, com a mesma missão de
+  // avaliação de qualidade, só com a identidade fixa "Balança Ecos Largos"
+  // (ver tools/parkin.UTILIZADOR_CHAT_PARKIN) — pedido explícito do Rui
+  // (2026-10-02).
+  let assistenteBolha = null, texto2 = "";
   try{
     const r = await fetch("/park-in/entrada", {method:"POST", body:fd});
     const reader = r.body.getReader();
@@ -1049,22 +1039,15 @@ $("#bEntradaGuardar").onclick = async () => {
         let dados;
         try{ dados = JSON.parse(linha.slice(6)); } catch(_) { continue; }
         if(dados.delta){
-          estadoEl.style.display = "none";
-          texto += dados.delta;
-          relatorioEl.textContent = texto;
+          if(!assistenteBolha) assistenteBolha = bolhaEntrada("assistant");
+          texto2 += dados.delta;
+          assistenteBolha.textContent = texto2;
+          $("#entradaChat").scrollTop = $("#entradaChat").scrollHeight;
         } else if(dados.a_processar){
-          estadoEl.style.display = "";
-          estadoEl.textContent = "A avaliar a qualidade…";
+          if(!assistenteBolha){ assistenteBolha = bolhaEntrada("assistant"); assistenteBolha.textContent = "a escrever…"; }
         } else if(dados.erro){
           $("#entradaMsg").innerHTML = `<div class="err">${dados.erro}</div>`;
         } else if(dados.done){
-          estadoEl.remove();
-          const resumo = document.createElement("div");
-          resumo.className = "ok";
-          if(texto) resumo.style.marginTop = "8px";
-          resumo.innerHTML = `Registado: talão ${dados.talao}, ${t(dados.peso_liquido_kg)}, `+
-            `categoria ${dados.categoria_qualidade||"(por avaliar)"}.${dados.aviso ? ` ${dados.aviso}.` : ""}`;
-          $("#entradaMsg").appendChild(resumo);
           carregar();
         }
       }

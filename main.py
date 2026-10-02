@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import asyncio, json, os, queue
+import asyncio, json, os, queue, uuid
 import threading
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Body
@@ -24,6 +24,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
 from db import inicializar_schema
 inicializar_schema()
+parkin.garantir_perfil_chat_parkin()
 
 app = FastAPI(title="ALMA")
 
@@ -915,35 +916,31 @@ def park_in_dados(dias_top_entradas: int = 30):
     top entradas — ver tools/parkin.dados_dashboard."""
     return parkin.dados_dashboard(dias_top_entradas)
 
-def _fluxo_entrada_parkin(fotos: list, registado_por: str, erro_tamanho: str):
-    """Generator SSE do registo de entrada no Park In — mesmo formato de
-    eventos que _fluxo_resposta_agente (delta/a_processar/erro), mais um
-    evento final "done" com os dados da entrada já gravada (ver
-    tools/parkin.registar_entrada_stream). Pedido explícito do Rui
-    (2026-10-02): o relatório de qualidade deve aparecer a ir sendo
-    escrito, tal como no chat normal, em vez de ficar à espera às cegas
-    atrás de um spinner até estar tudo pronto."""
-    if erro_tamanho:
-        yield f"data: {json.dumps({'erro': erro_tamanho}, ensure_ascii=False)}\n\n"
-        return
-    for evento in parkin.registar_entrada_stream(fotos, registado_por):
-        yield f"data: {json.dumps(evento, ensure_ascii=False)}\n\n"
-
 @app.post("/park-in/entrada")
-async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
+async def park_in_entrada(mensagem: str = Form(""), sessao: str = Form(None),
+                          ficheiros: list[UploadFile] = File(...)):
     """Regista uma entrada a partir de uma ou mais fotos (o talão de
     pesagem, e idealmente também foto(s) da própria carga, necessárias
-    para a avaliação de qualidade), por SSE — ver _fluxo_entrada_parkin."""
-    fotos = []
-    erro_tamanho = None
-    for ficheiro in ficheiros:
-        bruto = await ficheiro.read()
-        if len(bruto) > 15 * 1024 * 1024:
-            erro_tamanho = f"ficheiro demasiado grande (máx. 15 MB): {ficheiro.filename}"
-            break
-        fotos.append((bruto, ficheiro.content_type))
+    para a avaliação de qualidade). O popup "Nova entrada" do Park In é
+    agora mesmo o chat da Alma (pedido explícito do Rui, 2026-10-02): usa
+    a mesma _fluxo_resposta_agente/missão do chat normal (ver
+    /alma/ficheiro), só com uma identidade fixa
+    (parkin.UTILIZADOR_CHAT_PARKIN, já com perfil associado à Ecos Largos
+    — ver parkin.garantir_perfil_chat_parkin) para o encaminhamento ir
+    sempre direto ao agente de qualidade de toros, sem pedir nome nem
+    passar pelo acolhimento. A entrada só fica mesmo registada no stock
+    se a avaliação conseguir extrair todos os campos necessários do
+    talão — ver tools/ecos_largos.guardar_avaliacao_carga_toros, que
+    regista automaticamente."""
+    nomes = [ficheiro.filename for ficheiro in ficheiros]
+    partes = await asyncio.gather(*(_processar_ficheiro_anexado(f) for f in ficheiros))
+    mensagem_visivel = "\n".join(f"📎 {nome}" for nome in nomes) + (f"\n{mensagem}" if mensagem else "")
+    mensagem_agente = ((mensagem or "Avalia a qualidade desta carga de toros e regista a entrada.")
+                       + "\n\n" + "\n\n---\n\n".join(partes))
+    sessao = sessao or f"park-in-{uuid.uuid4().hex[:12]}"
     return StreamingResponse(
-        _fluxo_entrada_parkin(fotos, utilizador or None, erro_tamanho),
+        _fluxo_resposta_agente(parkin.UTILIZADOR_CHAT_PARKIN, sessao, mensagem_agente,
+                               mensagem_visivel, tem_anexos=True),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )

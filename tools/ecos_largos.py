@@ -480,7 +480,10 @@ TOOLS_MANUAL_QUALIDADE_TOROS = [
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: str = None,
                                   data_carga: str = None, talao: str = None,
                                   indice_igqc: float = None, tipo: str = None,
-                                  comprimento: float = None, espessura: str = None) -> dict:
+                                  comprimento: float = None, espessura: str = None,
+                                  peso_liquido_kg: float = None, matricula: str = None,
+                                  guia_req: str = None, peso_bruto_kg: float = None,
+                                  tara_kg: float = None) -> dict:
     """Guarda o registo de uma avaliação de qualidade de uma carga de
     toros, associado ao ano corrente — fica disponível para perguntas
     futuras (em qualquer conversa) sobre o histórico de avaliações, e
@@ -502,7 +505,19 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     perder esta informação (histórico anterior a isto ficou sem ela,
     porque o resumo de qualidade não a preservava de forma fiável). É o
     que o Park In (gestão de stock de toros) usa para classificar/somar
-    uma carga pelo número do talão, sem ter de analisar texto livre."""
+    uma carga pelo número do talão, sem ter de analisar texto livre.
+
+    `peso_liquido_kg`/`matricula`/`guia_req`/`peso_bruto_kg`/`tara_kg` são
+    os restantes campos do talão de pesagem — pedido explícito do Rui
+    (2026-10-02): com `fornecedor`, `talao`, `tipo`, `comprimento`,
+    `espessura` e `peso_liquido_kg` todos presentes, esta função regista
+    AUTOMATICAMENTE a entrada correspondente no Park In (stock de toros),
+    tal como se tivesse vindo do próprio botão "Entrada" dessa página —
+    o popup "Nova entrada" do Park In é agora mesmo este chat, por isso
+    toda avaliação feita a partir dali (ou do chat normal, ou do
+    WhatsApp) tem de alimentar o stock sozinha, sem nenhum passo manual
+    extra. Nunca duplica (ver tools/parkin.registar_entrada_a_partir_de_
+    avaliacao) — se o talão já tiver uma entrada registada, não faz nada."""
     ano = date.today().year
     # coerção defensiva: o schema da tool já pede strings, mas o modelo por
     # vezes devolve um número (ex: quantidade=11850) — psycopg não converte
@@ -524,15 +539,42 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     espessura = str(espessura).strip().lower() if espessura else None
     if espessura not in ("normal", "fina"):
         espessura = None
+    try:
+        peso_liquido_kg = float(peso_liquido_kg) if peso_liquido_kg is not None else None
+    except (TypeError, ValueError):
+        peso_liquido_kg = None
+    try:
+        peso_bruto_kg = float(peso_bruto_kg) if peso_bruto_kg is not None else None
+    except (TypeError, ValueError):
+        peso_bruto_kg = None
+    try:
+        tara_kg = float(tara_kg) if tara_kg is not None else None
+    except (TypeError, ValueError):
+        tara_kg = None
+    fornecedor = str(fornecedor) if fornecedor else "(fornecedor não identificado)"
+    talao = str(talao) if talao is not None else None
     db.guardar_avaliacao_carga_toros(
-        str(fornecedor) if fornecedor else "(fornecedor não identificado)",
-        str(avaliacao), ano,
+        fornecedor, str(avaliacao), ano,
         quantidade=str(quantidade) if quantidade is not None else None,
         data_carga=str(data_carga) if data_carga is not None else None,
-        talao=str(talao) if talao is not None else None,
-        indice_igqc=indice_igqc, tipo=tipo, comprimento=comprimento, espessura=espessura)
+        talao=talao, indice_igqc=indice_igqc, tipo=tipo, comprimento=comprimento, espessura=espessura)
     print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano} "
          f"indice_igqc={indice_igqc!r} tipo={tipo!r} comprimento={comprimento!r} espessura={espessura!r}")
+
+    if talao and fornecedor and tipo and comprimento is not None and espessura and peso_liquido_kg:
+        from tools import parkin
+        try:
+            resultado_parkin = parkin.registar_entrada_a_partir_de_avaliacao(
+                talao=talao, fornecedor=fornecedor, data_carga=data_carga,
+                tipo=tipo, comprimento=comprimento, espessura=espessura,
+                peso_liquido_kg=peso_liquido_kg, matricula=str(matricula) if matricula else None,
+                guia_req=str(guia_req) if guia_req else None,
+                peso_bruto_kg=peso_bruto_kg, tara_kg=tara_kg, indice_igqc=indice_igqc,
+                registado_por=f"avaliação de qualidade ({fornecedor})")
+            print(f"[ecos_largos] Park In: {resultado_parkin}")
+        except Exception as e:
+            print(f"[ecos_largos] falhou o registo automático no Park In: {e!r}")
+
     return {"guardado": True, "ano": ano}
 
 def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> dict:
@@ -557,7 +599,7 @@ def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> d
 TOOLS_AVALIACOES_CARGAS_TOROS = [
     {
         "name": "guardar_avaliacao_carga_toros",
-        "description": "Guarda o registo de uma avaliação de qualidade de uma carga de toros, associado ao ano corrente — usa isto sempre que terminares uma avaliação de qualidade de uma carga de toros. O texto que escreveres no campo `avaliacao` é transmitido automaticamente, tal e qual, à pessoa (não precisas de o repetir separadamente na tua resposta) — por isso escreve ali a avaliação DETALHADA completa (critério a critério, com a tabela \"Cálculo do IGQC\", a classificação final, e a recomendação), nunca um resumo curto.",
+        "description": "Guarda o registo de uma avaliação de qualidade de uma carga de toros, associado ao ano corrente — usa isto sempre que terminares uma avaliação de qualidade de uma carga de toros. O texto que escreveres no campo `avaliacao` é transmitido automaticamente, tal e qual, à pessoa (não precisas de o repetir separadamente na tua resposta) — por isso escreve ali a avaliação DETALHADA completa (critério a critério, com a tabela \"Cálculo do IGQC\", a classificação final, e a recomendação), nunca um resumo curto. Com fornecedor/talão/tipo/comprimento/espessura/peso_liquido_kg todos presentes, esta tool regista também automaticamente a entrada correspondente no stock do Park In — passa sempre todos os campos do talão que conseguires ler, mesmo que pareçam secundários para a avaliação em si.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -569,7 +611,12 @@ TOOLS_AVALIACOES_CARGAS_TOROS = [
                 "indice_igqc": {"type": "number", "description": "a percentagem final do IGQC (0-100) calculada no passo 3 da avaliação — passa-a sempre que a avaliação chegar a esse passo, como número, mesmo já estando também escrita dentro do texto de `avaliacao`"},
                 "tipo": {"type": "string", "enum": ["IN", "MT"], "description": "o código do tipo de produto do talão (normalmente logo a seguir ao nº do produto, ex: \"006-IN\" -> \"IN\") — passa sempre que estiver legível no talão"},
                 "comprimento": {"type": "number", "description": "o comprimento em metros do campo \"Produto\" do talão (ex: \"MADEIRA PINHO 2,35\" -> 2.35) — passa sempre que estiver legível no talão"},
-                "espessura": {"type": "string", "enum": ["normal", "fina"], "description": "\"fina\" se o campo \"Produto\" do talão tiver o sufixo \"ACIMA\" (ex: \"16 ACIMA\"), senão \"normal\" — passa sempre que o talão tiver essa indicação"}
+                "espessura": {"type": "string", "enum": ["normal", "fina"], "description": "\"fina\" se o campo \"Produto\" do talão tiver o sufixo \"ACIMA\" (ex: \"16 ACIMA\"), senão \"normal\" — passa sempre que o talão tiver essa indicação"},
+                "peso_liquido_kg": {"type": "number", "description": "o peso líquido do talão, em kg (ex: \"Peso líquido: 43.150 kg\" -> 43150) — passa sempre que estiver legível no talão; é o que o Park In usa como quantidade desta entrada"},
+                "matricula": {"type": "string", "description": "a matrícula do veículo no talão, se estiver legível"},
+                "guia_req": {"type": "string", "description": "o número da guia/requisição no talão, se estiver legível"},
+                "peso_bruto_kg": {"type": "number", "description": "o peso bruto do talão, em kg, se estiver legível"},
+                "tara_kg": {"type": "number", "description": "a tara do talão, em kg, se estiver legível"}
             },
             "required": ["fornecedor", "avaliacao"]
         }

@@ -168,6 +168,17 @@ o texto que a pessoa escreveu:
   - comprimento: o número em metros a seguir a "MADEIRA PINHO" (ex: "2,35").
   - espessura: "fina" se tiver o sufixo "ACIMA" (ex: "16 ACIMA"), senão
     "normal" — nunca "fina" sem esse sufixo estar mesmo presente.
+- peso_liquido_kg, matricula, guia_req, peso_bruto_kg, tara_kg: os
+  restantes campos do talão de pesagem (normalmente no mesmo cabeçalho
+  que já lês para "Data"/"Entrada"/"Saída"/"Produto") — passa sempre que
+  estiverem legíveis, mesmo não sendo usados diretamente na avaliação em
+  si. Com fornecedor + talao + tipo + comprimento + espessura +
+  peso_liquido_kg todos presentes, guardar_avaliacao_carga_toros regista
+  AUTOMATICAMENTE a entrada desta carga no Park In (stock de toros) — o
+  popup "Nova entrada" dessa página é agora mesmo esta conversa, por
+  isso uma avaliação feita a partir dali só fica completa quando estes
+  campos lá chegam todos; sem o peso_liquido_kg, por exemplo, a entrada
+  não chega a ficar registada, mesmo com a avaliação em si correta.
 Só deixes um campo de fora se o tiveres mesmo procurado (na mensagem E em
 todas as fotos/transcrições) e não estiver em lado nenhum — não inventes
 valores, mas também não desistas cedo demais só porque a pessoa não os
