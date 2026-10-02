@@ -22,7 +22,7 @@ import time
 import unicodedata
 from datetime import date, timedelta
 import db
-from tools import basecamp
+from tools import basecamp, ecos_largos
 from tools.tempo import dia_da_semana
 
 PROJETO = "Ecos Largos"
@@ -505,6 +505,113 @@ def _ocupacao_diaria(linha: str, antes_de: tuple = None, excluir_id: int = None,
         for dia, valor in alocacao.items():
             ocupacao[dia] = ocupacao.get(dia, 0) + valor
     return ocupacao
+
+def _semana_producao_de(referencia: date) -> tuple:
+    """Segunda a sábado da semana que contém `referencia` — domingo fica de
+    fora, porque nenhuma linha produz nesse dia (ver _repartir_greedy).
+    Diferente de ecos_largos._semana_de (segunda a sexta, usada só para o
+    dashboard de produção REAL): o quadro de planeamento já conta o
+    sábado como dia útil desde 2026-10-03, por isso a semana "planeada"
+    tem sempre 6 dias, nunca 5."""
+    inicio = referencia - timedelta(days=referencia.weekday())
+    return inicio, inicio + timedelta(days=5)
+
+def _resolver_periodo_planeamento(periodo: str):
+    """Mesmas expressões de período que ecos_largos._resolver_intervalo
+    ("esta_semana", "semana_passada", "este_mes", "junho", etc.), mas com
+    a semana a ir até sábado em vez de sexta (ver _semana_producao_de) —
+    delega em ecos_largos._resolver_intervalo para tudo o resto (meses),
+    que não têm essa diferença."""
+    termo = periodo.strip().lower().replace(" de ", " ").replace(" ", "_")
+    hoje = date.today()
+    if termo == "esta_semana":
+        return _semana_producao_de(hoje)
+    if termo == "semana_passada":
+        return _semana_producao_de(hoje - timedelta(days=7))
+    if termo == "proxima_semana":
+        return _semana_producao_de(hoje + timedelta(days=7))
+    return ecos_largos._resolver_intervalo(periodo)
+
+def resumo_producao_planeada(periodo: str = "esta_semana") -> dict:
+    """Soma os m³ PLANEADOS (agendados no quadro de produção — ver
+    estado_planeamento_serracao) por linha e no total, num período. Usa
+    isto sempre que perguntarem quantos m³ estão planeados/agendados para
+    produzir (ex: "esta semana", "semana passada") — nunca
+    dashboard_producao_ecos_largos/dashboard_producao_ecos_largos_intervalo
+    para isso: esses leem o que já saiu mesmo da linha (produção REAL),
+    não o que está agendado para sair. Pedido explícito do Rui
+    (2026-10-02): antes desta ferramenta, uma pergunta sobre m³
+    "planeados" ia sempre parar ao dashboard de produção real, por
+    engano.
+
+    `periodo` aceita "esta_semana" (omissão), "semana_passada",
+    "proxima_semana", "este_mes", "mes_passado", ou o nome de um mês
+    ("junho", "junho de 2026") — tal como em ler_dashboard_producao_intervalo,
+    resolvido sempre aqui em código, nunca calculado por ti.
+
+    Reparte sempre dia a dia pela mesma lógica greedy usada para desenhar
+    o próprio quadro (_ocupacao_diaria) — nunca um cálculo simples de
+    "volume ÷ duração": uma OF que atravesse a fronteira do período só
+    conta os m³ que caem mesmo dentro dele."""
+    inicio, fim = _resolver_periodo_planeamento(periodo)
+    if inicio is None:
+        return {"erro": f"não reconheço o período {periodo!r}"}
+
+    dias_periodo = []
+    d = inicio
+    while d <= fim:
+        dias_periodo.append(d.isoformat())
+        d += timedelta(days=1)
+
+    ids_ativos = {c["id"] for c in _cards_of_ativos()}
+    m3_por_linha = {}
+    total = 0.0
+    tem_of_sem_volume = False
+    for linha in LINHAS:
+        ocupacao = _ocupacao_diaria(linha, ids_ativos=ids_ativos)
+        soma = 0.0
+        for dia in dias_periodo:
+            valor = ocupacao.get(dia, 0)
+            if valor == float("inf"):
+                tem_of_sem_volume = True
+                continue
+            soma += valor
+        m3_por_linha[linha] = round(soma, 1)
+        total += soma
+
+    resultado = {
+        "periodo": periodo, "inicio": inicio.isoformat(), "fim": fim.isoformat(),
+        "m3_planeados_por_linha": m3_por_linha,
+        "m3_planeados_total": round(total, 1),
+    }
+    if tem_of_sem_volume:
+        resultado["aviso"] = ("há pelo menos uma OF agendada neste período sem volume (m³) definido — "
+                              "o total pode estar incompleto")
+    return resultado
+
+TOOLS_PLANEAMENTO_PRODUCAO = [
+    {
+        "name": "resumo_producao_planeada",
+        "description": (
+            "Soma os m³ PLANEADOS/AGENDADOS (o que está previsto no quadro de planeamento de produção "
+            "da Ecos Largos, ainda para acontecer) por linha e no total, num período — nunca o que já "
+            "foi produzido de facto (para isso usa dashboard_producao_ecos_largos/_intervalo, uma fonte "
+            "completamente diferente). Usa isto sempre que perguntarem quantos m³ estão "
+            "planeados/agendados/previstos para produzir (ex: \"quantos m3 estão planeados para esta "
+            "semana\"). `periodo` aceita \"esta_semana\" (omissão), \"semana_passada\", "
+            "\"proxima_semana\", \"este_mes\", \"mes_passado\", ou o nome de um mês (\"junho\", \"junho "
+            "de 2026\") — resolvido sempre em código, nunca calculado por ti."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "periodo": {"type": "string",
+                           "description": "\"esta_semana\" (omissão), \"semana_passada\", \"proxima_semana\", \"este_mes\", \"mes_passado\", ou o nome de um mês"}
+            },
+            "required": []
+        }
+    }
+]
 
 def _prioridade(dia_inicio: str, basecamp_card_id: int = None) -> tuple:
     """Chave de prioridade (dia_inicio, basecamp_card_id) para desempate de

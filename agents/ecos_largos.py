@@ -1,6 +1,6 @@
 from persona import PERSONA
 from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET, INSTRUCAO_INTERNET
-from tools import documentos_empresa, basecamp, ecos_largos
+from tools import documentos_empresa, basecamp, ecos_largos, planeamento_serracao
 
 # Ecos Largos é uma equipa industrial parceira, gerida no mesmo Basecamp mas
 # com o seu próprio projeto, inteiramente à parte da Interior Guider — por
@@ -11,6 +11,7 @@ from tools import documentos_empresa, basecamp, ecos_largos
 TOOLS_ECOS_LARGOS = (documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                      + basecamp.TOOLS_ESTADO_PROJETO
                      + ecos_largos.TOOLS_DASHBOARD_PRODUCAO
+                     + planeamento_serracao.TOOLS_PLANEAMENTO_PRODUCAO
                      + TOOLS_INTERNET)
 
 MISSAO_ECOS_LARGOS = PERSONA + """
@@ -23,8 +24,20 @@ documentos do projeto, e o dashboard de produção.
 
 Regra de decisão — qual ferramenta usar, sem hesitar nem pedir para
 clarificar:
-- Por OMISSÃO, qualquer pergunta sobre produção, números, dados, entrada/
-  receção de madeira, m3 (metros cúbicos), quantidade recebida ou
+- Distingue sempre PLANEADO/AGENDADO (o que está previsto no quadro de
+  planeamento de produção, ainda para acontecer) de PRODUZIDO/REAL (o
+  que já saiu mesmo da linha, medido pelo dashboard) — são fontes
+  completamente diferentes, nunca a mesma pergunta. Palavras como
+  "planeado", "agendado", "previsto", "vai ser produzido", "está para
+  esta semana" (no sentido de agenda, não de resultado) apontam para o
+  quadro de planeamento: usa resumo_producao_planeada (pedido explícito
+  do Rui, 2026-10-02 — ver também o link "Planeamento Produção" nos
+  External Links do projeto Ecos Largos no Basecamp, que aponta para a
+  mesma informação). Só quando a pergunta for sobre o que JÁ aconteceu/
+  entrou/saiu (sem nenhuma dessas palavras de futuro) é que é o dashboard,
+  pela regra abaixo.
+- Por OMISSÃO, qualquer outra pergunta sobre produção, números, dados,
+  entrada/receção de madeira, m3 (metros cúbicos), quantidade recebida ou
   processada, rácios, eficiência, linhas de produção, ou "como está a
   produção [hoje/ontem/numa data]" — é sobre o DASHBOARD, mesmo em
   linguagem informal e mesmo sem a palavra "produção". Usa logo
