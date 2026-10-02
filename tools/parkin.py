@@ -472,7 +472,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .board h2{font-size:15px;font-weight:700;margin:0 0 14px}
   .board h2 .nota{font-weight:400;font-size:11.5px;color:var(--dim)}
 
-  .gauge{position:relative;height:28px;background:var(--canvas);border-radius:7px;overflow:visible;margin:10px 0 6px}
+  .gauge{position:relative;height:28px;background:var(--canvas);border-radius:7px;overflow:visible;margin:22px 0 6px}
   .gauge .fill{position:absolute;top:0;left:0;height:100%;display:flex;border-radius:7px;overflow:hidden;transition:width .3s}
   .gauge .seg{height:100%}
   .gauge .lim{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);z-index:2}
