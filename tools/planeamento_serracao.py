@@ -1910,7 +1910,11 @@ function step(dir){
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
     view.len=MASTER.filter(x=>x.mo===d.mo && x.y===d.y).length;
   }else{
-    view.start=clamp(view.start+dir*view.len,INICIO_MIN_SEMANA,Math.max(MASTER.length-view.len,0));
+    // pedido explícito do Rui (2026-10-04): as setas avançam/recuam
+    // sempre uma semana de cada vez (7 dias), mesmo em "Duas semanas" —
+    // nunca o tamanho da janela (view.len), que em "Duas semanas" são 14
+    // dias, o que saltava duas semanas de cada vez em vez de uma.
+    view.start=clamp(view.start+dir*7,INICIO_MIN_SEMANA,Math.max(MASTER.length-view.len,0));
   }
   limparAlinhamento(); render();
 }
