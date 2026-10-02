@@ -916,15 +916,20 @@ def park_in_dados(dias_top_entradas: int = 30):
     return parkin.dados_dashboard(dias_top_entradas)
 
 @app.post("/park-in/entrada")
-async def park_in_entrada(utilizador: str = Form(""), ficheiro: UploadFile = File(...)):
-    """Regista uma entrada a partir da foto de UM talão de pesagem — ver
-    tools/parkin.registar_entrada. Pode demorar alguns segundos quando é
-    preciso avaliar a qualidade na hora (talão ainda não avaliado no chat)."""
-    bruto = await ficheiro.read()
-    if len(bruto) > 15 * 1024 * 1024:
-        return JSONResponse({"erro": "ficheiro demasiado grande (máx. 15 MB)"}, status_code=400)
-    resultado = await asyncio.to_thread(
-        parkin.registar_entrada, bruto, ficheiro.content_type, utilizador or None)
+async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
+    """Regista uma entrada a partir de uma ou mais fotos (o talão de
+    pesagem, e idealmente também foto(s) da própria carga, necessárias
+    para a avaliação de qualidade — ver tools/parkin.registar_entrada).
+    Pode demorar alguns segundos quando é preciso avaliar a qualidade na
+    hora (talão ainda não avaliado no chat)."""
+    fotos = []
+    for ficheiro in ficheiros:
+        bruto = await ficheiro.read()
+        if len(bruto) > 15 * 1024 * 1024:
+            return JSONResponse({"erro": f"ficheiro demasiado grande (máx. 15 MB): {ficheiro.filename}"},
+                               status_code=400)
+        fotos.append((bruto, ficheiro.content_type))
+    resultado = await asyncio.to_thread(parkin.registar_entrada, fotos, utilizador or None)
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)

@@ -247,20 +247,25 @@ def _resolver_data(data_str: str):
         return date.today()
 
 
-def _avaliar_qualidade_inline(bruto: bytes, content_type: str, talao: str, fornecedor: str = None):
+def _avaliar_qualidade_inline(fotos: list, talao: str, fornecedor: str = None):
     """Corre a MESMA missão de avaliação de qualidade usada no chat (ver
-    agents/qualidade_toros_ecos_largos) a partir desta mesma foto, só
+    agents/qualidade_toros_ecos_largos) a partir destas mesmas fotos, só
     quando este talão ainda não tinha sido avaliado antes — para o
     registo de entrada no Park In nunca ficar bloqueado à espera de
-    alguém enviar a foto ao chat primeiro. Import feito aqui dentro (não
-    no topo do módulo) de propósito: mantém tools/ não dependente de
-    agents/ no caminho normal de arranque, só quando mesmo é preciso.
-    Devolve o índice IGQC (0-100) se a avaliação tiver corrido e sido
-    guardada com sucesso, ou None caso contrário."""
+    alguém enviar as fotos ao chat primeiro. `fotos` é uma lista de
+    (bruto, content_type) — o talão sozinho normalmente não chega para
+    uma avaliação a sério (não mostra o estado da madeira em si); pedido
+    explícito do Rui (2026-10-02): a Entrada tem de aceitar também
+    foto(s) da própria carga, tal como o chat já exige. Import feito
+    aqui dentro (não no topo do módulo) de propósito: mantém tools/ não
+    dependente de agents/ no caminho normal de arranque, só quando mesmo
+    é preciso. Devolve o índice IGQC (0-100) se a avaliação tiver
+    corrido e sido guardada com sucesso, ou None caso contrário."""
     from agents import qualidade_toros_ecos_largos
-    transcricao = visao.descrever_imagem(bruto, content_type)
-    contexto = (f"[Foto do talão anexada, já transcrita abaixo]\n{transcricao}\n\n"
-               f"Nº do talão (já confirmado, usa exatamente este valor): {talao}\n"
+    transcricoes = [f"[Foto {i}]\n{visao.descrever_imagem(bruto, content_type)}"
+                    for i, (bruto, content_type) in enumerate(fotos, start=1)]
+    contexto = ("[Fotos anexadas, já transcritas abaixo]\n\n" + "\n\n".join(transcricoes)
+               + f"\n\nNº do talão (já confirmado, usa exatamente este valor): {talao}\n"
                + (f"Fornecedor (já confirmado): {fornecedor}\n" if fornecedor else "")
                + "\nAvalia a qualidade desta carga de toros.")
     try:
@@ -275,13 +280,27 @@ def _avaliar_qualidade_inline(bruto: bytes, content_type: str, talao: str, forne
     return None
 
 
-def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None) -> dict:
-    """Regista uma entrada no Park In a partir da foto de um talão de
-    pesagem — extrai os campos, procura (ou corre na hora) a avaliação de
+def registar_entrada(fotos: list, registado_por: str = None) -> dict:
+    """Regista uma entrada no Park In a partir de uma ou mais fotos — a
+    do talão de pesagem (obrigatória, identificada tentando ler cada
+    foto até encontrar uma com talão/produto legíveis) e, idealmente,
+    foto(s) da própria carga de madeira, para a avaliação de qualidade
+    poder ser feita com a mesma informação visual que o chat já usa (só
+    o talão não chega para avaliar o estado da madeira em si). `fotos` é
+    uma lista de (bruto, content_type). Extrai os campos do talão,
+    procura (ou corre na hora, com todas as fotos) a avaliação de
     qualidade desse talão, e grava o lote com saldo_kg = peso líquido."""
-    campos = _extrair_campos_talao(bruto, content_type)
-    if "erro" in campos:
-        return campos
+    if not fotos:
+        return {"erro": "falta pelo menos uma foto (o talão de pesagem)"}
+
+    campos = None
+    for bruto, content_type in fotos:
+        tentativa = _extrair_campos_talao(bruto, content_type)
+        if "erro" not in tentativa and tentativa.get("talao") and tentativa.get("produto"):
+            campos = tentativa
+            break
+    if campos is None:
+        return {"erro": "não consegui reconhecer um talão de pesagem em nenhuma destas fotos"}
 
     talao = str(campos.get("talao") or "").strip()
     if not talao:
@@ -313,7 +332,7 @@ def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None)
         if indice is not None:
             db.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
     if categoria is None:
-        indice = _avaliar_qualidade_inline(bruto, content_type, talao, fornecedor)
+        indice = _avaliar_qualidade_inline(fotos, talao, fornecedor)
         categoria = _categoria_de_indice(indice)
     id_gerado = db.guardar_entrada_parkin(
         talao=talao, fornecedor=fornecedor, data=data_resolvida,
@@ -322,9 +341,18 @@ def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None)
         peso_bruto_kg=campos.get("peso_bruto_kg"), tara_kg=campos.get("tara_kg"),
         indice_igqc=indice, categoria_qualidade=categoria, registado_por=registado_por)
 
+    # relê a avaliação no fim (em vez de ir arrastando o texto pelos vários
+    # ramos acima) para apanhar o relatório completo tal como a Alma o
+    # escreveu no chat, tanto para talões já avaliados como para os
+    # avaliados agora mesmo em _avaliar_qualidade_inline — o Rui pediu para
+    # ver aqui o mesmo relatório, não só a categoria (2026-10-02).
+    avaliacao_final = db.avaliacao_carga_toros_por_talao(talao)
+    relatorio = avaliacao_final.get("avaliacao") if avaliacao_final else None
+
     resultado = {"ok": True, "id": id_gerado, "talao": talao, "fornecedor": fornecedor,
                 "artigo": _chave_artigo(interpretado["tipo"], interpretado["comprimento"], interpretado["espessura"]),
-                "peso_liquido_kg": float(peso_liquido), "indice_igqc": indice, "categoria_qualidade": categoria}
+                "peso_liquido_kg": float(peso_liquido), "indice_igqc": indice, "categoria_qualidade": categoria,
+                "relatorio": relatorio}
     if categoria is None:
         resultado["aviso"] = ("a entrada ficou registada, mas ainda sem categoria de qualidade — não foi "
                               "possível avaliar esta carga automaticamente")
@@ -791,8 +819,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <div class="sheet" id="sheetEntrada">
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Nova entrada</h3>
-  <p class="sub" style="margin:0 0 12px">Foto do talão de pesagem da balança.</p>
-  <input type="file" id="fEntradaFoto" accept="image/*" capture="environment">
+  <p class="sub" style="margin:0 0 12px">Foto do talão de pesagem da balança, e também fotos da própria carga (necessárias para avaliar a qualidade) — escolhe todas de uma vez.</p>
+  <input type="file" id="fEntradaFotos" accept="image/*" multiple>
   <div class="acts">
     <button class="btn" data-close>Cancelar</button>
     <button class="btn primary" id="bEntradaGuardar">Guardar</button>
@@ -983,7 +1011,7 @@ function fecharSheets(){ $("#veil").classList.remove("on");
 $("#veil").onclick = fecharSheets;
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = fecharSheets);
 
-$("#bAbrirEntrada").onclick = () => { $("#entradaMsg").innerHTML=""; $("#fEntradaFoto").value=""; abrirSheet("#sheetEntrada"); };
+$("#bAbrirEntrada").onclick = () => { $("#entradaMsg").innerHTML=""; $("#fEntradaFotos").value=""; abrirSheet("#sheetEntrada"); };
 $("#bAbrirSaida").onclick = () => { $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value=""; abrirSheet("#sheetSaida"); };
 $("#bAbrirCorrecao").onclick = () => { $("#correcaoMsg").innerHTML=""; abrirSheet("#sheetCorrecao"); };
 $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites"); };
@@ -995,18 +1023,23 @@ $("#cQuantidade").addEventListener("input", () => {
 });
 
 $("#bEntradaGuardar").onclick = async () => {
-  const f = $("#fEntradaFoto").files[0];
-  if(!f){ $("#entradaMsg").innerHTML = '<div class="err">Escolhe uma foto do talão.</div>'; return; }
+  const fs = $("#fEntradaFotos").files;
+  if(!fs.length){ $("#entradaMsg").innerHTML = '<div class="err">Escolhe a foto do talão e da carga.</div>'; return; }
   $("#bEntradaGuardar").disabled = true;
   $("#entradaMsg").innerHTML = '<div class="sub">A ler o talão e avaliar a qualidade — pode demorar uns segundos…</div>';
-  const fd = new FormData(); fd.append("ficheiro", f);
+  const fd = new FormData();
+  for(const f of fs) fd.append("ficheiros", f);
   try{
     const r = await fetch("/park-in/entrada", {method:"POST", body:fd});
     const j = await r.json();
     if(j.erro){ $("#entradaMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
     else {
+      const relatorio = j.relatorio ? `<details style="margin-top:8px">
+          <summary style="cursor:pointer">Ver relatório de qualidade</summary>
+          <div class="sub" style="white-space:pre-wrap;margin-top:6px">${j.relatorio}</div>
+        </details>` : "";
       $("#entradaMsg").innerHTML = `<div class="ok">Registado: talão ${j.talao}, ${t(j.peso_liquido_kg)}, `+
-        `categoria ${j.categoria_qualidade||"(por avaliar)"}.</div>`;
+        `categoria ${j.categoria_qualidade||"(por avaliar)"}.${j.aviso ? ` ${j.aviso}.` : ""}</div>${relatorio}`;
       carregar();
     }
   } catch(e){ $("#entradaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
