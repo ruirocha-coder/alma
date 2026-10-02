@@ -13,7 +13,7 @@ from orchestrator import encaminhar, contexto_para_encaminhar, AGENTES, AGENTES_
 from db import (guardar_mensagem, historico_sessao, historico_sessao_para_modelo, log_routing,
                 sessoes_utilizador, eliminar_sessao, perfil_existe, alertas_recentes,
                 obter_documento_gerado, avaliacoes_cargas_toros_ano, listar_portais_projeto,
-                eliminar_documento_gerado)
+                eliminar_documento_gerado, get_conn)
 from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     resumo_semanal_basecamp, resumo_diario_ecos_largos,
                     resumo_anual_cargas_toros, logistica_entregas,
@@ -940,7 +940,7 @@ def _debug_apagar_entrada_parkin(id: int):
     limpar contaminação de um teste de curl com imagens falsas que o
     modelo de visão "alucinou" como sendo o talão real 11293). Remover
     depois de usar."""
-    with db.get_conn() as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT saldo_kg, peso_liquido_kg FROM parkin_entradas WHERE id = %s", (id,))
             row = cur.fetchone()
