@@ -456,6 +456,13 @@
   }
   .icon-btn-composer:hover { color: var(--text) !important; }
   .icon-btn-composer.a-gravar { color: var(--error) !important; animation: pulsar 1s infinite; }
+  /* Botão "tirar foto": só em ecrãs táteis (telemóvel/tablet) — em desktop
+     não há câmara a apontar para um documento/talão, e o clip (📎) já
+     serve para anexar uma foto já tirada antes. */
+  #camera-btn { display: none; }
+  @media (pointer: coarse) {
+    #camera-btn { display: flex; }
+  }
   @keyframes pulsar {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.45; }
@@ -624,6 +631,8 @@
           <form id="form">
             <button id="anexar" type="button" class="icon-btn-composer" aria-label="Anexar ficheiro">📎</button>
             <input id="ficheiro-input" type="file" hidden multiple accept=".pdf,.docx,.xlsx,.txt,.csv,.md,image/jpeg,image/png,image/gif,image/webp">
+            <button id="camera-btn" type="button" class="icon-btn-composer" aria-label="Tirar foto" title="Tirar foto">📷</button>
+            <input id="camera-input" type="file" hidden accept="image/*" capture="environment">
             <button id="reuniao-btn" type="button" class="icon-btn-composer" aria-label="Modo reunião" title="Começar/terminar modo reunião">🎙️</button>
             <textarea id="input" rows="1" placeholder="Escreve uma mensagem..." autofocus></textarea>
             <button id="send" type="submit" aria-label="Enviar">➤</button>
@@ -687,6 +696,8 @@
   sidebarScrim.addEventListener("click", fecharSidebar);
   const anexarBtn = document.getElementById("anexar");
   const ficheiroInput = document.getElementById("ficheiro-input");
+  const cameraBtn = document.getElementById("camera-btn");
+  const cameraInput = document.getElementById("camera-input");
   const anexoChips = document.getElementById("anexo-chips");
   let ficheirosAnexados = [];
 
@@ -1960,6 +1971,7 @@
   });
 
   anexarBtn.addEventListener("click", () => ficheiroInput.click());
+  cameraBtn.addEventListener("click", () => cameraInput.click());
 
   function renderAnexos() {
     anexoChips.innerHTML = "";
@@ -1981,23 +1993,27 @@
     });
   }
 
-  ficheiroInput.addEventListener("change", () => {
+  function receberFicheiros(lista, input) {
     // acumula com o que já estava anexado — permite ir adicionando
-    // ficheiros em vários cliques no clip, não só um de cada vez
-    for (const ficheiro of ficheiroInput.files) {
+    // ficheiros em vários cliques (no clip ou na câmara), não só um de
+    // cada vez
+    for (const ficheiro of lista) {
       if (ficheiro.size > 15 * 1024 * 1024) {
         addMessage("error", `Ficheiro demasiado grande (máx. 15 MB): ${ficheiro.name}`);
         continue;
       }
       ficheirosAnexados.push(ficheiro);
     }
-    ficheiroInput.value = "";  // permite voltar a escolher o mesmo ficheiro depois de o remover
+    input.value = "";  // permite voltar a escolher o mesmo ficheiro/tirar outra foto depois de a remover
     renderAnexos();
-  });
+  }
+  ficheiroInput.addEventListener("change", () => receberFicheiros(ficheiroInput.files, ficheiroInput));
+  cameraInput.addEventListener("change", () => receberFicheiros(cameraInput.files, cameraInput));
 
   function limparAnexo() {
     ficheirosAnexados = [];
     ficheiroInput.value = "";
+    cameraInput.value = "";
     renderAnexos();
   }
 
@@ -2071,6 +2087,7 @@
     input.disabled = true;
     sendBtn.disabled = true;
     anexarBtn.disabled = true;
+    cameraBtn.disabled = true;
     addTyping();
 
     try {
@@ -2121,6 +2138,7 @@
       input.disabled = false;
       sendBtn.disabled = false;
       anexarBtn.disabled = false;
+      cameraBtn.disabled = false;
       input.focus();
     }
   });
