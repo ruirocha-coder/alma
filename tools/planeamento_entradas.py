@@ -581,15 +581,21 @@ let logs=[], DAY=92, LANE=78;
 
 const item=id=>entradas.find(e=>e.id===id);
 /* uma OF pode estar em vários charriots ao mesmo tempo (pedido explícito
-   do Rui, 2026-10-02) — aparece visivelmente repetida em cada um deles
-   (pedido explícito do Rui, 2026-10-03: "quero que o card fique
-   visivelmente em todos os que eu colocar"), nunca só numa etiqueta.
-   lanesDe devolve todas as lanes onde uma OF deve ser desenhada — [0]
+   do Rui, 2026-10-02). Em vez de aparecer repetida num card por cada
+   charriot (confuso — pedido explícito do Rui, 2026-10-04: "quero que o
+   card fique um só pelos vários charriots, como fazemos horizontalmente"),
+   desenha-se UM único card, esticado na vertical da lane de topo até à
+   lane de fundo do intervalo (ver minMaxLane) — o mesmo espírito do
+   alargar horizontal por dias (.rsz-h/larguraDias), agora na vertical
+   (.rsz-v já arrastava uma pré-visualização exatamente assim; só faltava
+   o resultado final, depois de largar, desenhar da mesma forma).
+   lanesDe devolve todas as lanes onde uma OF está atribuída — [0]
    ("Por atribuir") quando ainda não tem nenhum charriot. */
 const lanesDe=e=>{
   if(!e.charriots || !e.charriots.length) return [0];
   return e.charriots.map(c=>CHARRIOTS.indexOf(c)+1);
 };
+const minMaxLane=e=>{ const ls=lanesDe(e); return [Math.min(...ls),Math.max(...ls)]; };
 const numCurto=id=>String(id).slice(-4);
 
 function metrics(){
@@ -678,6 +684,8 @@ function renderLanes(){
     const itens=entradas.filter(e=>lanesDe(e).includes(li));
     const {linhaPorId}=empacotarLinhas(itens);
     itens.forEach(e=>{
+      const [minLane,maxLane]=minMaxLane(e);
+      if(li!==minLane) return; // já desenhado uma vez, na lane de topo (ver minMaxLane)
       const largura=e.larguraDias||1;
       const aIni=e.gs-view.start, aFim=e.gs+largura-1-view.start;
       if(aFim<0||aIni>=view.len) return; // completamente fora da vista
@@ -689,9 +697,12 @@ function renderLanes(){
       el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
       el.style.borderLeftColor=corProduto(e);
       el.style.left=(aVis*DAY+3)+"px";
-      el.style.top=(OFFSETS_LANE[li]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP))+"px";
+      const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
+      el.style.top=topoPx+"px";
       el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
-      el.style.height=ITEM_H+"px";
+      el.style.height=(maxLane>minLane
+        ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ALTURAS_LANE[maxLane])-topoPx-ITEM_PAD)
+        : ITEM_H)+"px";
       // manípulos de arrastar para alargar (pedido explícito do Rui,
       // 2026-10-02): borda direita alarga em dias (só visual — ver
       // definir_largura_dias); borda de baixo marca mais charriots ao
