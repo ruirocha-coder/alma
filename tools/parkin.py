@@ -142,20 +142,24 @@ def _interpretar_produto(produto: str) -> dict:
 
 # faixas do manual (ver LIMIAR_BOA/LIMIAR_MEDIA) tal como os nomes que a
 # própria avaliação já escreve ("Classificação Final: Aceitável (60-74%)")
-# — ler o NOME da faixa é mais fiável do que tentar ler só um número.
-# Entre "Classificação[:/Final]" e o nome da faixa pode vir quase
-# qualquer coisa (a percentagem repetida, uma seta "→", um emoji) — bug
-# real, 2026-10-02: a versão anterior só tolerava ":"/"*"/espaço aí, e
-# "Classificação: 60–74% → Aceitável" (com a percentagem a repetir-se
-# antes do nome) caía para o fallback genérico, que apanhava a
+# — ler o NOME da faixa é mais fiável do que tentar ler só um número, e é
+# a ÚNICA fonte usada para decidir a categoria (nunca um número sozinho,
+# depois do bug abaixo). Para o índice (só um número aproximado, usado só
+# para "média de qualidade" por fornecedor — ver
+# top_qualidade_fornecedores_parkin, nunca para decidir a categoria),
+# procura-se uma percentagem perto do próprio local onde o nome da faixa
+# foi encontrado, e só se aceita esse número SE for consistente com a
+# categoria já determinada — caso contrário fica None, nunca um valor
+# que contradiga a categoria.
+#
+# Bug real, 2026-10-02 (primeira versão desta função): usava
+# `.find("classifica")` para situar a janela de busca — mas a palavra
+# "classifica" também aparece em frases soltas do corpo da avaliação
+# (ex: "Classifica como 'Fresca'"), antes da verdadeira secção de
+# classificação final; a janela calculada a partir daí apanhava a
 # percentagem ERRADA de uma linha anterior da tabela de critérios (ex:
-# "Retidão | 10%"), dando uma qualidade de 10% a uma carga real
-# "Aceitável" (62%). Por isso tenta sempre o nome da faixa primeiro
-# (tolerante ao que vier pelo meio), depois o INTERVALO da faixa (ex:
-# "60–74%", mais estável no texto do que o nome isolado), e só por fim
-# uma percentagem solta — e essa só numa janela que começa EM
-# "Classificação"/"IGQC", nunca antes (para nunca voltar a apanhar uma
-# percentagem de uma linha anterior).
+# "Retidão | 10%"), dando 10% de qualidade a uma carga real "Aceitável"
+# (62%) — abaixo do mínimo matematicamente possível do IGQC (20%).
 _RE_BANDA_CLASSIFICACAO = re.compile(
     r"Classifica[cç][aã]o\s*(?:[Ff]inal)?[:\*\s]*(?:\d[\d,.\-–>\s%→*]*)?\**\s*"
     r"(Excelente|Boa|Aceit[aá]vel|Fraca|Rejei[cç][aã]o)",
@@ -165,6 +169,10 @@ _RE_PERCENTAGEM_GENERICA = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*%")
 _BANDA_PARA_CATEGORIA = {"excelente": "Boa", "boa": "Boa", "aceitavel": "Media", "fraca": "Fraca", "rejeicao": "Fraca"}
 
 
+def _normalizar_banda(banda: str) -> str:
+    return banda.lower().replace("á", "a").replace("ã", "a").replace("ç", "c")
+
+
 def _indice_e_categoria_de_texto(avaliacao_texto: str):
     """Deduz (indice, categoria) de uma avaliação de qualidade já escrita
     (ver agents/qualidade_toros_ecos_largos) — usado como fallback para
@@ -172,44 +180,64 @@ def _indice_e_categoria_de_texto(avaliacao_texto: str):
     guardado, no caso do histórico anterior ao Park In — ver
     importar_historico_avaliacoes), em vez de tentar reavaliar a carga
     sem as fotos originais da madeira (que o Park In não tem aqui, só a
-    foto do talão). Três tentativas, por ordem (ver comentário acima):
-    nome da faixa, intervalo da faixa, percentagem solta. Best-effort:
-    devolve (None, None) se não conseguir ler nada, nunca inventa um
-    valor."""
+    foto do talão).
+
+    `categoria` vem sempre do nome da faixa (mais fiável), com o
+    intervalo numérico como única reserva; `indice` é só um número
+    aproximado para "média de qualidade" — só aceite se bater com a
+    categoria já determinada, nunca um número que a contradiga (ver bug
+    acima). Best-effort: devolve (None, None) se não conseguir ler nada,
+    nunca inventa um valor."""
     if not avaliacao_texto:
         return None, None
 
-    m = _RE_BANDA_CLASSIFICACAO.search(avaliacao_texto)
-    if m:
-        banda = m.group(1).lower()
-        banda = banda.replace("á", "a").replace("ã", "a").replace("ç", "c")
-        categoria = _BANDA_PARA_CATEGORIA.get(banda)
-        if categoria:
-            return None, categoria
+    categoria = None
+    candidato = None
 
-    idx = avaliacao_texto.lower().find("classifica")
-    if idx < 0:
-        idx = avaliacao_texto.lower().find("faixa")
-    janela = avaliacao_texto[max(0, idx - 50):idx + 250] if idx >= 0 else avaliacao_texto
-    m2 = _RE_FAIXA_INTERVALO.search(janela) or _RE_FAIXA_INTERVALO.search(avaliacao_texto)
-    if m2:
-        try:
-            return None, _categoria_de_indice(float(m2.group(1)))
-        except ValueError:
-            pass
+    m_banda = _RE_BANDA_CLASSIFICACAO.search(avaliacao_texto)
+    if m_banda:
+        categoria = _BANDA_PARA_CATEGORIA.get(_normalizar_banda(m_banda.group(1)))
+        # procura uma percentagem mesmo à volta de onde o nome da faixa
+        # foi encontrado (ex: "Aceitável (62%)" a seguir, ou "62% →
+        # Aceitável" antes) — nunca a partir de .find("classifica"), que
+        # pode apanhar uma ocorrência solta da palavra noutro sítio.
+        janela_perto = avaliacao_texto[max(0, m_banda.start() - 60):m_banda.end() + 60]
+        m_pct = _RE_PERCENTAGEM_GENERICA.search(janela_perto)
+        if m_pct:
+            try:
+                candidato = float(m_pct.group(1).replace(",", "."))
+            except ValueError:
+                pass
 
-    idx2 = avaliacao_texto.lower().find("classifica")
-    if idx2 < 0:
-        idx2 = avaliacao_texto.lower().find("igqc")
-    janela2 = avaliacao_texto[idx2:idx2 + 200] if idx2 >= 0 else avaliacao_texto
-    m3 = _RE_PERCENTAGEM_GENERICA.search(janela2) or _RE_PERCENTAGEM_GENERICA.search(avaliacao_texto)
-    if m3:
-        try:
-            indice = float(m3.group(1).replace(",", "."))
-            return indice, _categoria_de_indice(indice)
-        except ValueError:
-            pass
-    return None, None
+    if categoria is None:
+        idx_faixa = avaliacao_texto.lower().rfind("classifica")
+        if idx_faixa < 0:
+            idx_faixa = avaliacao_texto.lower().rfind("faixa")
+        janela_faixa = avaliacao_texto[max(0, idx_faixa - 50):idx_faixa + 250] if idx_faixa >= 0 else avaliacao_texto
+        m_faixa = _RE_FAIXA_INTERVALO.search(janela_faixa) or _RE_FAIXA_INTERVALO.search(avaliacao_texto)
+        if m_faixa:
+            try:
+                categoria = _categoria_de_indice(float(m_faixa.group(1)))
+            except ValueError:
+                pass
+
+    if candidato is None:
+        idx = avaliacao_texto.lower().rfind("classifica")
+        if idx < 0:
+            idx = avaliacao_texto.lower().rfind("igqc")
+        janela = avaliacao_texto[idx:idx + 200] if idx >= 0 else avaliacao_texto
+        m_pct2 = _RE_PERCENTAGEM_GENERICA.search(janela) or _RE_PERCENTAGEM_GENERICA.search(avaliacao_texto)
+        if m_pct2:
+            try:
+                candidato = float(m_pct2.group(1).replace(",", "."))
+            except ValueError:
+                pass
+
+    if categoria is None and candidato is not None:
+        categoria = _categoria_de_indice(candidato)
+
+    indice = candidato if (candidato is not None and _categoria_de_indice(candidato) == categoria) else None
+    return indice, categoria
 
 
 def _resolver_data(data_str: str):
