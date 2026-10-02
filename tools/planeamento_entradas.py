@@ -31,16 +31,17 @@ TORO_TIPOS = {"IN", "MT"}
 # WIP: Cmp é uma lista fechada em mm (sem "outro", ao contrário do Toro);
 # Lar é sempre fixa, já não se escolhe por OF; Esp só pode ser um dos
 # valores da tabela "WIP Lotes" (documento no Basecamp, Ecos Largos/
-# Documentos), cada um já associado ao seu nº de fiadas — pedido explícito
-# do Rui, 2026-10-04.
+# Documentos — espessura em mm, atualizado pelo Rui em 2026-10-04 para
+# bater certo com o resto, que já estava todo em mm), cada um já
+# associado ao seu nº de fiadas.
 WIP_CMP_PRESETS = ["2350", "2550", "2650", "3100"]
 WIP_LAR_FIXA = 1200
 WIP_LOTES_TABELA = [
-    (0.18, 40), (0.22, 35), (0.25, 30), (0.32, 25), (0.36, 20), (0.42, 16),
-    (0.52, 14), (0.6, 12), (0.7, 10), (0.8, 8), (0.9, 7), (1, 6), (1.1, 6),
-    (1.2, 5), (1.3, 5), (1.4, 4), (1.5, 4), (1.6, 4), (1.7, 4), (1.8, 4), (2, 3),
+    (180, 40), (220, 35), (250, 30), (320, 25), (360, 20), (420, 16),
+    (520, 14), (600, 12), (700, 10), (800, 8), (900, 7), (1000, 6), (1100, 6),
+    (1200, 5), (1300, 5), (1400, 4), (1500, 4), (1600, 4), (1700, 4), (1800, 4), (2000, 3),
 ]
-FIADAS_POR_ESPESSURA = {round(esp, 2): fiadas for esp, fiadas in WIP_LOTES_TABELA}
+FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
 
 # QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
 # — pedido explícito do Rui (2026-10-01). Cada OF pode ter o seu próprio
@@ -61,19 +62,20 @@ _PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
 def _eh_quadradilho(titulo: str) -> bool:
     return not bool(_PADRAO_OF.search(titulo or ""))
 
-def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_m):
+def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_mm):
     """Nº de lotes (pedido explícito do Rui, 2026-10-04): volume real de
     um lote = comprimento x (largura fixa x 0,7) x nº de fiadas x
-    espessura — fiadas vêm sempre da tabela "WIP Lotes" pela espessura
-    escolhida (ver FIADAS_POR_ESPESSURA); nº de lotes = QTD Wip a
-    dividir por esse volume. None sempre que faltar algum dos dados ou a
-    espessura não bater com nenhuma linha da tabela."""
-    if qtd_wip_m3 is None or wip_cmp_mm is None or wip_esp_m is None:
+    espessura (cmp/lar/esp em mm, convertidos para metros aqui) — fiadas
+    vêm sempre da tabela "WIP Lotes" pela espessura escolhida (ver
+    FIADAS_POR_ESPESSURA); nº de lotes = QTD Wip a dividir por esse
+    volume. None sempre que faltar algum dos dados ou a espessura não
+    bater com nenhuma linha da tabela."""
+    if qtd_wip_m3 is None or wip_cmp_mm is None or wip_esp_mm is None:
         return None
-    fiadas = FIADAS_POR_ESPESSURA.get(round(float(wip_esp_m), 2))
+    fiadas = FIADAS_POR_ESPESSURA.get(round(float(wip_esp_mm)))
     if fiadas is None:
         return None
-    volume_lote = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * float(wip_esp_m)
+    volume_lote = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
     if volume_lote <= 0:
         return None
     return round(qtd_wip_m3 / volume_lote, 1)
@@ -226,7 +228,7 @@ def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp
         erro = _validar_numero_positivo(nome, valor)
         if erro:
             return {"erro": erro}
-    if esp is not None and round(float(esp), 2) not in FIADAS_POR_ESPESSURA:
+    if esp is not None and round(float(esp)) not in FIADAS_POR_ESPESSURA:
         return {"erro": f"espessura {esp!r} não consta da tabela \"WIP Lotes\""}
     lar = WIP_LAR_FIXA
     return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
@@ -543,18 +545,18 @@ const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=["2550","2640","3100","2350"];
 const WIP_CMP_PRESETS=["2350","2550","2650","3100"];
 const WIP_LAR_FIXA=1200;
-const WIP_LOTES_TABELA=[[0.18,40],[0.22,35],[0.25,30],[0.32,25],[0.36,20],[0.42,16],
-  [0.52,14],[0.6,12],[0.7,10],[0.8,8],[0.9,7],[1,6],[1.1,6],[1.2,5],[1.3,5],
-  [1.4,4],[1.5,4],[1.6,4],[1.7,4],[1.8,4],[2,3]];
-function fiadasPorEspessura(esp){
-  if(esp==null || isNaN(esp)) return null;
-  const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e*100)===Math.round(esp*100));
+const WIP_LOTES_TABELA=[[180,40],[220,35],[250,30],[320,25],[360,20],[420,16],
+  [520,14],[600,12],[700,10],[800,8],[900,7],[1000,6],[1100,6],[1200,5],[1300,5],
+  [1400,4],[1500,4],[1600,4],[1700,4],[1800,4],[2000,3]];
+function fiadasPorEspessura(espMm){
+  if(espMm==null || isNaN(espMm)) return null;
+  const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
   return linha ? linha[1] : null;
 }
-function calcularNLotes(qtdWipM3, wipCmpMm, wipEspM){
-  const fiadas=fiadasPorEspessura(wipEspM);
-  if(qtdWipM3==null || wipCmpMm==null || wipEspM==null || fiadas==null) return null;
-  const volumeLote=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*wipEspM;
+function calcularNLotes(qtdWipM3, wipCmpMm, wipEspMm){
+  const fiadas=fiadasPorEspessura(wipEspMm);
+  if(qtdWipM3==null || wipCmpMm==null || wipEspMm==null || fiadas==null) return null;
+  const volumeLote=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*(wipEspMm/1000);
   return volumeLote>0 ? Math.round((qtdWipM3/volumeLote)*10)/10 : null;
 }
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
@@ -951,7 +953,7 @@ function wipCmpOptionsHtml(atual){
 }
 function wipEspOptionsHtml(atual){
   return `<option value="" ${atual==null?"selected":""}>—</option>` +
-    WIP_LOTES_TABELA.map(([esp])=>`<option value="${esp}"${atual===esp?" selected":""}>${String(esp).replace(".",",")}</option>`).join("");
+    WIP_LOTES_TABELA.map(([esp])=>`<option value="${esp}"${atual===esp?" selected":""}>${esp}</option>`).join("");
 }
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
 /* QTD Toros/QTD Wip nunca se guardam — recalculam-se aqui ao vivo, à

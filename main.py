@@ -1084,17 +1084,6 @@ def diagnostico_logistica_entregas():
     a divergir)."""
     return logistica_entregas.diagnostico_cards_regiao()
 
-@app.get("/_debug-ler-wip-lotes")
-def _debug_ler_wip_lotes():
-    """Temporário: procura e relê o documento "WIP Lotes.pdf" depois de
-    atualizado pelo Rui (espessura passou de m para mm) — procura de novo
-    em vez de usar o id antigo (10366022164), que pode ter mudado com a
-    atualização. Remover depois de usar."""
-    candidatos = documentos_empresa.procurar_documentos_empresa("wip lotes")
-    if not candidatos:
-        return {"erro": "não encontrei nenhum documento com 'wip lotes' no título/projeto/pasta"}
-    return {"candidatos": candidatos, "conteudo": documentos_empresa.ler_documento_empresa(candidatos[0]["id"])}
-
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():
     """Diagnóstico: mostra exatamente o que a conta da Alma vê no Basecamp
