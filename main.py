@@ -1084,6 +1084,13 @@ def diagnostico_logistica_entregas():
     a divergir)."""
     return logistica_entregas.diagnostico_cards_regiao()
 
+@app.get("/_debug-ler-wip-lotes")
+def _debug_ler_wip_lotes():
+    """Temporário: relê o documento "WIP Lotes.pdf" (id 10366022164) depois
+    de atualizado pelo Rui (espessura passou de m para mm). Remover depois
+    de usar."""
+    return documentos_empresa.ler_documento_empresa(10366022164)
+
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():
     """Diagnóstico: mostra exatamente o que a conta da Alma vê no Basecamp
