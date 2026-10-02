@@ -1086,13 +1086,10 @@ def diagnostico_logistica_entregas():
 
 @app.get("/_debug-procurar-wip-lotes")
 def _debug_procurar_wip_lotes():
-    """Temporário: procura a tabela "WIP Lotes" referida pelo Rui (campos
-    Esp/Nº Fiadas do planeamento de entrada) — documentos e card tables.
+    """Temporário: lê o documento "WIP Lotes.pdf" (id 10366022164, Ecos
+    Largos/Documentos) — campos Esp/Nº Fiadas do planeamento de entrada.
     Remover depois de usar."""
-    docs = documentos_empresa.procurar_documentos_empresa("wip")
-    docs += documentos_empresa.procurar_documentos_empresa("lotes")
-    tabelas = [t.get("title") for t in basecamp._card_tables_ativos(forcar=True)]
-    return {"documentos": docs, "card_tables": tabelas}
+    return documentos_empresa.ler_documento_empresa(10366022164)
 
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():
