@@ -272,6 +272,94 @@ CREATE TABLE IF NOT EXISTS cores_estado_ecos_largos (
     estado TEXT PRIMARY KEY,
     cor TEXT NOT NULL
 );
+
+-- Park In: stock de toros da Ecos Largos (ver tools/parkin.py). Cada
+-- entrada é um "lote" identificado pelo nº de talão da balança, com o
+-- artigo (tipo IN/MT + comprimento + espessura normal/fina, lidos do
+-- campo "Produto" do talão — ex: "006-IN - MADEIRA PINHO 2,35 16 ACIMA")
+-- e a categoria de qualidade (derivada do índice IGQC já avaliado para
+-- esse talão — ver avaliacoes_cargas_toros.indice_igqc). `saldo_kg`
+-- começa igual a `peso_liquido_kg` e vai sendo descontado por saídas e
+-- correções negativas (ver parkin_depletions) — nunca editado
+-- diretamente, só através dessas duas vias, para o saldo nunca divergir
+-- do que entrou/saiu de facto.
+CREATE TABLE IF NOT EXISTS parkin_entradas (
+    id SERIAL PRIMARY KEY,
+    talao TEXT NOT NULL,
+    fornecedor TEXT NOT NULL,
+    data DATE NOT NULL,
+    matricula TEXT,
+    guia_req TEXT,
+    tipo TEXT NOT NULL,              -- 'IN' | 'MT'
+    comprimento NUMERIC NOT NULL,    -- metros, ex: 2.35
+    espessura TEXT NOT NULL,         -- 'normal' | 'fina'
+    peso_bruto_kg NUMERIC,
+    tara_kg NUMERIC,
+    peso_liquido_kg NUMERIC NOT NULL,
+    saldo_kg NUMERIC NOT NULL,
+    indice_igqc NUMERIC,             -- percentagem (0-100), copiada de avaliacoes_cargas_toros no momento do registo
+    categoria_qualidade TEXT,        -- 'Boa' | 'Media' | 'Fraca', derivada de indice_igqc
+    registado_por TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- Saída em lote (consumo) de um artigo — nunca liga a um talão de entrada
+-- específico diretamente; a ligação real fica em parkin_depletions, que
+-- regista como o FIFO por artigo repartiu esta saída pelas entradas mais
+-- antigas com saldo (pode ser mais do que uma).
+CREATE TABLE IF NOT EXISTS parkin_saidas (
+    id SERIAL PRIMARY KEY,
+    tipo TEXT NOT NULL,
+    comprimento NUMERIC NOT NULL,
+    espessura TEXT NOT NULL,
+    quantidade_kg NUMERIC NOT NULL,
+    talao TEXT,                      -- nº do talão de saída, se existir (só referência, nunca usado para lookup)
+    data DATE NOT NULL,
+    registado_por TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- lançamento manual de correções (erros, falhas, inventário) — pedido
+-- explícito do Rui, 2026-10-02. Positiva (sobra encontrada) não vem de
+-- nenhuma entrada, por isso pede a categoria à mão; negativa deplete por
+-- FIFO as entradas do mesmo artigo (ver tools/parkin.py), tal como uma
+-- saída normal — o desconto real fica registado em parkin_depletions.
+CREATE TABLE IF NOT EXISTS parkin_correcoes (
+    id SERIAL PRIMARY KEY,
+    tipo TEXT NOT NULL,
+    comprimento NUMERIC NOT NULL,
+    espessura TEXT NOT NULL,
+    categoria_qualidade TEXT,        -- só preenchida em correções positivas (sem entrada de origem)
+    quantidade_kg NUMERIC NOT NULL,  -- sinal: positivo = adição, negativo = remoção
+    motivo TEXT NOT NULL,
+    data DATE NOT NULL,
+    registado_por TEXT,
+    criado_em TIMESTAMPTZ DEFAULT now()
+);
+
+-- auditoria do FIFO, partilhada por saídas e correções negativas: cada
+-- linha é "isto consumiu X kg desta entrada" — permite reconstruir de que
+-- categoria/fornecedor saiu cada kg, e recalcular o saldo de uma entrada
+-- a qualquer momento. Exatamente uma de saida_id/correcao_id está
+-- preenchida, nunca as duas nem nenhuma.
+CREATE TABLE IF NOT EXISTS parkin_depletions (
+    id SERIAL PRIMARY KEY,
+    entrada_id INTEGER NOT NULL REFERENCES parkin_entradas(id),
+    saida_id INTEGER REFERENCES parkin_saidas(id),
+    correcao_id INTEGER REFERENCES parkin_correcoes(id),
+    quantidade_kg NUMERIC NOT NULL,
+    CHECK (((saida_id IS NOT NULL)::int + (correcao_id IS NOT NULL)::int) = 1)
+);
+
+-- limites de stock (mín/máx) definidos pela equipa — 'total' para a barra
+-- de stock geral, ou uma chave por artigo ("IN|2.35|normal") para as
+-- barras de "stock por artigo". Sem entrada aqui = sem limites definidos
+-- ainda (a barra mostra-se sem as linhas de mín/máx).
+CREATE TABLE IF NOT EXISTS parkin_limites (
+    chave TEXT PRIMARY KEY,
+    minimo_kg NUMERIC,
+    maximo_kg NUMERIC
+);
 """
 
 # período de férias já anunciado pelo Rui no Mural da Gestão (post "Boas
@@ -358,6 +446,11 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS quantidade TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS data_carga TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS talao TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS avaliacao TEXT;
+-- percentagem final do IGQC (0-100), como número — pedido do Park In
+-- (ver tools/parkin.py), que precisa de consultar o índice de uma carga
+-- pelo número do talão sem ter de analisar o texto livre da avaliação.
+-- NULL em registos antigos (antes desta coluna existir).
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS indice_igqc NUMERIC;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS utilizador TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS conteudo_markdown TEXT;
 ALTER TABLE documentos_gerados ADD COLUMN IF NOT EXISTS formato TEXT NOT NULL DEFAULT 'pdf';
@@ -961,22 +1054,40 @@ def contexto_global() -> str:
     return "\n".join(linhas)
 
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, ano: int,
-                                  quantidade: str = None, data_carga: str = None, talao: str = None):
+                                  quantidade: str = None, data_carga: str = None, talao: str = None,
+                                  indice_igqc: float = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO avaliacoes_cargas_toros
-                   (fornecedor, quantidade, data_carga, talao, avaliacao, ano)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
-                (fornecedor, quantidade, data_carga, talao, avaliacao, ano)
+                   (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc)
             )
         conn.commit()
+
+def avaliacao_carga_toros_por_talao(talao: str) -> dict:
+    """A avaliação mais recente guardada para este número de talão (ver
+    guardar_avaliacao_carga_toros) — usado pelo Park In (tools/parkin.py)
+    para saber o índice IGQC/categoria de qualidade de uma entrada sem
+    repetir a avaliação. None se este talão ainda não tiver sido avaliado
+    (ex: a foto ainda não foi enviada ao chat) ou se a avaliação encontrada
+    não tiver indice_igqc (registos antigos, antes desta coluna existir)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fornecedor, avaliacao, indice_igqc, criado_em
+                   FROM avaliacoes_cargas_toros
+                   WHERE talao = %s ORDER BY criado_em DESC LIMIT 1""",
+                (talao,)
+            )
+            return cur.fetchone()
 
 def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fornecedor, quantidade, data_carga, talao, avaliacao, criado_em
+                """SELECT fornecedor, quantidade, data_carga, talao, avaliacao, indice_igqc, criado_em
                    FROM avaliacoes_cargas_toros
                    WHERE ano = %s ORDER BY criado_em ASC""",
                 (ano,)
@@ -987,6 +1098,7 @@ def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
                 "data_carga": l["data_carga"],
                 "talao": l["talao"],
                 "avaliacao": l["avaliacao"],
+                "indice_igqc": l["indice_igqc"],
                 "registado_em": l["criado_em"].date().isoformat(),
             } for l in cur.fetchall()]
 
@@ -2129,3 +2241,172 @@ def snapshot_diario_projeto_anterior(projeto: str, antes_de) -> dict:
                 (projeto, antes_de)
             )
             return cur.fetchone()
+
+# --- Park In (stock de toros, Ecos Largos) — ver tools/parkin.py ---
+
+def guardar_entrada_parkin(talao: str, fornecedor: str, data, tipo: str, comprimento: float,
+                           espessura: str, peso_liquido_kg: float, matricula: str = None,
+                           guia_req: str = None, peso_bruto_kg: float = None, tara_kg: float = None,
+                           indice_igqc: float = None, categoria_qualidade: str = None,
+                           registado_por: str = None) -> int:
+    """`saldo_kg` começa sempre igual a `peso_liquido_kg` — só é descontado
+    depois por saídas/correções (ver descontar_saldo_entrada_parkin)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO parkin_entradas
+                   (talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
+                    peso_bruto_kg, tara_kg, peso_liquido_kg, saldo_kg, indice_igqc, categoria_qualidade,
+                    registado_por)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
+                 peso_bruto_kg, tara_kg, peso_liquido_kg, peso_liquido_kg, indice_igqc,
+                 categoria_qualidade, registado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def entradas_parkin_com_saldo(tipo: str, comprimento: float, espessura: str) -> list[dict]:
+    """Entradas deste artigo exato com saldo > 0, da mais antiga para a
+    mais recente — ordem de consumo FIFO (ver aplicar_fifo_parkin em
+    tools/parkin.py, partilhada por saídas e correções negativas)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, saldo_kg, categoria_qualidade
+                   FROM parkin_entradas
+                   WHERE tipo = %s AND comprimento = %s AND espessura = %s AND saldo_kg > 0
+                   ORDER BY data ASC, id ASC""",
+                (tipo, comprimento, espessura)
+            )
+            return cur.fetchall()
+
+def descontar_saldo_entrada_parkin(entrada_id: int, quantidade_kg: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE parkin_entradas SET saldo_kg = saldo_kg - %s WHERE id = %s",
+                       (quantidade_kg, entrada_id))
+        conn.commit()
+
+def guardar_saida_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
+                         data, talao: str = None, registado_por: str = None) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO parkin_saidas (tipo, comprimento, espessura, quantidade_kg, talao, data, registado_por)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (tipo, comprimento, espessura, quantidade_kg, talao, data, registado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def guardar_correcao_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
+                            motivo: str, data, categoria_qualidade: str = None,
+                            registado_por: str = None) -> int:
+    """`quantidade_kg` com sinal: positivo = sobra/adição (pede
+    `categoria_qualidade` à mão, não vem de nenhuma entrada), negativo =
+    remoção (deplete por FIFO como uma saída — ver tools/parkin.py)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO parkin_correcoes
+                   (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def guardar_depletion_parkin(entrada_id: int, quantidade_kg: float, saida_id: int = None,
+                             correcao_id: int = None):
+    """Regista que uma saída/correção consumiu `quantidade_kg` desta
+    entrada — exatamente um de `saida_id`/`correcao_id` tem de vir
+    preenchido (ver CHECK em parkin_depletions)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO parkin_depletions (entrada_id, saida_id, correcao_id, quantidade_kg)
+                   VALUES (%s,%s,%s,%s)""",
+                (entrada_id, saida_id, correcao_id, quantidade_kg)
+            )
+        conn.commit()
+
+def entradas_parkin_todas() -> list[dict]:
+    """Todas as entradas já registadas — base das agregações do dashboard
+    (stock total, stock por artigo, top qualidade, top entradas), sempre
+    calculadas em Python a partir destes dados brutos (ver
+    tools/parkin.py), nunca somadas pelo modelo."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura,
+                          peso_liquido_kg, saldo_kg, indice_igqc, categoria_qualidade, criado_em
+                   FROM parkin_entradas ORDER BY data ASC, id ASC"""
+            )
+            return cur.fetchall()
+
+def correcoes_parkin_positivas() -> list[dict]:
+    """Correções positivas (sobras/inventário sem entrada de origem) — a
+    somar diretamente ao stock por categoria/artigo (ver tools/parkin.py);
+    as negativas já ficam refletidas no saldo_kg das entradas depletadas."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, data
+                   FROM parkin_correcoes WHERE quantidade_kg > 0"""
+            )
+            return cur.fetchall()
+
+def limites_parkin() -> dict:
+    """{chave: {"minimo_kg", "maximo_kg"}} — 'total' é o limite da barra de
+    stock geral; qualquer outra chave é um artigo ("tipo|comprimento|espessura",
+    ver tools/parkin._chave_artigo). Sem entrada = sem limites definidos."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT chave, minimo_kg, maximo_kg FROM parkin_limites")
+            return {l["chave"]: {"minimo_kg": l["minimo_kg"], "maximo_kg": l["maximo_kg"]}
+                   for l in cur.fetchall()}
+
+def definir_limite_parkin(chave: str, minimo_kg: float = None, maximo_kg: float = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO parkin_limites (chave, minimo_kg, maximo_kg) VALUES (%s, %s, %s)
+                   ON CONFLICT (chave) DO UPDATE SET
+                       minimo_kg = EXCLUDED.minimo_kg, maximo_kg = EXCLUDED.maximo_kg""",
+                (chave, minimo_kg, maximo_kg)
+            )
+        conn.commit()
+
+def top_qualidade_fornecedores_parkin(limite: int = 3) -> dict:
+    """Média do índice IGQC por fornecedor (só entradas com índice
+    conhecido) — {"melhores": [...], "piores": [...]}, calculado em SQL
+    (AVG), nunca somado à mão. Com poucos fornecedores no total, os dois
+    grupos podem repetir nomes — é o retrato real, não um bug."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fornecedor, AVG(indice_igqc) AS media, COUNT(*) AS n
+                   FROM parkin_entradas WHERE indice_igqc IS NOT NULL
+                   GROUP BY fornecedor ORDER BY media DESC"""
+            )
+            linhas = [{"fornecedor": l["fornecedor"], "media": round(float(l["media"]), 1), "n": l["n"]}
+                     for l in cur.fetchall()]
+    return {"melhores": linhas[:limite], "piores": list(reversed(linhas[-limite:]))}
+
+def top_entradas_fornecedores_parkin(dias: int = 30, limite: int = 5) -> list[dict]:
+    """Fornecedores com mais entregas nos últimos `dias` dias, com
+    quantidade total e nº de entregas — ordenado por quantidade desc."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT fornecedor, COUNT(*) AS entregas, SUM(peso_liquido_kg) AS total_kg
+                   FROM parkin_entradas WHERE data >= (CURRENT_DATE - %s * interval '1 day')
+                   GROUP BY fornecedor ORDER BY total_kg DESC LIMIT %s""",
+                (dias, limite)
+            )
+            return [{"fornecedor": l["fornecedor"], "entregas": l["entregas"], "total_kg": float(l["total_kg"])}
+                   for l in cur.fetchall()]

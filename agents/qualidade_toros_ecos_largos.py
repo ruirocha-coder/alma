@@ -149,6 +149,12 @@ o texto que a pessoa escreveu:
   "Cálculo do IGQC", classificação, recomendação — os 4 passos definidos
   acima). Este campo é transmitido automaticamente à pessoa, tal e qual
   o escreveres — nunca um resumo, escreve-o por extenso
+- indice_igqc: a mesma percentagem final (0-100) do passo 3, agora como
+  número — passa sempre que a avaliação chegar a esse passo, mesmo já
+  estando também escrita dentro do texto de avaliacao (ex: "Aceitável
+  (60%)" -> indice_igqc=60). É o que o Park In (gestão de stock de toros)
+  usa para saber a categoria de qualidade de uma carga pelo número do
+  talão, sem ter de voltar a analisar o texto da avaliação.
 Só deixes um campo de fora se o tiveres mesmo procurado (na mensagem E em
 todas as fotos/transcrições) e não estiver em lado nenhum — não inventes
 valores, mas também não desistas cedo demais só porque a pessoa não os

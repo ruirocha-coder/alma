@@ -21,7 +21,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
                     verificar_portais_projeto)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
 from db import inicializar_schema
 inicializar_schema()
 
@@ -901,6 +901,74 @@ def planeamento_entradas_dia_entrada(corpo: dict = Body(...)):
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
+
+@app.get("/park-in", response_class=HTMLResponse)
+def park_in_pagina():
+    """Página interna (sem login) de gestão do stock de toros da Ecos
+    Largos — ver tools/parkin.pagina_park_in. O Rui coloca o link
+    manualmente dentro do Basecamp."""
+    return HTMLResponse(parkin.pagina_park_in())
+
+@app.get("/park-in/dados")
+def park_in_dados(dias_top_entradas: int = 30):
+    """Dados do dashboard: stock total, stock por artigo, top qualidade e
+    top entradas — ver tools/parkin.dados_dashboard."""
+    return parkin.dados_dashboard(dias_top_entradas)
+
+@app.post("/park-in/entrada")
+async def park_in_entrada(utilizador: str = Form(""), ficheiro: UploadFile = File(...)):
+    """Regista uma entrada a partir da foto de UM talão de pesagem — ver
+    tools/parkin.registar_entrada. Pode demorar alguns segundos quando é
+    preciso avaliar a qualidade na hora (talão ainda não avaliado no chat)."""
+    bruto = await ficheiro.read()
+    if len(bruto) > 15 * 1024 * 1024:
+        return JSONResponse({"erro": "ficheiro demasiado grande (máx. 15 MB)"}, status_code=400)
+    resultado = await asyncio.to_thread(
+        parkin.registar_entrada, bruto, ficheiro.content_type, utilizador or None)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/saida")
+async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
+    """Regista saídas em lote — uma foto de talão por carga consumida (ver
+    tools/parkin.registar_saida). Cada ficheiro é processado de forma
+    independente: uma falha num não impede os outros de serem registados."""
+    resultados = []
+    for ficheiro in ficheiros:
+        bruto = await ficheiro.read()
+        if len(bruto) > 15 * 1024 * 1024:
+            resultados.append({"ficheiro": ficheiro.filename, "erro": "ficheiro demasiado grande (máx. 15 MB)"})
+            continue
+        resultado = await asyncio.to_thread(
+            parkin.registar_saida, bruto, ficheiro.content_type, utilizador or None)
+        resultados.append({"ficheiro": ficheiro.filename, **resultado})
+    return JSONResponse({"resultados": resultados})
+
+@app.post("/park-in/correcao")
+def park_in_correcao(corpo: dict = Body(...)):
+    """Lançamento manual de uma correção de stock — ver
+    tools/parkin.registar_correcao."""
+    try:
+        quantidade_kg = float(corpo.get("quantidade_kg"))
+        comprimento = float(corpo.get("comprimento"))
+    except (TypeError, ValueError):
+        return JSONResponse({"erro": "quantidade_kg e comprimento têm de ser números"}, status_code=400)
+    resultado = parkin.registar_correcao(
+        corpo.get("tipo"), comprimento, corpo.get("espessura"), quantidade_kg, corpo.get("motivo"),
+        categoria_qualidade=corpo.get("categoria_qualidade"), registado_por=corpo.get("utilizador"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/limites")
+def park_in_limites(corpo: dict = Body(...)):
+    """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
+    "tipo|comprimento|espessura") — ver tools/parkin.definir_limite."""
+    chave = corpo.get("chave")
+    if not chave:
+        return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
+    return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
 
 @app.get("/health")
 def health():

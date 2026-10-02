@@ -478,7 +478,8 @@ TOOLS_MANUAL_QUALIDADE_TOROS = [
 # sempre calculado aqui, nunca pelo modelo — a mesma razão de sempre:
 # datas não se confiam ao modelo, ver tools/ecos_largos._resolver_data.
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: str = None,
-                                  data_carga: str = None, talao: str = None) -> dict:
+                                  data_carga: str = None, talao: str = None,
+                                  indice_igqc: float = None) -> dict:
     """Guarda o registo de uma avaliação de qualidade de uma carga de
     toros, associado ao ano corrente — fica disponível para perguntas
     futuras (em qualquer conversa) sobre o histórico de avaliações, e
@@ -491,7 +492,12 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     não as regras do manual, e porquê — direto, sem rodeios);
     `quantidade` (peso/quantidade da carga), `data_carga` e `talao`
     (número do talão) ficam de fora se não forem mencionados — não
-    inventes valores para eles."""
+    inventes valores para eles. `indice_igqc` é a percentagem final do
+    IGQC (0-100) que já calculaste no passo 3 da avaliação — passa-a
+    também aqui, como número, nunca só dentro do texto de `avaliacao`: é
+    o que o Park In (gestão de stock de toros) usa para saber a categoria
+    de qualidade de uma carga pelo número do talão, sem ter de analisar
+    texto livre."""
     ano = date.today().year
     # coerção defensiva: o schema da tool já pede strings, mas o modelo por
     # vezes devolve um número (ex: quantidade=11850) — psycopg não converte
@@ -499,13 +505,19 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     # do ponto de vista de quem pergunta (o erro ficava só nos logs do
     # Railway, e a Alma continuava a dizer "guardado" até à correção da
     # missão que proíbe essa alegação falsa).
+    try:
+        indice_igqc = float(indice_igqc) if indice_igqc is not None else None
+    except (TypeError, ValueError):
+        indice_igqc = None
     db.guardar_avaliacao_carga_toros(
         str(fornecedor) if fornecedor else "(fornecedor não identificado)",
         str(avaliacao), ano,
         quantidade=str(quantidade) if quantidade is not None else None,
         data_carga=str(data_carga) if data_carga is not None else None,
-        talao=str(talao) if talao is not None else None)
-    print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano}")
+        talao=str(talao) if talao is not None else None,
+        indice_igqc=indice_igqc)
+    print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano} "
+         f"indice_igqc={indice_igqc!r}")
     return {"guardado": True, "ano": ano}
 
 def resumo_avaliacoes_cargas_toros(ano: str = None, fornecedor: str = None) -> dict:
@@ -538,7 +550,8 @@ TOOLS_AVALIACOES_CARGAS_TOROS = [
                 "avaliacao": {"type": "string", "description": "a avaliação DETALHADA completa desta carga, em markdown: justificação critério a critério (com a pontuação de cada um), a tabela \"Cálculo do IGQC\" (Critério/Peso/Pontuação/Contribuição + Total ponderado), a percentagem e classificação final, e a secção \"Recomendação\". Este texto é mostrado tal e qual à pessoa — nunca um resumo, escreve-o por extenso"},
                 "quantidade": {"type": "string", "description": "peso/quantidade da carga, se for mencionado"},
                 "data_carga": {"type": "string", "description": "data da carga, se for mencionada"},
-                "talao": {"type": "string", "description": "número do talão, se for mencionado"}
+                "talao": {"type": "string", "description": "número do talão, se for mencionado"},
+                "indice_igqc": {"type": "number", "description": "a percentagem final do IGQC (0-100) calculada no passo 3 da avaliação — passa-a sempre que a avaliação chegar a esse passo, como número, mesmo já estando também escrita dentro do texto de `avaliacao`"}
             },
             "required": ["fornecedor", "avaliacao"]
         }
