@@ -21,12 +21,26 @@ import db
 from tools import planeamento_serracao as ps
 
 CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros"]
-# valores corrigidos (pedido explícito do Rui, 2026-10-04) — guardados como
-# texto, não número, para poder vir a ter opções que não sejam um número
-# puro (ex: com diâmetro) — ver nota na migração de toro_cmp para TEXT, em
-# db.py.
-TORO_CMP_PRESETS = ["255", "264", "310", "235"]
+# valores em milímetros (pedido explícito do Rui, 2026-10-04 — antes
+# estavam em cm) — guardados como texto, não número, para poder vir a ter
+# opções que não sejam um número puro (ex: com diâmetro) — ver nota na
+# migração de toro_cmp para TEXT, em db.py.
+TORO_CMP_PRESETS = ["2550", "2640", "3100", "2350"]
 TORO_TIPOS = {"IN", "MT"}
+
+# WIP: Cmp é uma lista fechada em mm (sem "outro", ao contrário do Toro);
+# Lar é sempre fixa, já não se escolhe por OF; Esp só pode ser um dos
+# valores da tabela "WIP Lotes" (documento no Basecamp, Ecos Largos/
+# Documentos), cada um já associado ao seu nº de fiadas — pedido explícito
+# do Rui, 2026-10-04.
+WIP_CMP_PRESETS = ["2350", "2550", "2650", "3100"]
+WIP_LAR_FIXA = 1200
+WIP_LOTES_TABELA = [
+    (0.18, 40), (0.22, 35), (0.25, 30), (0.32, 25), (0.36, 20), (0.42, 16),
+    (0.52, 14), (0.6, 12), (0.7, 10), (0.8, 8), (0.9, 7), (1, 6), (1.1, 6),
+    (1.2, 5), (1.3, 5), (1.4, 4), (1.5, 4), (1.6, 4), (1.7, 4), (1.8, 4), (2, 3),
+]
+FIADAS_POR_ESPESSURA = {round(esp, 2): fiadas for esp, fiadas in WIP_LOTES_TABELA}
 
 # QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
 # — pedido explícito do Rui (2026-10-01). Cada OF pode ter o seu próprio
@@ -47,13 +61,22 @@ _PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
 def _eh_quadradilho(titulo: str) -> bool:
     return not bool(_PADRAO_OF.search(titulo or ""))
 
-# tamanhos WIP mais usados para "quadradilho" (pedido explícito do Rui,
-# 2026-10-01) — não são regra fixa, por isso só preenchem por omissão um
-# campo que ainda ninguém tenha escrito nada (ver estado_planeamento_
-# entradas); continuam totalmente editáveis por OF.
-WIP_CMP_QUADRADILHO_DEFAULT = 2500
-WIP_LAR_QUADRADILHO_DEFAULT = 32
-WIP_ESP_QUADRADILHO_DEFAULT = 32
+def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_m):
+    """Nº de lotes (pedido explícito do Rui, 2026-10-04): volume real de
+    um lote = comprimento x (largura fixa x 0,7) x nº de fiadas x
+    espessura — fiadas vêm sempre da tabela "WIP Lotes" pela espessura
+    escolhida (ver FIADAS_POR_ESPESSURA); nº de lotes = QTD Wip a
+    dividir por esse volume. None sempre que faltar algum dos dados ou a
+    espessura não bater com nenhuma linha da tabela."""
+    if qtd_wip_m3 is None or wip_cmp_mm is None or wip_esp_m is None:
+        return None
+    fiadas = FIADAS_POR_ESPESSURA.get(round(float(wip_esp_m), 2))
+    if fiadas is None:
+        return None
+    volume_lote = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * float(wip_esp_m)
+    if volume_lote <= 0:
+        return None
+    return round(qtd_wip_m3 / volume_lote, 1)
 
 def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     """Dia em que os troncos desta OF entram no charriot.
@@ -112,24 +135,10 @@ def estado_planeamento_entradas() -> dict:
         indice_wip = extra.get("indice_wip")
         if indice_wip is None:
             indice_wip = INDICE_WIP_DEFAULT
-        # pedido explícito do Rui (2026-10-01): para "quadradilho", o WIP
-        # começa logo preenchido com os tamanhos mais usados (2500/32/32)
-        # — não são regra fixa, por isso continuam totalmente editáveis;
-        # cada campo só usa o valor por omissão enquanto ninguém tiver
-        # escrito nada nele (ver guardar_wip: escrever aqui grava o valor
-        # escolhido em definitivo para esta OF, mesmo que seja igual ao
-        # que já vinha por omissão).
         wip_cmp = extra.get("wip_cmp")
-        wip_lar = extra.get("wip_lar")
         wip_esp = extra.get("wip_esp")
-        if eh_quadradilho:
-            if wip_cmp is None:
-                wip_cmp = WIP_CMP_QUADRADILHO_DEFAULT
-            if wip_lar is None:
-                wip_lar = WIP_LAR_QUADRADILHO_DEFAULT
-            if wip_esp is None:
-                wip_esp = WIP_ESP_QUADRADILHO_DEFAULT
         volume = agendamento["volume_m3"]
+        qtd_wip_m3 = round(volume * indice_wip, 2) if volume is not None else None
         entradas.append({
             "basecamp_card_id": c["id"],
             "titulo": c["titulo"],
@@ -150,10 +159,11 @@ def estado_planeamento_entradas() -> dict:
             "largura_dias": extra.get("largura_dias_visual") or 1,
             "produzido": bool(extra.get("produzido")),
             "wip_cmp": wip_cmp,
-            "wip_lar": wip_lar,
+            "wip_lar": WIP_LAR_FIXA,
             "wip_esp": wip_esp,
             "indice_wip": indice_wip,
-            "qtd_wip_m3": round(volume * indice_wip, 2) if volume is not None else None,
+            "qtd_wip_m3": qtd_wip_m3,
+            "n_lotes": _calcular_n_lotes(qtd_wip_m3, wip_cmp, wip_esp),
             "toro_cmp": extra.get("toro_cmp"),
             "toro_tipo": extra.get("toro_tipo"),
             "indice_toros": indice_toros,
@@ -216,6 +226,9 @@ def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp
         erro = _validar_numero_positivo(nome, valor)
         if erro:
             return {"erro": erro}
+    if esp is not None and round(float(esp), 2) not in FIADAS_POR_ESPESSURA:
+        return {"erro": f"espessura {esp!r} não consta da tabela \"WIP Lotes\""}
+    lar = WIP_LAR_FIXA
     return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
 
 def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indice_toros: float = None) -> dict:
@@ -527,7 +540,23 @@ const INICIO_MIN_SEMANA=(()=>{ const s=segundaDe(0); return s>=0?s:s+7; })();
 const $=s=>document.querySelector(s);
 const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros"];
 const LANES=["Por atribuir",...CHARRIOTS];
-const TORO_PRESETS=["255","264","310","235"];
+const TORO_PRESETS=["2550","2640","3100","2350"];
+const WIP_CMP_PRESETS=["2350","2550","2650","3100"];
+const WIP_LAR_FIXA=1200;
+const WIP_LOTES_TABELA=[[0.18,40],[0.22,35],[0.25,30],[0.32,25],[0.36,20],[0.42,16],
+  [0.52,14],[0.6,12],[0.7,10],[0.8,8],[0.9,7],[1,6],[1.1,6],[1.2,5],[1.3,5],
+  [1.4,4],[1.5,4],[1.6,4],[1.7,4],[1.8,4],[2,3]];
+function fiadasPorEspessura(esp){
+  if(esp==null || isNaN(esp)) return null;
+  const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e*100)===Math.round(esp*100));
+  return linha ? linha[1] : null;
+}
+function calcularNLotes(qtdWipM3, wipCmpMm, wipEspM){
+  const fiadas=fiadasPorEspessura(wipEspM);
+  if(qtdWipM3==null || wipCmpMm==null || wipEspM==null || fiadas==null) return null;
+  const volumeLote=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*wipEspM;
+  return volumeLote>0 ? Math.round((qtdWipM3/volumeLote)*10)/10 : null;
+}
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
    explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
@@ -670,7 +699,7 @@ function renderLanes(){
       // seleção na ficha, mas mais rápido).
       el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
         <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
-        <div class="of">Wip: ${e.qtdWip!=null?e.qtdWip+" m³":"—"}</div>
+        <div class="of">Nº lotes: ${e.nLotes!=null?e.nLotes:"—"}</div>
         <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
         <div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>`;
       bl.appendChild(el);
@@ -882,6 +911,15 @@ function toroCmpOptionsHtml(atual){
     TORO_PRESETS.map(v=>`<option value="${v}"${atual===v?" selected":""}>${v}</option>`).join("") +
     `<option value="outro"${(atual!=null && !ehPreset)?" selected":""}>Outro…</option>`;
 }
+function wipCmpOptionsHtml(atual){
+  const atualTxt = atual==null ? "" : String(atual);
+  return `<option value="" ${!atualTxt?"selected":""}>—</option>` +
+    WIP_CMP_PRESETS.map(v=>`<option value="${v}"${atualTxt===v?" selected":""}>${v}</option>`).join("");
+}
+function wipEspOptionsHtml(atual){
+  return `<option value="" ${atual==null?"selected":""}>—</option>` +
+    WIP_LOTES_TABELA.map(([esp])=>`<option value="${esp}"${atual===esp?" selected":""}>${String(esp).replace(".",",")}</option>`).join("");
+}
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
 /* QTD Toros/QTD Wip nunca se guardam — recalculam-se aqui ao vivo, à
    medida que o índice muda no formulário (pedido explícito do Rui,
@@ -890,8 +928,15 @@ function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.
 function recalcularQtd(it){
   const indiceWip=parseFloat($("#fIndiceWip").value);
   const indiceToros=parseFloat($("#fIndiceToros").value);
-  $("#fQtdWip").textContent = (it.volume!=null && !isNaN(indiceWip)) ? (Math.round(it.volume*indiceWip*100)/100)+" m³" : "—";
+  const qtdWip = (it.volume!=null && !isNaN(indiceWip)) ? Math.round(it.volume*indiceWip*100)/100 : null;
+  $("#fQtdWip").textContent = qtdWip!=null ? qtdWip+" m³" : "—";
   $("#fQtdToros").textContent = (it.volume!=null && !isNaN(indiceToros)) ? (Math.round(it.volume*indiceToros*100)/100)+" m³" : "—";
+  const wipCmp = $("#fWipCmp").value ? parseFloat($("#fWipCmp").value) : null;
+  const wipEsp = $("#fWipEsp").value ? parseFloat($("#fWipEsp").value) : null;
+  const fiadas = fiadasPorEspessura(wipEsp);
+  $("#fFiadas").textContent = fiadas!=null ? fiadas : "—";
+  const nLotes = calcularNLotes(qtdWip, wipCmp, wipEsp);
+  $("#fNLotes").textContent = nLotes!=null ? nLotes : "—";
 }
 /* sugestões de valores já usados antes (pedido explícito do Rui,
    2026-10-01) — <datalist> nativo do browser: ao escrever, por exemplo,
@@ -936,11 +981,13 @@ function openSheet(id){
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
-      <div class="miniField"><label>Cmp</label><input id="fWipCmp" type="text" inputmode="decimal" value="${it.wipCmp??""}" list="histWipCmp"></div>
-      <div class="miniField"><label>Lar</label><input id="fWipLar" type="text" inputmode="decimal" value="${it.wipLar??""}" list="histWipLar"></div>
-      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="text" inputmode="decimal" value="${it.wipEsp??""}" list="histWipEsp"></div>
+      <div class="miniField"><label>Cmp</label><select id="fWipCmp">${wipCmpOptionsHtml(it.wipCmp)}</select></div>
+      <div class="miniField"><label>Lar</label><input type="text" value="${WIP_LAR_FIXA}" disabled></div>
+      <div class="miniField"><label>Esp</label><select id="fWipEsp">${wipEspOptionsHtml(it.wipEsp)}</select></div>
+      <div class="miniField"><label>Fiadas</label><b id="fFiadas" class="mono" style="align-self:center">—</b></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="text" inputmode="decimal" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
+      <div class="miniField"><label>Nº lotes</label><b id="fNLotes" class="mono" style="align-self:center">—</b></div>
     </div>
 
     <label class="grupoLbl">Toro</label>
@@ -956,9 +1003,6 @@ function openSheet(id){
       <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="text" inputmode="decimal" value="${it.indiceToros}"></div>
       <div class="miniField"><label>QTD Toros</label><b id="fQtdToros" class="mono" style="align-self:center">—</b></div>
     </div>
-    ${datalistHtml("histWipCmp",historico.wip_cmp)}
-    ${datalistHtml("histWipLar",historico.wip_lar)}
-    ${datalistHtml("histWipEsp",historico.wip_esp)}
     ${datalistHtml("histToroCmp",historico.toro_cmp)}
 
     <div class="kv" style="margin-top:16px"><span>Nome</span><b>${it.titulo}</b></div>
@@ -988,11 +1032,13 @@ function openSheet(id){
   };
   $("#fIndiceWip").oninput=()=>recalcularQtd(it);
   $("#fIndiceToros").oninput=()=>recalcularQtd(it);
+  $("#fWipCmp").onchange=()=>recalcularQtd(it);
+  $("#fWipEsp").onchange=()=>recalcularQtd(it);
   recalcularQtd(it);
   $("#guardar").onclick=async()=>{
     $("#fErro").textContent="";
     const wipCmp=$("#fWipCmp").value?parseFloat($("#fWipCmp").value):null;
-    const wipLar=$("#fWipLar").value?parseFloat($("#fWipLar").value):null;
+    const wipLar=WIP_LAR_FIXA;
     const wipEsp=$("#fWipEsp").value?parseFloat($("#fWipEsp").value):null;
     const indiceWip=$("#fIndiceWip").value?parseFloat($("#fIndiceWip").value):null;
     const indiceToros=$("#fIndiceToros").value?parseFloat($("#fIndiceToros").value):null;
@@ -1063,7 +1109,7 @@ async function carregar(){
       gs:idxOf(e.dia_entrada), charriots:e.charriots||[], larguraDias:e.largura_dias||1,
       produzido:!!e.produzido, emContinuo:!!e.em_continuo,
       wipCmp:e.wip_cmp, wipLar:e.wip_lar, wipEsp:e.wip_esp,
-      indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3,
+      indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3, nLotes:e.n_lotes,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,
       indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
     })).filter(e=>e.gs>=0);
