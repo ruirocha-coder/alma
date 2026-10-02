@@ -915,24 +915,38 @@ def park_in_dados(dias_top_entradas: int = 30):
     top entradas — ver tools/parkin.dados_dashboard."""
     return parkin.dados_dashboard(dias_top_entradas)
 
+def _fluxo_entrada_parkin(fotos: list, registado_por: str, erro_tamanho: str):
+    """Generator SSE do registo de entrada no Park In — mesmo formato de
+    eventos que _fluxo_resposta_agente (delta/a_processar/erro), mais um
+    evento final "done" com os dados da entrada já gravada (ver
+    tools/parkin.registar_entrada_stream). Pedido explícito do Rui
+    (2026-10-02): o relatório de qualidade deve aparecer a ir sendo
+    escrito, tal como no chat normal, em vez de ficar à espera às cegas
+    atrás de um spinner até estar tudo pronto."""
+    if erro_tamanho:
+        yield f"data: {json.dumps({'erro': erro_tamanho}, ensure_ascii=False)}\n\n"
+        return
+    for evento in parkin.registar_entrada_stream(fotos, registado_por):
+        yield f"data: {json.dumps(evento, ensure_ascii=False)}\n\n"
+
 @app.post("/park-in/entrada")
 async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
     """Regista uma entrada a partir de uma ou mais fotos (o talão de
     pesagem, e idealmente também foto(s) da própria carga, necessárias
-    para a avaliação de qualidade — ver tools/parkin.registar_entrada).
-    Pode demorar alguns segundos quando é preciso avaliar a qualidade na
-    hora (talão ainda não avaliado no chat)."""
+    para a avaliação de qualidade), por SSE — ver _fluxo_entrada_parkin."""
     fotos = []
+    erro_tamanho = None
     for ficheiro in ficheiros:
         bruto = await ficheiro.read()
         if len(bruto) > 15 * 1024 * 1024:
-            return JSONResponse({"erro": f"ficheiro demasiado grande (máx. 15 MB): {ficheiro.filename}"},
-                               status_code=400)
+            erro_tamanho = f"ficheiro demasiado grande (máx. 15 MB): {ficheiro.filename}"
+            break
         fotos.append((bruto, ficheiro.content_type))
-    resultado = await asyncio.to_thread(parkin.registar_entrada, fotos, utilizador or None)
-    if "erro" in resultado:
-        return JSONResponse(resultado, status_code=400)
-    return JSONResponse(resultado)
+    return StreamingResponse(
+        _fluxo_entrada_parkin(fotos, utilizador or None, erro_tamanho),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 @app.post("/park-in/saida")
 async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):

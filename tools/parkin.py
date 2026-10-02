@@ -247,51 +247,33 @@ def _resolver_data(data_str: str):
         return date.today()
 
 
-def _avaliar_qualidade_inline(fotos: list, talao: str, fornecedor: str = None):
-    """Corre a MESMA missão de avaliação de qualidade usada no chat (ver
-    agents/qualidade_toros_ecos_largos) a partir destas mesmas fotos, só
-    quando este talão ainda não tinha sido avaliado antes — para o
-    registo de entrada no Park In nunca ficar bloqueado à espera de
-    alguém enviar as fotos ao chat primeiro. `fotos` é uma lista de
-    (bruto, content_type) — o talão sozinho normalmente não chega para
-    uma avaliação a sério (não mostra o estado da madeira em si); pedido
-    explícito do Rui (2026-10-02): a Entrada tem de aceitar também
-    foto(s) da própria carga, tal como o chat já exige. Import feito
-    aqui dentro (não no topo do módulo) de propósito: mantém tools/ não
-    dependente de agents/ no caminho normal de arranque, só quando mesmo
-    é preciso. Devolve o índice IGQC (0-100) se a avaliação tiver
-    corrido e sido guardada com sucesso, ou None caso contrário."""
-    from agents import qualidade_toros_ecos_largos
-    transcricoes = [f"[Foto {i}]\n{visao.descrever_imagem(bruto, content_type)}"
-                    for i, (bruto, content_type) in enumerate(fotos, start=1)]
-    contexto = ("[Fotos anexadas, já transcritas abaixo]\n\n" + "\n\n".join(transcricoes)
-               + f"\n\nNº do talão (já confirmado, usa exatamente este valor): {talao}\n"
-               + (f"Fornecedor (já confirmado): {fornecedor}\n" if fornecedor else "")
-               + "\nAvalia a qualidade desta carga de toros.")
-    try:
-        qualidade_toros_ecos_largos.responder("Park In (registo automático)",
-                                              [{"role": "user", "content": contexto}])
-    except Exception as e:
-        print(f"[parkin] falhou a avaliação de qualidade em linha do talão {talao!r}: {e!r}")
-        return None
-    avaliacao = db.avaliacao_carga_toros_por_talao(talao)
-    if avaliacao and avaliacao.get("indice_igqc") is not None:
-        return float(avaliacao["indice_igqc"])
-    return None
+def registar_entrada_stream(fotos: list, registado_por: str = None):
+    """Versão em stream de registo de entrada no Park In — a do talão de
+    pesagem (obrigatória, identificada tentando ler cada foto até
+    encontrar uma com talão/produto legíveis) e, idealmente, foto(s) da
+    própria carga de madeira, para a avaliação de qualidade poder ser
+    feita com a mesma informação visual que o chat já usa (só o talão não
+    chega para avaliar o estado da madeira em si). `fotos` é uma lista de
+    (bruto, content_type).
 
+    Em vez de correr a avaliação de qualidade da mesma MISSÃO usada no
+    chat (agents/qualidade_toros_ecos_largos) em bloco e só mostrar o
+    resultado tudo de uma vez no fim (como esta função fazia antes),
+    agora usa responder_stream e vai devolvendo o relatório a aparecer
+    progressivamente, exatamente como no chat normal — pedido explícito
+    do Rui (2026-10-02): não queria ter de abrir nada para ver o
+    relatório, nem que a avaliação "pareça" demorada por ficar à espera
+    às cegas atrás de um spinner. Import feito aqui dentro (não no topo
+    do módulo) de propósito: mantém tools/ não dependente de agents/ no
+    caminho normal de arranque, só quando mesmo é preciso.
 
-def registar_entrada(fotos: list, registado_por: str = None) -> dict:
-    """Regista uma entrada no Park In a partir de uma ou mais fotos — a
-    do talão de pesagem (obrigatória, identificada tentando ler cada
-    foto até encontrar uma com talão/produto legíveis) e, idealmente,
-    foto(s) da própria carga de madeira, para a avaliação de qualidade
-    poder ser feita com a mesma informação visual que o chat já usa (só
-    o talão não chega para avaliar o estado da madeira em si). `fotos` é
-    uma lista de (bruto, content_type). Extrai os campos do talão,
-    procura (ou corre na hora, com todas as fotos) a avaliação de
-    qualidade desse talão, e grava o lote com saldo_kg = peso líquido."""
+    Gera eventos: {"delta": texto} (pedaço de relatório), {"a_processar":
+    True} (sinal de vida, sem texto novo), {"erro": msg} (falha, pára
+    aqui sem gravar nada), {"done": True, **resultado} (sucesso, já com a
+    entrada gravada)."""
     if not fotos:
-        return {"erro": "falta pelo menos uma foto (o talão de pesagem)"}
+        yield {"erro": "falta pelo menos uma foto (o talão de pesagem)"}
+        return
 
     campos = None
     for bruto, content_type in fotos:
@@ -300,19 +282,23 @@ def registar_entrada(fotos: list, registado_por: str = None) -> dict:
             campos = tentativa
             break
     if campos is None:
-        return {"erro": "não consegui reconhecer um talão de pesagem em nenhuma destas fotos"}
+        yield {"erro": "não consegui reconhecer um talão de pesagem em nenhuma destas fotos"}
+        return
 
     talao = str(campos.get("talao") or "").strip()
     if not talao:
-        return {"erro": "não consegui ler o número do talão nesta foto"}
+        yield {"erro": "não consegui ler o número do talão nesta foto"}
+        return
 
     interpretado = _interpretar_produto(campos.get("produto") or "")
     if interpretado["erro"]:
-        return {"erro": interpretado["erro"]}
+        yield {"erro": interpretado["erro"]}
+        return
 
     peso_liquido = campos.get("peso_liquido_kg")
     if not peso_liquido:
-        return {"erro": "não consegui ler o peso líquido neste talão"}
+        yield {"erro": "não consegui ler o peso líquido neste talão"}
+        return
 
     fornecedor = (campos.get("fornecedor") or "").strip() or "(fornecedor não identificado)"
     data_resolvida = _resolver_data(campos.get("data"))
@@ -322,6 +308,8 @@ def registar_entrada(fotos: list, registado_por: str = None) -> dict:
     if avaliacao and avaliacao.get("indice_igqc") is not None:
         indice = float(avaliacao["indice_igqc"])
         categoria = _categoria_de_indice(indice)
+        if avaliacao.get("avaliacao"):
+            yield {"delta": avaliacao["avaliacao"]}
     elif avaliacao and avaliacao.get("avaliacao"):
         # já avaliado antes de indice_igqc existir como coluna — lê a
         # categoria do texto em vez de reavaliar sem as fotos da madeira
@@ -331,9 +319,27 @@ def registar_entrada(fotos: list, registado_por: str = None) -> dict:
         indice, categoria = _indice_e_categoria_de_texto(avaliacao["avaliacao"])
         if indice is not None:
             db.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
+        yield {"delta": avaliacao["avaliacao"]}
+
     if categoria is None:
-        indice = _avaliar_qualidade_inline(fotos, talao, fornecedor)
-        categoria = _categoria_de_indice(indice)
+        from agents import qualidade_toros_ecos_largos
+        transcricoes = [f"[Foto {i}]\n{visao.descrever_imagem(bruto, content_type)}"
+                        for i, (bruto, content_type) in enumerate(fotos, start=1)]
+        contexto = ("[Fotos anexadas, já transcritas abaixo]\n\n" + "\n\n".join(transcricoes)
+                   + f"\n\nNº do talão (já confirmado, usa exatamente este valor): {talao}\n"
+                   + (f"Fornecedor (já confirmado): {fornecedor}\n" if fornecedor else "")
+                   + "\nAvalia a qualidade desta carga de toros.")
+        try:
+            for pedaco in qualidade_toros_ecos_largos.responder_stream(
+                    "Park In (registo automático)", [{"role": "user", "content": contexto}]):
+                yield {"a_processar": True} if pedaco is None else {"delta": pedaco}
+        except Exception as e:
+            print(f"[parkin] falhou a avaliação de qualidade em stream do talão {talao!r}: {e!r}")
+        avaliacao_final = db.avaliacao_carga_toros_por_talao(talao)
+        if avaliacao_final and avaliacao_final.get("indice_igqc") is not None:
+            indice = float(avaliacao_final["indice_igqc"])
+            categoria = _categoria_de_indice(indice)
+
     id_gerado = db.guardar_entrada_parkin(
         talao=talao, fornecedor=fornecedor, data=data_resolvida,
         tipo=interpretado["tipo"], comprimento=interpretado["comprimento"], espessura=interpretado["espessura"],
@@ -341,22 +347,13 @@ def registar_entrada(fotos: list, registado_por: str = None) -> dict:
         peso_bruto_kg=campos.get("peso_bruto_kg"), tara_kg=campos.get("tara_kg"),
         indice_igqc=indice, categoria_qualidade=categoria, registado_por=registado_por)
 
-    # relê a avaliação no fim (em vez de ir arrastando o texto pelos vários
-    # ramos acima) para apanhar o relatório completo tal como a Alma o
-    # escreveu no chat, tanto para talões já avaliados como para os
-    # avaliados agora mesmo em _avaliar_qualidade_inline — o Rui pediu para
-    # ver aqui o mesmo relatório, não só a categoria (2026-10-02).
-    avaliacao_final = db.avaliacao_carga_toros_por_talao(talao)
-    relatorio = avaliacao_final.get("avaliacao") if avaliacao_final else None
-
     resultado = {"ok": True, "id": id_gerado, "talao": talao, "fornecedor": fornecedor,
                 "artigo": _chave_artigo(interpretado["tipo"], interpretado["comprimento"], interpretado["espessura"]),
-                "peso_liquido_kg": float(peso_liquido), "indice_igqc": indice, "categoria_qualidade": categoria,
-                "relatorio": relatorio}
+                "peso_liquido_kg": float(peso_liquido), "indice_igqc": indice, "categoria_qualidade": categoria}
     if categoria is None:
         resultado["aviso"] = ("a entrada ficou registada, mas ainda sem categoria de qualidade — não foi "
                               "possível avaliar esta carga automaticamente")
-    return resultado
+    yield {"done": True, **resultado}
 
 
 _RE_PRODUTO_LINHA = re.compile(r"Produto:\**\s*([^\n]+)", re.IGNORECASE)
@@ -1026,21 +1023,51 @@ $("#bEntradaGuardar").onclick = async () => {
   const fs = $("#fEntradaFotos").files;
   if(!fs.length){ $("#entradaMsg").innerHTML = '<div class="err">Escolhe a foto do talão e da carga.</div>'; return; }
   $("#bEntradaGuardar").disabled = true;
-  $("#entradaMsg").innerHTML = '<div class="sub">A ler o talão e avaliar a qualidade — pode demorar uns segundos…</div>';
+  $("#entradaMsg").innerHTML = '<div class="sub" id="entradaEstado">A ler o talão…</div>'+
+    '<div id="entradaRelatorio" class="sub" style="white-space:pre-wrap;margin-top:8px"></div>';
+  const estadoEl = $("#entradaEstado"), relatorioEl = $("#entradaRelatorio");
   const fd = new FormData();
   for(const f of fs) fd.append("ficheiros", f);
+  let texto = "";
+  // consome a resposta por SSE tal como o chat normal (ver static/index.html,
+  // consumirStreamSSE) — o relatório de qualidade vai aparecendo a ser
+  // escrito em vez de ficar à espera às cegas atrás de um spinner até
+  // estar tudo pronto (pedido explícito do Rui, 2026-10-02).
   try{
     const r = await fetch("/park-in/entrada", {method:"POST", body:fd});
-    const j = await r.json();
-    if(j.erro){ $("#entradaMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
-    else {
-      const relatorio = j.relatorio ? `<details style="margin-top:8px">
-          <summary style="cursor:pointer">Ver relatório de qualidade</summary>
-          <div class="sub" style="white-space:pre-wrap;margin-top:6px">${j.relatorio}</div>
-        </details>` : "";
-      $("#entradaMsg").innerHTML = `<div class="ok">Registado: talão ${j.talao}, ${t(j.peso_liquido_kg)}, `+
-        `categoria ${j.categoria_qualidade||"(por avaliar)"}.${j.aviso ? ` ${j.aviso}.` : ""}</div>${relatorio}`;
-      carregar();
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while(true){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buffer += decoder.decode(value, {stream:true});
+      const linhas = buffer.split("\n\n");
+      buffer = linhas.pop();
+      for(const linha of linhas){
+        if(!linha.startsWith("data: ")) continue;
+        let dados;
+        try{ dados = JSON.parse(linha.slice(6)); } catch(_) { continue; }
+        if(dados.delta){
+          estadoEl.style.display = "none";
+          texto += dados.delta;
+          relatorioEl.textContent = texto;
+        } else if(dados.a_processar){
+          estadoEl.style.display = "";
+          estadoEl.textContent = "A avaliar a qualidade…";
+        } else if(dados.erro){
+          $("#entradaMsg").innerHTML = `<div class="err">${dados.erro}</div>`;
+        } else if(dados.done){
+          estadoEl.remove();
+          const resumo = document.createElement("div");
+          resumo.className = "ok";
+          if(texto) resumo.style.marginTop = "8px";
+          resumo.innerHTML = `Registado: talão ${dados.talao}, ${t(dados.peso_liquido_kg)}, `+
+            `categoria ${dados.categoria_qualidade||"(por avaliar)"}.${dados.aviso ? ` ${dados.aviso}.` : ""}`;
+          $("#entradaMsg").appendChild(resumo);
+          carregar();
+        }
+      }
     }
   } catch(e){ $("#entradaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bEntradaGuardar").disabled = false;
