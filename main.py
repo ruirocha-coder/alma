@@ -981,6 +981,26 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.post("/_debug-desfazer-importacao-parkin")
+def _debug_desfazer_importacao_parkin():
+    """TEMPORÁRIO — desfaz a importação feita com a lógica antiga (bug
+    real: classificava mal cargas quando o texto repetia a percentagem
+    antes do nome da faixa, ver commit 8b5590c), para a repetir já com a
+    correção. Apaga as entradas importadas e limpa o indice_igqc que essa
+    corrida tenha escrito de volta em avaliacoes_cargas_toros (exceto o
+    talão 11293, confirmado manualmente antes de existir qualquer bug)."""
+    import db as db_mod
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM parkin_entradas WHERE registado_por = %s",
+                       ("importação do histórico",))
+            apagadas = cur.rowcount
+            cur.execute("UPDATE avaliacoes_cargas_toros SET indice_igqc = NULL WHERE talao != %s",
+                       ("11293",))
+            limpas = cur.rowcount
+        conn.commit()
+    return {"entradas_apagadas": apagadas, "indices_limpos": limpas}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
