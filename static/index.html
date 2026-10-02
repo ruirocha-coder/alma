@@ -459,9 +459,9 @@
   /* Botão "tirar foto": só em ecrãs táteis (telemóvel/tablet) — em desktop
      não há câmara a apontar para um documento/talão, e o clip (📎) já
      serve para anexar uma foto já tirada antes. */
-  #camera-btn { display: none; }
+  #composer button#camera-btn { display: none; }
   @media (pointer: coarse) {
-    #camera-btn { display: flex; }
+    #composer button#camera-btn { display: flex; }
   }
   @keyframes pulsar {
     0%, 100% { opacity: 1; }
