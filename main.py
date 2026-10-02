@@ -934,6 +934,25 @@ async def park_in_entrada(utilizador: str = Form(""), ficheiros: list[UploadFile
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/_debug-apagar-entrada-parkin")
+def _debug_apagar_entrada_parkin(id: int):
+    """Temporário: apaga uma entrada de teste do Park In por id (usado para
+    limpar contaminação de um teste de curl com imagens falsas que o
+    modelo de visão "alucinou" como sendo o talão real 11293). Remover
+    depois de usar."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT saldo_kg, peso_liquido_kg FROM parkin_entradas WHERE id = %s", (id,))
+            row = cur.fetchone()
+            if not row:
+                return {"erro": "não existe"}
+            if float(row["saldo_kg"]) != float(row["peso_liquido_kg"]):
+                return {"erro": "esta entrada já tem saldo consumido, não é seguro apagar às cegas"}
+            cur.execute("DELETE FROM parkin_depletions WHERE entrada_id = %s", (id,))
+            cur.execute("DELETE FROM parkin_entradas WHERE id = %s", (id,))
+        conn.commit()
+    return {"ok": True, "apagado": id}
+
 @app.post("/park-in/saida")
 async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
     """Regista saídas em lote — uma foto de talão por carga consumida (ver
