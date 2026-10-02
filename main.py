@@ -1027,20 +1027,6 @@ def diagnostico_avaliacoes_cargas_toros(ano: int = None):
     avaliacoes = avaliacoes_cargas_toros_ano(ano_resolvido)
     return {"ano": ano_resolvido, "total": len(avaliacoes), "avaliacoes": avaliacoes}
 
-@app.post("/_debug-testar-ecos-largos")
-def _debug_testar_ecos_largos(corpo: dict = Body(...)):
-    """TEMPORÁRIO — testa uma pergunta diretamente contra o agente Ecos
-    Largos (sem passar pelo Basecamp, sem nenhum efeito colateral), para
-    confirmar que resumo_producao_planeada é escolhida corretamente."""
-    import traceback
-    from agents import ecos_largos as ecos_largos_agent
-    try:
-        resposta = ecos_largos_agent.responder(
-            "teste (Rui)", [{"role": "user", "content": corpo["pergunta"]}])
-        return {"ok": True, "resposta": resposta}
-    except Exception:
-        return {"erro": traceback.format_exc()}
-
 @app.post("/portais-projeto/verificar")
 def verificar_portais_projeto_agora():
     """Dispara já o reforço diário dos portais de projeto (Interior
