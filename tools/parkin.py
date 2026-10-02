@@ -142,13 +142,25 @@ def _interpretar_produto(produto: str) -> dict:
 
 # faixas do manual (ver LIMIAR_BOA/LIMIAR_MEDIA) tal como os nomes que a
 # própria avaliação já escreve ("Classificação Final: Aceitável (60-74%)")
-# — ler o NOME da faixa é mais fiável do que tentar ler só um número
-# (confirmado contra os 225 registos reais de 2026: cobertura de 71% só
-# pelo nome da faixa, contra 64% só pela palavra "Percentagem"), por isso
-# tenta sempre o nome primeiro.
+# — ler o NOME da faixa é mais fiável do que tentar ler só um número.
+# Entre "Classificação[:/Final]" e o nome da faixa pode vir quase
+# qualquer coisa (a percentagem repetida, uma seta "→", um emoji) — bug
+# real, 2026-10-02: a versão anterior só tolerava ":"/"*"/espaço aí, e
+# "Classificação: 60–74% → Aceitável" (com a percentagem a repetir-se
+# antes do nome) caía para o fallback genérico, que apanhava a
+# percentagem ERRADA de uma linha anterior da tabela de critérios (ex:
+# "Retidão | 10%"), dando uma qualidade de 10% a uma carga real
+# "Aceitável" (62%). Por isso tenta sempre o nome da faixa primeiro
+# (tolerante ao que vier pelo meio), depois o INTERVALO da faixa (ex:
+# "60–74%", mais estável no texto do que o nome isolado), e só por fim
+# uma percentagem solta — e essa só numa janela que começa EM
+# "Classificação"/"IGQC", nunca antes (para nunca voltar a apanhar uma
+# percentagem de uma linha anterior).
 _RE_BANDA_CLASSIFICACAO = re.compile(
-    r"Classifica[cç][aã]o\s*(?:[Ff]inal)?[:\*\s]*\**\s*(Excelente|Boa|Aceit[aá]vel|Fraca|Rejei[cç][aã]o)",
+    r"Classifica[cç][aã]o\s*(?:[Ff]inal)?[:\*\s]*(?:\d[\d,.\-–>\s%→*]*)?\**\s*"
+    r"(Excelente|Boa|Aceit[aá]vel|Fraca|Rejei[cç][aã]o)",
     re.IGNORECASE)
+_RE_FAIXA_INTERVALO = re.compile(r"(\d{1,3})\s*[-–]\s*(\d{1,3})\s*%")
 _RE_PERCENTAGEM_GENERICA = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*%")
 _BANDA_PARA_CATEGORIA = {"excelente": "Boa", "boa": "Boa", "aceitavel": "Media", "fraca": "Fraca", "rejeicao": "Fraca"}
 
@@ -160,25 +172,40 @@ def _indice_e_categoria_de_texto(avaliacao_texto: str):
     guardado, no caso do histórico anterior ao Park In — ver
     importar_historico_avaliacoes), em vez de tentar reavaliar a carga
     sem as fotos originais da madeira (que o Park In não tem aqui, só a
-    foto do talão). Tenta primeiro o NOME da faixa que a própria avaliação
-    já escreveu; só se não encontrar é que procura uma percentagem solta
-    perto de "Classificação"/"IGQC". Best-effort: devolve (None, None) se
-    não conseguir ler nada, nunca inventa um valor."""
+    foto do talão). Três tentativas, por ordem (ver comentário acima):
+    nome da faixa, intervalo da faixa, percentagem solta. Best-effort:
+    devolve (None, None) se não conseguir ler nada, nunca inventa um
+    valor."""
     if not avaliacao_texto:
         return None, None
+
     m = _RE_BANDA_CLASSIFICACAO.search(avaliacao_texto)
     if m:
         banda = m.group(1).lower()
         banda = banda.replace("á", "a").replace("ã", "a").replace("ç", "c")
-        return None, _BANDA_PARA_CATEGORIA.get(banda)
+        categoria = _BANDA_PARA_CATEGORIA.get(banda)
+        if categoria:
+            return None, categoria
+
     idx = avaliacao_texto.lower().find("classifica")
     if idx < 0:
-        idx = avaliacao_texto.lower().find("igqc")
-    janela = avaliacao_texto[max(0, idx - 200):idx + 200] if idx >= 0 else avaliacao_texto
-    m2 = _RE_PERCENTAGEM_GENERICA.search(janela) or _RE_PERCENTAGEM_GENERICA.search(avaliacao_texto)
+        idx = avaliacao_texto.lower().find("faixa")
+    janela = avaliacao_texto[max(0, idx - 50):idx + 250] if idx >= 0 else avaliacao_texto
+    m2 = _RE_FAIXA_INTERVALO.search(janela) or _RE_FAIXA_INTERVALO.search(avaliacao_texto)
     if m2:
         try:
-            indice = float(m2.group(1).replace(",", "."))
+            return None, _categoria_de_indice(float(m2.group(1)))
+        except ValueError:
+            pass
+
+    idx2 = avaliacao_texto.lower().find("classifica")
+    if idx2 < 0:
+        idx2 = avaliacao_texto.lower().find("igqc")
+    janela2 = avaliacao_texto[idx2:idx2 + 200] if idx2 >= 0 else avaliacao_texto
+    m3 = _RE_PERCENTAGEM_GENERICA.search(janela2) or _RE_PERCENTAGEM_GENERICA.search(avaliacao_texto)
+    if m3:
+        try:
+            indice = float(m3.group(1).replace(",", "."))
             return indice, _categoria_de_indice(indice)
         except ValueError:
             pass
