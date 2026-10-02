@@ -1082,6 +1082,14 @@ def diagnostico_logistica_entregas():
     a divergir)."""
     return logistica_entregas.diagnostico_cards_regiao()
 
+@app.get("/_debug-manual-qualidade-completo")
+def _debug_manual_qualidade_completo():
+    """TEMPORÁRIO — o manual real lido pelo diagnóstico fica cortado a 500
+    carateres; preciso do texto completo para confirmar as faixas de
+    classificação exatas do IGQC antes de fixar os limiares do Park In."""
+    resultado = ecos_largos.ler_manual_qualidade_cargas_toros()
+    return resultado
+
 @app.get("/ecos-largos/diagnostico-manual")
 def diagnostico_manual_qualidade_toros():
     """Diagnóstico: mostra exatamente o que a conta da Alma vê no Basecamp
