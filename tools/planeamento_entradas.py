@@ -78,7 +78,7 @@ def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_mm):
     volume_lote = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
     if volume_lote <= 0:
         return None
-    return round(qtd_wip_m3 / volume_lote, 1)
+    return round(qtd_wip_m3 / volume_lote)
 
 def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     """Dia em que os troncos desta OF entram no charriot.
@@ -557,7 +557,7 @@ function calcularNLotes(qtdWipM3, wipCmpMm, wipEspMm){
   const fiadas=fiadasPorEspessura(wipEspMm);
   if(qtdWipM3==null || wipCmpMm==null || wipEspMm==null || fiadas==null) return null;
   const volumeLote=(wipCmpMm/1000)*((WIP_LAR_FIXA/1000)*0.7)*fiadas*(wipEspMm/1000);
-  return volumeLote>0 ? Math.round((qtdWipM3/volumeLote)*10)/10 : null;
+  return volumeLote>0 ? Math.round(qtdWipM3/volumeLote) : null;
 }
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
