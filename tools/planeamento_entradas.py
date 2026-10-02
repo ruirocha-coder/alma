@@ -696,13 +696,35 @@ function renderLanes(){
       el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"");
       el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
       el.style.borderLeftColor=corProduto(e);
-      el.style.left=(aVis*DAY+3)+"px";
       const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
-      el.style.top=topoPx+"px";
-      el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
-      el.style.height=(maxLane>minLane
+      const alturaPx=(maxLane>minLane
         ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ALTURAS_LANE[maxLane])-topoPx-ITEM_PAD)
-        : ITEM_H)+"px";
+        : ITEM_H);
+      // pedido explícito do Rui (2026-10-04, "tipo Google Calendar"): um
+      // card de uma só lane pode cair visualmente por cima de um card
+      // esticado de outra OF (ver minMaxLane) que passe pela mesma lane no
+      // mesmo intervalo de dias — em vez de o tapar, afasta-se "um bocado
+      // para dentro" (desloca-se para a direita/baixo e encolhe) a cada
+      // card esticado que o cubra, em cascata, para dar sempre para ver o
+      // início de todos.
+      let profundidade=0;
+      if(maxLane===minLane){
+        entradas.forEach(outro=>{
+          if(outro.id===e.id) return;
+          const [oMin,oMax]=minMaxLane(outro);
+          if(oMax<=oMin || li<=oMin || li>oMax) return; // 'outro' não está esticado sobre esta lane
+          const oLargura=outro.larguraDias||1;
+          const oIni=outro.gs-view.start, oFim=outro.gs+oLargura-1-view.start;
+          if(oFim<aIni || oIni>aFim) return; // não se cruzam nos dias
+          profundidade++;
+        });
+      }
+      const PASSO_CASCATA=14;
+      el.style.left=(aVis*DAY+3+profundidade*PASSO_CASCATA)+"px";
+      el.style.top=(topoPx+profundidade*6)+"px";
+      el.style.width=Math.max(50,((aFimVis-aVis+1)*DAY-8-profundidade*PASSO_CASCATA))+"px";
+      el.style.height=alturaPx+"px";
+      if(profundidade>0){ el.style.zIndex=10+profundidade; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
       // manípulos de arrastar para alargar (pedido explícito do Rui,
       // 2026-10-02): borda direita alarga em dias (só visual — ver
       // definir_largura_dias); borda de baixo marca mais charriots ao
