@@ -28,10 +28,17 @@ CATEGORIAS_QUALIDADE = ["Boa", "Media", "Fraca"]
 TIPOS_VALIDOS = ("IN", "MT")
 ESPESSURAS_VALIDAS = ("normal", "fina")
 
-# faixas confirmadas pelo Rui (2026-10-02) — se um dia o manual de
-# qualidade mudar as faixas do IGQC, atualizar aqui também.
-LIMIAR_BOA = 80
-LIMIAR_MEDIA = 50
+# faixas do manual real "Manual Qualidade de Cargas - Toros" (Basecamp),
+# secção "Classificação Final": 90-100% Excelente, 75-89% Boa, 60-74%
+# Aceitável, 40-59% Fraca, <40% Rejeição. O Park In usa só 3 categorias
+# (pedido do Rui, 2026-10-02) — Excelente+Boa juntam-se em "Boa" (≥75%),
+# Aceitável fica "Media" (60-74%), Fraca+Rejeição juntam-se em "Fraca"
+# (<60%), para nunca mostrar uma classificação diferente da que já está
+# escrita na avaliação detalhada da mesma carga (bug real, 2026-10-02: os
+# limiares 80/50 que o Rui confirmou sem cruzar com o manual classificavam
+# uma carga de 78% — "Boa (faixa 75-89%)" no texto — como "Media" aqui).
+LIMIAR_BOA = 75
+LIMIAR_MEDIA = 60
 
 
 def _categoria_de_indice(indice: float) -> str:
