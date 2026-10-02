@@ -1076,12 +1076,23 @@ def avaliacao_carga_toros_por_talao(talao: str) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT fornecedor, avaliacao, indice_igqc, criado_em
+                """SELECT id, fornecedor, avaliacao, indice_igqc, criado_em
                    FROM avaliacoes_cargas_toros
                    WHERE talao = %s ORDER BY criado_em DESC LIMIT 1""",
                 (talao,)
             )
             return cur.fetchone()
+
+def definir_indice_igqc_avaliacao(id: int, indice_igqc: float):
+    """Backfill do índice IGQC numérico de uma avaliação antiga (ver
+    avaliacao_carga_toros_por_talao e tools/parkin._extrair_percentagem_de_texto)
+    — lido do texto da avaliação uma única vez, para os lookups seguintes
+    por número de talão não precisarem de repetir esse parsing."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE avaliacoes_cargas_toros SET indice_igqc = %s WHERE id = %s",
+                       (indice_igqc, id))
+        conn.commit()
 
 def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:

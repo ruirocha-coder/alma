@@ -124,6 +124,27 @@ def _interpretar_produto(produto: str) -> dict:
     return {"tipo": tipo, "comprimento": comprimento, "espessura": espessura, "erro": None}
 
 
+_RE_PERCENTAGEM_AVALIACAO = re.compile(r"Percentagem[:\*\s]*.*?(\d{1,3}(?:[.,]\d+)?)\s*%", re.IGNORECASE)
+
+
+def _extrair_percentagem_de_texto(avaliacao_texto: str):
+    """Fallback para avaliações antigas (anteriores à coluna indice_igqc):
+    lê a percentagem a partir da linha "Percentagem:" do texto já escrito
+    pela avaliação, em vez de tentar reavaliar a carga sem as fotos
+    originais da madeira (que o Park In não tem — só a foto do talão).
+    Best-effort: se o texto não seguir o formato esperado, devolve None,
+    nunca inventa um número."""
+    if not avaliacao_texto:
+        return None
+    m = _RE_PERCENTAGEM_AVALIACAO.search(avaliacao_texto)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
 def _resolver_data(data_str: str):
     try:
         return datetime.strptime((data_str or "").strip(), "%Y-%m-%d").date()
@@ -182,10 +203,20 @@ def registar_entrada(bruto: bytes, content_type: str, registado_por: str = None)
     fornecedor = (campos.get("fornecedor") or "").strip() or "(fornecedor não identificado)"
     data_resolvida = _resolver_data(campos.get("data"))
 
+    indice = None
     avaliacao = db.avaliacao_carga_toros_por_talao(talao)
     if avaliacao and avaliacao.get("indice_igqc") is not None:
         indice = float(avaliacao["indice_igqc"])
-    else:
+    elif avaliacao and avaliacao.get("avaliacao"):
+        # já avaliado antes de indice_igqc existir como coluna — lê a
+        # percentagem do texto em vez de reavaliar sem as fotos da
+        # madeira (que não temos aqui, só a foto do talão), e guarda o
+        # valor lido para os próximos lookups não precisarem de repetir
+        # este parsing.
+        indice = _extrair_percentagem_de_texto(avaliacao["avaliacao"])
+        if indice is not None:
+            db.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
+    if indice is None:
         indice = _avaliar_qualidade_inline(bruto, content_type, talao, fornecedor)
 
     categoria = _categoria_de_indice(indice)

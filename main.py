@@ -970,6 +970,31 @@ def park_in_limites(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
 
+@app.post("/_debug-reclassificar-entrada-parkin")
+def _debug_reclassificar_entrada_parkin(corpo: dict = Body(...)):
+    """TEMPORÁRIO — a entrada real do talão 11293 (UNIMADEIRAS) ficou sem
+    categoria de qualidade porque a avaliação já existente era anterior à
+    coluna indice_igqc; depois de acrescentar o fallback que lê a
+    percentagem do texto já escrito, falta só reclassificar esta entrada
+    já registada (sem repetir o registo, que duplicaria o stock)."""
+    import db as db_mod
+    entrada_id = corpo["entrada_id"]
+    talao = corpo["talao"]
+    avaliacao = db_mod.avaliacao_carga_toros_por_talao(talao)
+    if not avaliacao or not avaliacao.get("avaliacao"):
+        return {"erro": "sem avaliação encontrada para este talão"}
+    indice = parkin._extrair_percentagem_de_texto(avaliacao["avaliacao"])
+    if indice is None:
+        return {"erro": "não consegui ler a percentagem do texto da avaliação"}
+    db_mod.definir_indice_igqc_avaliacao(avaliacao["id"], indice)
+    categoria = parkin._categoria_de_indice(indice)
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE parkin_entradas SET indice_igqc=%s, categoria_qualidade=%s WHERE id=%s",
+                       (indice, categoria, entrada_id))
+        conn.commit()
+    return {"ok": True, "indice_igqc": indice, "categoria_qualidade": categoria}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
