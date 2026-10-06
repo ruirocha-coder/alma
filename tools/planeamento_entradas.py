@@ -823,35 +823,19 @@ const LARGURA_DIAS_MAX=14;
 let ALTURAS_LANE=[], OFFSETS_LANE=[];
 /* uma OF pode "alargar" (ver .rsz-h) para ocupar vários dias na mesma lane
    (pedido explícito do Rui, 2026-10-02), e pode também estar esticada por
-   várias lanes ao mesmo tempo (ver minMaxLane) — por isso o empacotamento
-   em linhas tem de ser GLOBAL ao quadro todo (lane × dia), não lane a
-   lane: dois cards só podem partilhar linha se os intervalos de LANE e de
-   DIA de ambos não se cruzarem ao mesmo tempo (pedido explícito do Rui,
-   2026-10-06: "não deve ficar nenhuma em cima da outra" — a tentativa
-   anterior, de afastar um card "um bocado para dentro" em cascata quando
-   caía por cima de outro, continuava a sobrepor informação; o correto é
-   nunca deixar a sobreposição acontecer, dando-lhes sempre linhas
-   diferentes, como já acontecia dentro de uma única lane). */
-/* um card esticado por várias lanes (ver minMaxLane) é desenhado como UM
-   único retângulo — isso significa, geometricamente, que ocupa SEMPRE a
-   lane toda (todas as linhas) em qualquer lane "de passagem" (entre a
-   primeira e a última), e ocupa da sua própria linha até ao fim na lane
-   onde começa, e do início até à sua própria linha na lane onde acaba
-   (um retângulo não pode "saltar" um bocado de uma lane a meio). Dar-lhe
-   só uma linha "diferente" de outro card, sem perceber isto, não chega —
-   dois cards com linhas diferentes podiam à mesma sobrepor-se de facto
-   (bug real, 2026-10-06: GREENBOX esticado Charriot1-3 e um buffer
-   esticado Charriot3-Multiserra, cada um na sua própria linha "global",
-   mesmo assim tocavam-se visualmente no Charriot 3, que os dois
-   atravessavam). rangeEmLane devolve o intervalo de linhas que um card
-   ocupa DENTRO de uma lane concreta: */
-function rangeEmLane(minLane,maxLane,linha,lane){
-  if(minLane===maxLane) return [linha,linha];
-  if(lane===minLane) return [linha,Infinity];   // começa aqui: desce até sair desta lane
-  if(lane===maxLane) return [0,linha];          // acaba aqui: vem do topo desta lane
-  return [0,Infinity];                          // lane só de passagem: ocupa-a toda
-}
-const seCruzam=([a0,a1],[b0,b1])=>a0<=b1 && b0<=a1;
+   várias lanes ao mesmo tempo (ver minMaxLane) — por isso dois cards
+   "colidem" (precisam de aparecer em cascata, ver renderLanes) sempre que
+   os intervalos de LANE e de DIA de ambos se cruzarem ao mesmo tempo.
+   Nunca se tenta fazer um empacotamento perfeito sem nenhuma sobreposição
+   (ver histórico: isso exigia que um card esticado ocupasse sempre a
+   lane toda por onde passa, o que por sua vez tornava impossível dois
+   cards coexistirem em qualquer lane só com uma linha diferente — ex:
+   uma OF esticada que termina numa lane onde já está outra OF, mesmo
+   lane nenhuma, nunca tinha linha livre nenhuma). Em vez disso, cada
+   conflito só desloca o card "um bocado para dentro" em cascata (pedido
+   explícito do Rui, 2026-10-06, "como no Google Calendar") — aceitável
+   mesmo que ocasionalmente ainda se toquem um pouco, porque nunca faz a
+   tabela crescer nem esconde a informação por completo. */
 function empacotarGlobal(lista){
   const ordenada=[...lista].sort((x,y)=> x.gs-y.gs || x.id-y.id);
   const colocados=[];  // {minLane,maxLane,fim,linha}
@@ -860,28 +844,9 @@ function empacotarGlobal(lista){
     const [minLane,maxLane]=minMaxLane(e);
     const fim=e.gs+(e.larguraDias||1)-1;
     let linha=0;
-    // limite de segurança baixo (8): duas OFs podem pedir, por engano, a
-    // mesma lane ao mesmo tempo (ex: três buffers a reivindicarem todos o
-    // mesmo charriot) — nesse caso nunca há nenhuma linha sem conflito
-    // nenhum (impossível de resolver só a empilhar, é mesmo um conflito
-    // real de agenda) e ia subir para sempre; um limite alto (200) fazia
-    // disparar a altura da lane para milhares de pixels, inutilizando a
-    // página inteira por causa de só 2-3 cards problemáticos — com 8,
-    // fica "só" com alguma sobreposição visual entre esses poucos cards a
-    // mais (sinal de que a agenda deles próprios é mesmo incompatível),
-    // sem arrastar consigo a altura de toda a tabela.
-    while(linha<8){
-      let conflito=false;
-      for(const o of colocados){
-        if(o.fim<e.gs) continue;
-        const loComum=Math.max(minLane,o.minLane), hiComum=Math.min(maxLane,o.maxLane);
-        if(loComum>hiComum) continue;  // não partilham nenhuma lane
-        for(let l=loComum;l<=hiComum && !conflito;l++){
-          if(seCruzam(rangeEmLane(minLane,maxLane,linha,l), rangeEmLane(o.minLane,o.maxLane,o.linha,l)))
-            conflito=true;
-        }
-        if(conflito) break;
-      }
+    while(true){
+      const conflito=colocados.some(o=>
+        o.fim>=e.gs && o.linha===linha && !(maxLane<o.minLane || minLane>o.maxLane));
       if(!conflito) break;
       linha++;
     }
@@ -949,11 +914,17 @@ function renderLanes(){
     // 2026-10-06): um card em conflito com outro (linha>0, ver
     // empacotarGlobal) não ganha uma linha nova nem faz a lane crescer —
     // desloca-se um bocado para a direita/baixo e encolhe, suficiente
-    // para nunca tapar por completo o que está por baixo.
-    const PASSO_CASCATA=8;
-    el.style.left=(aVis*DAY+3+linha*PASSO_CASCATA)+"px";
-    el.style.top=(topoPx+linha*6)+"px";
-    el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-linha*PASSO_CASCATA))+"px";
+    // para nunca tapar por completo o que está por baixo. A diferença
+    // entre cards nunca deve ficar muito notória (pedido explícito do
+    // Rui, 2026-10-06) — por isso o desvio visual tem um máximo (3),
+    // mesmo que a "linha" real (só para evitar o conflito) seja maior,
+    // ex: 3 cards a disputarem o mesmo charriot ao mesmo tempo (um
+    // conflito real de agenda, não resolúvel só a empilhar).
+    const PASSO_CASCATA=6;
+    const profVisual=Math.min(linha,3);
+    el.style.left=(aVis*DAY+3+profVisual*PASSO_CASCATA)+"px";
+    el.style.top=(topoPx+profVisual*5)+"px";
+    el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-profVisual*PASSO_CASCATA))+"px";
     el.style.height=alturaPx+"px";
     if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
     // manípulos de arrastar para alargar (pedido explícito do Rui,
