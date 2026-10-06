@@ -802,28 +802,44 @@ const ITEM_H=58, ITEM_GAP=4, ITEM_PAD=6;
 const LARGURA_DIAS_MAX=14;
 let ALTURAS_LANE=[], OFFSETS_LANE=[];
 /* uma OF pode "alargar" (ver .rsz-h) para ocupar vários dias na mesma lane
-   (pedido explícito do Rui, 2026-10-02) — deixa de ser um simples
-   agrupamento por dia exato (um card só nunca se sobrepõe a outro): passa
-   a ser um empacotamento por intervalo (como um calendário), cada item
-   ocupa [gs, gs+larguraDias-1] e só entra na mesma linha vertical de outro
-   se os intervalos não se cruzarem. */
-function empacotarLinhas(lista){
+   (pedido explícito do Rui, 2026-10-02), e pode também estar esticada por
+   várias lanes ao mesmo tempo (ver minMaxLane) — por isso o empacotamento
+   em linhas tem de ser GLOBAL ao quadro todo (lane × dia), não lane a
+   lane: dois cards só podem partilhar linha se os intervalos de LANE e de
+   DIA de ambos não se cruzarem ao mesmo tempo (pedido explícito do Rui,
+   2026-10-06: "não deve ficar nenhuma em cima da outra" — a tentativa
+   anterior, de afastar um card "um bocado para dentro" em cascata quando
+   caía por cima de outro, continuava a sobrepor informação; o correto é
+   nunca deixar a sobreposição acontecer, dando-lhes sempre linhas
+   diferentes, como já acontecia dentro de uma única lane). */
+function empacotarGlobal(lista){
   const ordenada=[...lista].sort((x,y)=> x.gs-y.gs || x.id-y.id);
-  const fimPorLinha=[];
+  const ocupantesPorLinha=[];  // ocupantesPorLinha[linha] = [{minLane,maxLane,fim}, ...]
   const linhaPorId=new Map();
   ordenada.forEach(e=>{
+    const [minLane,maxLane]=minMaxLane(e);
     const fim=e.gs+(e.larguraDias||1)-1;
-    let linha=fimPorLinha.findIndex(f=>f<e.gs);
-    if(linha===-1){ linha=fimPorLinha.length; fimPorLinha.push(fim); }
-    else fimPorLinha[linha]=fim;
+    let linha=0;
+    while(true){
+      const ocupantes=ocupantesPorLinha[linha]||(ocupantesPorLinha[linha]=[]);
+      const conflito=ocupantes.some(o=> o.fim>=e.gs && !(maxLane<o.minLane || minLane>o.maxLane));
+      if(!conflito) break;
+      linha++;
+    }
+    ocupantesPorLinha[linha].push({minLane,maxLane,fim});
     linhaPorId.set(e.id,linha);
   });
-  return {linhaPorId, nLinhas:fimPorLinha.length};
+  return linhaPorId;
 }
-function calcularAlturasLanes(){
-  ALTURAS_LANE=LANES.map((_,li)=>{
-    const {nLinhas}=empacotarLinhas(entradas.filter(e=>lanesDe(e).includes(li)));
-    const maxN=Math.max(1,nLinhas);
+function calcularAlturasLanes(linhaPorId){
+  const maxLinhaPorLane=LANES.map(()=>0);
+  entradas.forEach(e=>{
+    const [minLane,maxLane]=minMaxLane(e);
+    const linha=linhaPorId.get(e.id);
+    for(let l=minLane;l<=maxLane;l++) maxLinhaPorLane[l]=Math.max(maxLinhaPorLane[l],linha+1);
+  });
+  ALTURAS_LANE=maxLinhaPorLane.map(n=>{
+    const maxN=Math.max(1,n);
     return Math.max(LANE, maxN*ITEM_H+(maxN-1)*ITEM_GAP+ITEM_PAD*2);
   });
   let acumulado=0;
@@ -843,7 +859,8 @@ function renderLabels(){
     `<div class="lbl" style="height:${ALTURAS_LANE[li]||LANE}px"><div class="n">${n}</div></div>`).join("");
 }
 function renderLanes(){
-  calcularAlturasLanes(); renderLabels();
+  const linhaPorId=empacotarGlobal(entradas);
+  calcularAlturasLanes(linhaPorId); renderLabels();
   const D=days();
   let h="";
   LANES.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LANE[li]}px">`+D.map(d=>{
@@ -853,63 +870,40 @@ function renderLanes(){
   h+='<div class="blocks" id="blocks"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
-  LANES.forEach((nome,li)=>{
-    const itens=entradas.filter(e=>lanesDe(e).includes(li));
-    const {linhaPorId}=empacotarLinhas(itens);
-    itens.forEach(e=>{
-      const [minLane,maxLane]=minMaxLane(e);
-      if(li!==minLane) return; // já desenhado uma vez, na lane de topo (ver minMaxLane)
-      const largura=e.larguraDias||1;
-      const aIni=e.gs-view.start, aFim=e.gs+largura-1-view.start;
-      if(aFim<0||aIni>=view.len) return; // completamente fora da vista
-      const aVis=Math.max(aIni,0), aFimVis=Math.min(aFim,view.len-1);
-      const linha=linhaPorId.get(e.id);
-      const el=document.createElement("div");
-      const temCharriot=e.charriots && e.charriots.length>0;
-      el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"")+(e.buffer?" buffer":"");
-      el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=li;
-      el.style.borderLeftColor=corProduto(e);
-      const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
-      const alturaPx=(maxLane>minLane
-        ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ALTURAS_LANE[maxLane])-topoPx-ITEM_PAD)
-        : ITEM_H);
-      // pedido explícito do Rui (2026-10-04, "tipo Google Calendar"): um
-      // card de uma só lane pode cair visualmente por cima de um card
-      // esticado de outra OF (ver minMaxLane) que passe pela mesma lane no
-      // mesmo intervalo de dias — em vez de o tapar, afasta-se "um bocado
-      // para dentro" (desloca-se para a direita/baixo e encolhe) a cada
-      // card esticado que o cubra, em cascata, para dar sempre para ver o
-      // início de todos.
-      let profundidade=0;
-      if(maxLane===minLane){
-        entradas.forEach(outro=>{
-          if(outro.id===e.id) return;
-          const [oMin,oMax]=minMaxLane(outro);
-          if(oMax<=oMin || li<=oMin || li>oMax) return; // 'outro' não está esticado sobre esta lane
-          const oLargura=outro.larguraDias||1;
-          const oIni=outro.gs-view.start, oFim=outro.gs+oLargura-1-view.start;
-          if(oFim<aIni || oIni>aFim) return; // não se cruzam nos dias
-          profundidade++;
-        });
-      }
-      const PASSO_CASCATA=14;
-      el.style.left=(aVis*DAY+3+profundidade*PASSO_CASCATA)+"px";
-      el.style.top=(topoPx+profundidade*6)+"px";
-      el.style.width=Math.max(50,((aFimVis-aVis+1)*DAY-8-profundidade*PASSO_CASCATA))+"px";
-      el.style.height=alturaPx+"px";
-      if(profundidade>0){ el.style.zIndex=10+profundidade; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
-      // manípulos de arrastar para alargar (pedido explícito do Rui,
-      // 2026-10-02): borda direita alarga em dias (só visual — ver
-      // definir_largura_dias); borda de baixo marca mais charriots ao
-      // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
-      // seleção na ficha, mas mais rápido).
-      el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
-        <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
-        <div class="of">Nº lotes: ${e.nLotes!=null?e.nLotes:"—"}</div>
-        <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
-        <div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>`;
-      bl.appendChild(el);
-    });
+  // um único passo por entrada (não mais por lane): o empacotamento já é
+  // global (ver empacotarGlobal), por isso cada card só precisa de ser
+  // desenhado uma vez, na sua lane de topo.
+  entradas.forEach(e=>{
+    const [minLane,maxLane]=minMaxLane(e);
+    const largura=e.larguraDias||1;
+    const aIni=e.gs-view.start, aFim=e.gs+largura-1-view.start;
+    if(aFim<0||aIni>=view.len) return; // completamente fora da vista
+    const aVis=Math.max(aIni,0), aFimVis=Math.min(aFim,view.len-1);
+    const linha=linhaPorId.get(e.id);
+    const el=document.createElement("div");
+    const temCharriot=e.charriots && e.charriots.length>0;
+    el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"")+(e.buffer?" buffer":"");
+    el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=minLane;
+    el.style.borderLeftColor=corProduto(e);
+    const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
+    const alturaPx=(maxLane>minLane
+      ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ALTURAS_LANE[maxLane])-topoPx-ITEM_PAD)
+      : ITEM_H);
+    el.style.left=(aVis*DAY+3)+"px";
+    el.style.top=topoPx+"px";
+    el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
+    el.style.height=alturaPx+"px";
+    // manípulos de arrastar para alargar (pedido explícito do Rui,
+    // 2026-10-02): borda direita alarga em dias (só visual — ver
+    // definir_largura_dias); borda de baixo marca mais charriots ao
+    // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
+    // seleção na ficha, mas mais rápido).
+    el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
+      <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
+      <div class="of">Nº lotes: ${e.nLotes!=null?e.nLotes:"—"}</div>
+      <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
+      <div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>`;
+    bl.appendChild(el);
   });
   stats();
 }
