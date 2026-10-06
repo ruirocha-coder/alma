@@ -203,11 +203,22 @@ def estado_planeamento_serracao() -> dict:
         tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
         # a fila (bolsa por agendar) só mostra OFs ainda em Triagem — uma OF
         # que já avançou no Basecamp (Programação/Em Produção/Produzido) sem
-        # nunca ter sido agendada aqui já não é "por agendar", é trabalho já
+        # NUNCA ter sido tocada aqui já não é "por agendar", é trabalho já
         # em curso fora deste quadro, por isso fica de fora por completo
-        # (pedido explícito do Rui, 2026-09). Só continua a aparecer, na
-        # grelha, se já tiver um agendamento local guardado de antes.
-        if not tem_agendamento and _normalizar(c.get("estado")) != "triagem":
+        # (pedido explícito do Rui, 2026-09).
+        #
+        # Mas uma OF que JÁ tem registo local (`agendamento is not None`) —
+        # mesmo sem linha/dia preenchidos — tem de continuar sempre
+        # visível, nem que seja de volta à fila: já foi configurada aqui
+        # (volume/cor/madeira), nunca deve desaparecer silenciosamente só
+        # por ter avançado de coluna no Basecamp entretanto ou por ter sido
+        # devolvida à fila com desagendar() depois de já ter avançado (bug
+        # real, 2026-10-06: a "Palcax OF 509" tinha volume/cor/madeira já
+        # definidos, mas por ter avançado para "Em Produção" sem (ou
+        # depois de perder) dia/linha, não aparecia em lado nenhum da
+        # página — nem na fila, por já não estar em Triagem, nem na
+        # grelha, por não ter dia/linha).
+        if not tem_agendamento and _normalizar(c.get("estado")) != "triagem" and agendamento is None:
             continue
         info = {
             "basecamp_card_id": c["id"],
