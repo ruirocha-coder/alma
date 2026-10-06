@@ -832,21 +832,60 @@ let ALTURAS_LANE=[], OFFSETS_LANE=[];
    caía por cima de outro, continuava a sobrepor informação; o correto é
    nunca deixar a sobreposição acontecer, dando-lhes sempre linhas
    diferentes, como já acontecia dentro de uma única lane). */
+/* um card esticado por várias lanes (ver minMaxLane) é desenhado como UM
+   único retângulo — isso significa, geometricamente, que ocupa SEMPRE a
+   lane toda (todas as linhas) em qualquer lane "de passagem" (entre a
+   primeira e a última), e ocupa da sua própria linha até ao fim na lane
+   onde começa, e do início até à sua própria linha na lane onde acaba
+   (um retângulo não pode "saltar" um bocado de uma lane a meio). Dar-lhe
+   só uma linha "diferente" de outro card, sem perceber isto, não chega —
+   dois cards com linhas diferentes podiam à mesma sobrepor-se de facto
+   (bug real, 2026-10-06: GREENBOX esticado Charriot1-3 e um buffer
+   esticado Charriot3-Multiserra, cada um na sua própria linha "global",
+   mesmo assim tocavam-se visualmente no Charriot 3, que os dois
+   atravessavam). rangeEmLane devolve o intervalo de linhas que um card
+   ocupa DENTRO de uma lane concreta: */
+function rangeEmLane(minLane,maxLane,linha,lane){
+  if(minLane===maxLane) return [linha,linha];
+  if(lane===minLane) return [linha,Infinity];   // começa aqui: desce até sair desta lane
+  if(lane===maxLane) return [0,linha];          // acaba aqui: vem do topo desta lane
+  return [0,Infinity];                          // lane só de passagem: ocupa-a toda
+}
+const seCruzam=([a0,a1],[b0,b1])=>a0<=b1 && b0<=a1;
 function empacotarGlobal(lista){
   const ordenada=[...lista].sort((x,y)=> x.gs-y.gs || x.id-y.id);
-  const ocupantesPorLinha=[];  // ocupantesPorLinha[linha] = [{minLane,maxLane,fim}, ...]
+  const colocados=[];  // {minLane,maxLane,fim,linha}
   const linhaPorId=new Map();
   ordenada.forEach(e=>{
     const [minLane,maxLane]=minMaxLane(e);
     const fim=e.gs+(e.larguraDias||1)-1;
     let linha=0;
-    while(true){
-      const ocupantes=ocupantesPorLinha[linha]||(ocupantesPorLinha[linha]=[]);
-      const conflito=ocupantes.some(o=> o.fim>=e.gs && !(maxLane<o.minLane || minLane>o.maxLane));
+    // limite de segurança baixo (8): duas OFs podem pedir, por engano, a
+    // mesma lane ao mesmo tempo (ex: três buffers a reivindicarem todos o
+    // mesmo charriot) — nesse caso nunca há nenhuma linha sem conflito
+    // nenhum (impossível de resolver só a empilhar, é mesmo um conflito
+    // real de agenda) e ia subir para sempre; um limite alto (200) fazia
+    // disparar a altura da lane para milhares de pixels, inutilizando a
+    // página inteira por causa de só 2-3 cards problemáticos — com 8,
+    // fica "só" com alguma sobreposição visual entre esses poucos cards a
+    // mais (sinal de que a agenda deles próprios é mesmo incompatível),
+    // sem arrastar consigo a altura de toda a tabela.
+    while(linha<8){
+      let conflito=false;
+      for(const o of colocados){
+        if(o.fim<e.gs) continue;
+        const loComum=Math.max(minLane,o.minLane), hiComum=Math.min(maxLane,o.maxLane);
+        if(loComum>hiComum) continue;  // não partilham nenhuma lane
+        for(let l=loComum;l<=hiComum && !conflito;l++){
+          if(seCruzam(rangeEmLane(minLane,maxLane,linha,l), rangeEmLane(o.minLane,o.maxLane,o.linha,l)))
+            conflito=true;
+        }
+        if(conflito) break;
+      }
       if(!conflito) break;
       linha++;
     }
-    ocupantesPorLinha[linha].push({minLane,maxLane,fim});
+    colocados.push({minLane,maxLane,fim,linha});
     linhaPorId.set(e.id,linha);
   });
   return linhaPorId;
@@ -906,8 +945,11 @@ function renderLanes(){
     el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=minLane;
     el.style.borderLeftColor=corProduto(e);
     const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
+    // um card esticado só ocupa, na sua última lane, até à própria linha
+    // (não a lane toda) — ver rangeEmLane/empacotarGlobal: assim outro
+    // card pode usar as linhas seguintes dessa mesma lane sem tocar nele.
     const alturaPx=(maxLane>minLane
-      ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ALTURAS_LANE[maxLane])-topoPx-ITEM_PAD)
+      ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ITEM_PAD+(linha+1)*(ITEM_H+ITEM_GAP)-ITEM_GAP)-topoPx)
       : ITEM_H);
     el.style.left=(aVis*DAY+3)+"px";
     el.style.top=topoPx+"px";
