@@ -938,6 +938,20 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-wip-lotes")
+def _debug_wip_lotes():
+    from tools import documentos_empresa as de
+    itens = de._listar_bruto()
+    candidatos = [i for i in itens if "wip" in i["titulo"].lower() and "lotes" in i["titulo"].lower()]
+    if not candidatos:
+        itens = de._listar_bruto(forcar=True)
+        candidatos = [i for i in itens if "wip" in i["titulo"].lower() and "lotes" in i["titulo"].lower()]
+    if not candidatos:
+        return {"erro": "não encontrei", "titulos": [i["titulo"] for i in itens][:50]}
+    item = candidatos[0]
+    conteudo = de._ler_conteudo(item)
+    return {"titulo": item["titulo"], "conteudo": conteudo}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
