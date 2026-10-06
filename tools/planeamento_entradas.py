@@ -589,9 +589,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn.primary:hover{background:#175CAF;border-color:#175CAF}
   /* botão "Produzido" (pedido explícito do Rui, 2026-10-03) — na ficha, ao
      lado de Guardar/Fechar, de propósito: um botão pequeno no card era
-     fácil demais de carregar sem querer. */
-  .btn.verde{color:var(--green);border-color:var(--green)}
-  .btn.verde.ativo{background:var(--green);color:#fff;font-weight:600}
+     fácil demais de carregar sem querer. Azul forte em vez de verde
+     (pedido explícito do Rui, 2026-10-06). */
+  .btn.azul{color:var(--blue);border-color:var(--blue)}
+  .btn.azul.ativo{background:var(--blue);color:#fff;font-weight:600}
   /* "Fazer Buffer" (pedido explícito do Rui, 2026-10-04) — mesmo verde
      escuro do título do card duplicado, para se perceber de imediato que
      é o botão que o cria. */
@@ -1323,7 +1324,7 @@ function openSheet(id){
     <div class="err" id="fErro"></div>
     <div class="acts" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
       ${it.url?`<a class="btn" target="_blank" rel="noopener" href="${it.url}">Abrir ${it.buffer?"OF de origem":"card"} no Basecamp</a>`:""}
-      <button class="btn verde${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
+      <button class="btn azul${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
       ${it.buffer
         ? `<button class="btn" id="btnApagarBuffer">Apagar Buffer</button>`
         : `<button class="btn buffer" id="btnFazerBuffer">Fazer Buffer</button>`}
