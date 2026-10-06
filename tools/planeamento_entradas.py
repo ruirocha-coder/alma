@@ -836,8 +836,20 @@ let ALTURAS_LANE=[], OFFSETS_LANE=[];
    explícito do Rui, 2026-10-06, "como no Google Calendar") — aceitável
    mesmo que ocasionalmente ainda se toquem um pouco, porque nunca faz a
    tabela crescer nem esconde a informação por completo. */
+function tamanhoDe(e){
+  const [minLane,maxLane]=minMaxLane(e);
+  return (maxLane-minLane+1)*(e.larguraDias||1);
+}
 function empacotarGlobal(lista){
-  const ordenada=[...lista].sort((x,y)=> x.gs-y.gs || x.id-y.id);
+  // os maiores (mais lanes/mais dias) são colocados PRIMEIRO, o que lhes
+  // dá a linha 0 — a posição mais "de trás" da cascata (sem desvio, sem
+  // zIndex, ver renderLanes). Os mais pequenos, colocados depois, acabam
+  // sempre a precisar de uma linha mais alta (mais à frente, com mais
+  // desvio) para não colidirem — pedido explícito do Rui, 2026-10-06:
+  // "os mais pequenos devem passar para a frente para ficarem mais
+  // visíveis", porque um card grande continua bem visível mesmo tapado
+  // em parte, mas um card pequeno tapado por um grande desaparece todo.
+  const ordenada=[...lista].sort((x,y)=> tamanhoDe(y)-tamanhoDe(x) || x.gs-y.gs || x.id-y.id);
   const colocados=[];  // {minLane,maxLane,fim,linha}
   const linhaPorId=new Map();
   ordenada.forEach(e=>{
@@ -921,10 +933,10 @@ function renderLanes(){
     // nunca ficar exagerado mesmo quando há mais do que 3 cards em
     // conflito real (ex: 3+ OFs a disputarem o mesmo charriot ao mesmo
     // tempo, um conflito real de agenda, não resolúvel só a empilhar).
-    const PASSO_CASCATA=14;
+    const PASSO_CASCATA=24;
     const profVisual=Math.min(linha,3);
     el.style.left=(aVis*DAY+3+profVisual*PASSO_CASCATA)+"px";
-    el.style.top=(topoPx+profVisual*10)+"px";
+    el.style.top=(topoPx+profVisual*16)+"px";
     el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-profVisual*PASSO_CASCATA))+"px";
     el.style.height=alturaPx+"px";
     if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
