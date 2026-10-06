@@ -819,6 +819,12 @@ function renderDays(){
 
 const ITEM_H=58, ITEM_GAP=4, ITEM_PAD=6;
 const LARGURA_DIAS_MAX=14;
+// cascata "em escada" (ver empacotarGlobal/renderLanes) — pedido
+// explícito do Rui, 2026-10-06: o passo vertical tem de dar para ler bem
+// o título de cada card, mesmo dos que ficam mais atrás; a lane cresce
+// em altura o que for preciso para caber todos (ver calcularAlturasLanes),
+// já não há limite ao nº de níveis.
+const PASSO_CASCATA_H=24, PASSO_CASCATA_V=26;
 let ALTURAS_LANE=[], OFFSETS_LANE=[];
 /* uma OF pode "alargar" (ver .rsz-h) para ocupar vários dias na mesma lane
    (pedido explícito do Rui, 2026-10-02), e pode também estar esticada por
@@ -875,13 +881,27 @@ function empacotarGlobal(lista){
   return linhaPorId;
 }
 /* pedido explícito do Rui (2026-10-06, "como no Google [Calendar]", com
-   screenshot): cards em conflito (ver empacotarGlobal) NÃO fazem crescer
-   a lane em altura — ficam antes "em escada", um bocado para dentro uns
-   dos outros (mais estreitos, deslocados), sempre dentro da MESMA altura
-   de sempre. Por isso cada lane volta a ter sempre uma só altura de
-   linha, nunca multiplicada pelo nº de cards em conflito. */
-function calcularAlturasLanes(){
-  ALTURAS_LANE=LANES.map(()=>Math.max(LANE, ITEM_H+ITEM_PAD*2));
+   screenshot): cards em conflito (ver empacotarGlobal) ficam "em escada",
+   um bocado para dentro uns dos outros (mais estreitos, deslocados) — mas
+   cada lane CRESCE em altura o que for preciso para caber a cascata toda
+   dos dias visíveis (pedido explícito do Rui, 2026-10-06: "se isso for
+   necessário aumentar o tamanho da linha para caber todos os cards que
+   estiverem lá, faz isso") — só pelos dias visíveis, nunca por um
+   conflito escondido fora da vista atual (ver days()/view). */
+function calcularAlturasLanes(linhaPorId){
+  const D=days();
+  const diaIni=view.start, diaFim=view.start+view.len-1;
+  ALTURAS_LANE=LANES.map((nome,li)=>{
+    let maxLinha=0;
+    entradas.forEach(e=>{
+      const [minLane]=minMaxLane(e);
+      if(minLane!==li) return;
+      const fim=e.gs+(e.larguraDias||1)-1;
+      if(fim<diaIni || e.gs>diaFim) return; // fora da vista
+      maxLinha=Math.max(maxLinha, linhaPorId.get(e.id)||0);
+    });
+    return Math.max(LANE, ITEM_H+ITEM_PAD*2+maxLinha*PASSO_CASCATA_V);
+  });
   let acumulado=0;
   OFFSETS_LANE=ALTURAS_LANE.map(alt=>{ const topo=acumulado; acumulado+=alt; return topo; });
 }
@@ -900,7 +920,7 @@ function renderLabels(){
 }
 function renderLanes(){
   const linhaPorId=empacotarGlobal(entradas);
-  calcularAlturasLanes(); renderLabels();
+  calcularAlturasLanes(linhaPorId); renderLabels();
   const D=days();
   let h="";
   LANES.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LANE[li]}px">`+D.map(d=>{
@@ -908,13 +928,13 @@ function renderLanes(){
     return `<div class="cell${NAO_PRODUZ(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
-  // reserva de espaço invisível no fundo (pedido explícito do Rui,
-  // 2026-10-06: "em baixo não deviam aparecer cortados") — um card na
-  // última lane que caia em cascata (ver renderLanes, desvio vertical até
-  // profVisual*16=48px) desloca-se para BAIXO do fim normal das lanes;
-  // sem esta reserva, o .scroll (overflow-y:hidden, ver CSS) corta essa
-  // parte porque a sua altura só tinha em conta as lanes "normais".
-  h+='<div style="height:56px"></div>';
+  // pequena reserva de espaço invisível no fundo, só como rede de segurança
+  // (pedido explícito do Rui, 2026-10-06: "em baixo não deviam aparecer
+  // cortados") — cada lane já cresce o que for preciso para a sua própria
+  // cascata (ver calcularAlturasLanes), mas um card esticado por várias
+  // lanes (ver minMaxLane) pode ainda ultrapassar um pouco o fim da última
+  // lane, se a cascata começar numa lane anterior.
+  h+='<div style="height:20px"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   // um único passo por entrada (não mais por lane): o empacotamento já é
@@ -938,20 +958,13 @@ function renderLanes(){
       : ITEM_H);
     // "escada" ao estilo Google Calendar (pedido explícito do Rui,
     // 2026-10-06): um card em conflito com outro (linha>0, ver
-    // empacotarGlobal) não ganha uma linha nova nem faz a lane crescer —
-    // desloca-se para a direita/baixo e encolhe, suficiente para nunca
-    // tapar por completo o que está por baixo. O desvio tem de ser
-    // visível o suficiente para se perceber que há cards por baixo e
-    // quais são (pedido explícito do Rui, 2026-10-06: a versão anterior,
-    // mais subtil, não dava para perceber), mas com um máximo (3) para
-    // nunca ficar exagerado mesmo quando há mais do que 3 cards em
-    // conflito real (ex: 3+ OFs a disputarem o mesmo charriot ao mesmo
-    // tempo, um conflito real de agenda, não resolúvel só a empilhar).
-    const PASSO_CASCATA=24;
-    const profVisual=Math.min(linha,3);
-    el.style.left=(aVis*DAY+3+profVisual*PASSO_CASCATA)+"px";
-    el.style.top=(topoPx+profVisual*16)+"px";
-    el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-profVisual*PASSO_CASCATA))+"px";
+    // empacotarGlobal) desloca-se para a direita/baixo e encolhe, para dar
+    // para ler bem o título dos que ficam por baixo (pedido explícito do
+    // Rui, 2026-10-06) — a lane cresce o que for preciso para caber (ver
+    // calcularAlturasLanes), por isso já não há limite ao nº de níveis.
+    el.style.left=(aVis*DAY+3+linha*PASSO_CASCATA_H)+"px";
+    el.style.top=(topoPx+linha*PASSO_CASCATA_V)+"px";
+    el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-linha*PASSO_CASCATA_H))+"px";
     el.style.height=alturaPx+"px";
     if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
     // manípulos de arrastar para alargar (pedido explícito do Rui,
