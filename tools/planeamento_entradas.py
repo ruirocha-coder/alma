@@ -890,17 +890,14 @@ function empacotarGlobal(lista){
   });
   return linhaPorId;
 }
-function calcularAlturasLanes(linhaPorId){
-  const maxLinhaPorLane=LANES.map(()=>0);
-  entradas.forEach(e=>{
-    const [minLane,maxLane]=minMaxLane(e);
-    const linha=linhaPorId.get(e.id);
-    for(let l=minLane;l<=maxLane;l++) maxLinhaPorLane[l]=Math.max(maxLinhaPorLane[l],linha+1);
-  });
-  ALTURAS_LANE=maxLinhaPorLane.map(n=>{
-    const maxN=Math.max(1,n);
-    return Math.max(LANE, maxN*ITEM_H+(maxN-1)*ITEM_GAP+ITEM_PAD*2);
-  });
+/* pedido explícito do Rui (2026-10-06, "como no Google [Calendar]", com
+   screenshot): cards em conflito (ver empacotarGlobal) NÃO fazem crescer
+   a lane em altura — ficam antes "em escada", um bocado para dentro uns
+   dos outros (mais estreitos, deslocados), sempre dentro da MESMA altura
+   de sempre. Por isso cada lane volta a ter sempre uma só altura de
+   linha, nunca multiplicada pelo nº de cards em conflito. */
+function calcularAlturasLanes(){
+  ALTURAS_LANE=LANES.map(()=>Math.max(LANE, ITEM_H+ITEM_PAD*2));
   let acumulado=0;
   OFFSETS_LANE=ALTURAS_LANE.map(alt=>{ const topo=acumulado; acumulado+=alt; return topo; });
 }
@@ -919,7 +916,7 @@ function renderLabels(){
 }
 function renderLanes(){
   const linhaPorId=empacotarGlobal(entradas);
-  calcularAlturasLanes(linhaPorId); renderLabels();
+  calcularAlturasLanes(); renderLabels();
   const D=days();
   let h="";
   LANES.forEach((nome,li)=>{ h+=`<div class="row" style="height:${ALTURAS_LANE[li]}px">`+D.map(d=>{
@@ -944,17 +941,21 @@ function renderLanes(){
     el.className="blk"+(temCharriot?"":" semCharriot")+(e.produzido?" produzido":"")+(e.buffer?" buffer":"");
     el.tabIndex=0; el.dataset.id=e.id; el.dataset.lane=minLane;
     el.style.borderLeftColor=corProduto(e);
-    const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD+linha*(ITEM_H+ITEM_GAP);
-    // um card esticado só ocupa, na sua última lane, até à própria linha
-    // (não a lane toda) — ver rangeEmLane/empacotarGlobal: assim outro
-    // card pode usar as linhas seguintes dessa mesma lane sem tocar nele.
+    const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD;
     const alturaPx=(maxLane>minLane
-      ? Math.max(ITEM_H,(OFFSETS_LANE[maxLane]+ITEM_PAD+(linha+1)*(ITEM_H+ITEM_GAP)-ITEM_GAP)-topoPx)
+      ? (OFFSETS_LANE[maxLane]+ITEM_PAD+ITEM_H)-topoPx
       : ITEM_H);
-    el.style.left=(aVis*DAY+3)+"px";
-    el.style.top=topoPx+"px";
-    el.style.width=((aFimVis-aVis+1)*DAY-8)+"px";
+    // "escada" ao estilo Google Calendar (pedido explícito do Rui,
+    // 2026-10-06): um card em conflito com outro (linha>0, ver
+    // empacotarGlobal) não ganha uma linha nova nem faz a lane crescer —
+    // desloca-se um bocado para a direita/baixo e encolhe, suficiente
+    // para nunca tapar por completo o que está por baixo.
+    const PASSO_CASCATA=14;
+    el.style.left=(aVis*DAY+3+linha*PASSO_CASCATA)+"px";
+    el.style.top=(topoPx+linha*6)+"px";
+    el.style.width=Math.max(40,((aFimVis-aVis+1)*DAY-8-linha*PASSO_CASCATA))+"px";
     el.style.height=alturaPx+"px";
+    if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
     // manípulos de arrastar para alargar (pedido explícito do Rui,
     // 2026-10-02): borda direita alarga em dias (só visual — ver
     // definir_largura_dias); borda de baixo marca mais charriots ao
