@@ -905,6 +905,29 @@ function calcularAlturasLanes(linhaPorId){
   let acumulado=0;
   OFFSETS_LANE=ALTURAS_LANE.map(alt=>{ const topo=acumulado; acumulado+=alt; return topo; });
 }
+/* quanto é que o fim das lanes (já todas com a sua própria altura, ver
+   calcularAlturasLanes) precisa de crescer, exatamente, para caber o
+   card esticado por várias lanes (ver minMaxLane) que mais ultrapasse o
+   fim da última — 0 no caso normal (nenhum chega lá), nunca um valor
+   fixo "a olho" (ver renderLanes). Um card de uma só lane nunca
+   ultrapassa nada: a sua própria lane já cresceu para o conter (ver
+   calcularAlturasLanes), por isso só interessam aqui os esticados. */
+function alturaExtraParaCardsEsticados(linhaPorId){
+  const diaIni=view.start, diaFim=view.start+view.len-1;
+  const fimLanes=OFFSETS_LANE[OFFSETS_LANE.length-1]+ALTURAS_LANE[ALTURAS_LANE.length-1];
+  let extra=0;
+  entradas.forEach(e=>{
+    const [minLane,maxLane]=minMaxLane(e);
+    if(minLane===maxLane) return;
+    const fim=e.gs+(e.larguraDias||1)-1;
+    if(fim<diaIni || e.gs>diaFim) return; // fora da vista
+    const topoPx=OFFSETS_LANE[minLane]+ITEM_PAD;
+    const alturaPx=(OFFSETS_LANE[maxLane]+ITEM_PAD+ITEM_H)-topoPx;
+    const fundoCard=topoPx+(linhaPorId.get(e.id)||0)*PASSO_CASCATA_V+alturaPx;
+    extra=Math.max(extra, fundoCard-fimLanes);
+  });
+  return Math.max(0, Math.ceil(extra));
+}
 /* a que lane corresponde uma posição vertical (em px, relativa ao topo de
    #lanes) — usado ao arrastar (ver laneDeY/linhaDeY equivalente na outra
    página). */
@@ -928,13 +951,15 @@ function renderLanes(){
     return `<div class="cell${NAO_PRODUZ(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
-  // pequena reserva de espaço invisível no fundo, só como rede de segurança
-  // (pedido explícito do Rui, 2026-10-06: "em baixo não deviam aparecer
-  // cortados") — cada lane já cresce o que for preciso para a sua própria
-  // cascata (ver calcularAlturasLanes), mas um card esticado por várias
-  // lanes (ver minMaxLane) pode ainda ultrapassar um pouco o fim da última
-  // lane, se a cascata começar numa lane anterior.
-  h+='<div style="height:20px"></div>';
+  // reserva de espaço invisível no fundo, calculada exatamente (nunca um
+  // valor fixo "a olho" — pedido explícito do Rui, 2026-10-06: "no fundo
+  // continua a colocar uma linha branca sem necessidade", depois de uma
+  // primeira tentativa com 20px fixos) — cada lane já cresce o que for
+  // preciso para a sua própria cascata (ver calcularAlturasLanes), mas um
+  // card esticado por várias lanes (ver minMaxLane) ainda pode ultrapassar
+  // um pouco o fim da última lane, se a cascata começar numa lane
+  // anterior; só nesse caso (raro) é que isto dá mais que 0px.
+  h+=`<div style="height:${alturaExtraParaCardsEsticados(linhaPorId)}px"></div>`;
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   // um único passo por entrada (não mais por lane): o empacotamento já é
