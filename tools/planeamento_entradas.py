@@ -1,8 +1,9 @@
 # tools/planeamento_entradas.py — página "Planeamento de Entradas" da Ecos
 # Largos: planear o que entra nos charriots (Charriot 1/2/3, Multiserra de
-# Toros), um dia antes do início da produção de cada OF (pedido explícito
-# do Rui, 2026-10-01) — uma OF pode estar em vários charriots ao mesmo
-# tempo (pedido explícito do Rui, 2026-10-02).
+# Toros, Aproveitamentos — este último acrescentado a pedido explícito do
+# Rui, 2026-10-06), um dia antes do início da produção de cada OF (pedido
+# explícito do Rui, 2026-10-01) — uma OF pode estar em vários charriots ao
+# mesmo tempo (pedido explícito do Rui, 2026-10-02).
 #
 # Segue exatamente a mesma filosofia da logística (ver
 # tools/planeamento_serracao.py): não duplica nome/linha/dia de início/
@@ -15,12 +16,11 @@
 # aqui sozinha, sempre que se lê o estado (ver estado_planeamento_entradas),
 # exatamente como uma OF com tipo de madeira definido aparece sozinha na
 # logística.
-import re
 from datetime import date, timedelta
 import db
 from tools import planeamento_serracao as ps
 
-CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros"]
+CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros", "Aproveitamentos"]
 # valores em milímetros (pedido explícito do Rui, 2026-10-04 — antes
 # estavam em cm) — guardados como texto, não número, para poder vir a ter
 # opções que não sejam um número puro (ex: com diâmetro) — ver nota na
@@ -38,7 +38,7 @@ WIP_CMP_PRESETS = ["2350", "2550", "2650", "3100"]
 WIP_LAR_FIXA = 1200
 WIP_LOTES_TABELA = [
     (18, 40), (22, 35), (25, 30), (32, 25), (36, 20), (42, 16),
-    (52, 14), (60, 12), (70, 10), (80, 8), (90, 7), (100, 6), (110, 6),
+    (52, 14), (60, 12), (70, 10), (80, 8), (88, 7), (90, 7), (100, 6), (110, 6),
     (120, 5), (130, 5), (140, 4), (150, 4), (160, 4), (170, 4), (180, 4), (200, 3),
 ]
 FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
@@ -51,16 +51,6 @@ FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
 # indice_wip).
 INDICE_TOROS_DEFAULT = 2.85
 INDICE_WIP_DEFAULT = 1.8
-
-# "quadradilho" = título sem "OF" (pedido explícito do Rui, 2026-10-01,
-# ex: "Fepal — Quadradilho MT", "Girona — 2600 MT" não têm "OF"; "Palcax
-# OF 508" tem). Por omissão entra "em contínuo" (ver _calcular_dia_entrada)
-# — a pessoa pode sempre desmarcar à mão para uma OF em concreto (ver
-# definir_em_continuo), e essa escolha fica gravada em definitivo.
-_PADRAO_OF = re.compile(r"(?<![a-zà-ÿ])of(?![a-zà-ÿ])", re.IGNORECASE)
-
-def _eh_quadradilho(titulo: str) -> bool:
-    return not bool(_PADRAO_OF.search(titulo or ""))
 
 def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
     """Volume real de um lote WIP, em m³: comprimento x (largura fixa x
@@ -107,10 +97,12 @@ def _calcular_wip_e_toros_de_lotes(n_lotes, wip_cmp_mm, wip_esp_mm, indice_wip, 
 def _calcular_dia_entrada(dia_inicio: str, em_continuo: bool) -> str:
     """Dia em que os troncos desta OF entram no charriot.
 
-    "Em contínuo" (pedido explícito do Rui, 2026-10-01): a OF entra no
-    MESMO dia do início da produção — salta o cálculo habitual (dia
-    anterior). Usado sobretudo para quadradilho (ver _eh_quadradilho), mas
-    qualquer OF pode ser marcada/desmarcada à mão (ver definir_em_continuo).
+    "Em contínuo" (pedido explícito do Rui, 2026-10-01; por omissão
+    sempre ligado para qualquer OF, pedido explícito do Rui, 2026-10-06 —
+    ver estado_planeamento_entradas): a OF entra no MESMO dia do início da
+    produção — salta o cálculo habitual (dia anterior). Qualquer OF pode
+    ser desmarcada à mão quando não for esse o caso (ver
+    definir_em_continuo), e essa escolha fica gravada em definitivo.
 
     Caso contrário (o cálculo habitual): um dia antes do início da
     produção. Se isso calhar a domingo (acontece sempre que a produção
@@ -151,10 +143,14 @@ def estado_planeamento_entradas() -> dict:
                 and date.fromisoformat(agendamento["dia_inicio"]) < date.today()):
             continue
         extra = extras.get(c["id"]) or {}
-        eh_quadradilho = _eh_quadradilho(c["titulo"])
+        # por omissão toda a gente entra "em contínuo" (pedido explícito
+        # do Rui, 2026-10-06) — só deixa de ser assim quando alguém
+        # desmarca à mão para uma OF em concreto (ver definir_em_continuo),
+        # o que fica gravado em definitivo (extra["em_continuo"] passa a
+        # False, nunca mais None).
         em_continuo = extra.get("em_continuo")
         if em_continuo is None:
-            em_continuo = eh_quadradilho
+            em_continuo = True
         indice_toros = extra.get("indice_toros")
         if indice_toros is None:
             indice_toros = INDICE_TOROS_DEFAULT
@@ -403,7 +399,9 @@ def definir_dia_entrada(basecamp_card_id: int, dia_entrada: str = None) -> dict:
 
 def definir_em_continuo(basecamp_card_id: int, em_continuo: bool) -> dict:
     """Marca/desmarca "Em contínuo" (ver _calcular_dia_entrada) para uma OF
-    em concreto — fica gravado em definitivo, mesmo que o título mude."""
+    em concreto — por omissão todas entram marcadas (ver
+    estado_planeamento_entradas); isto só é preciso para desmarcar
+    alguma, e fica gravado em definitivo."""
     return db.definir_em_continuo_entrada(basecamp_card_id, bool(em_continuo))
 
 def pagina_planeamento_entradas() -> str:
@@ -704,13 +702,13 @@ const segundaDe=idx=>{ const dow=MASTER[clamp(idx,0,MASTER.length-1)].dow; retur
 const INICIO_MIN_SEMANA=(()=>{ const s=segundaDe(0); return s>=0?s:s+7; })();
 
 const $=s=>document.querySelector(s);
-const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros"];
+const CHARRIOTS=["Charriot 1","Charriot 2","Charriot 3","Multiserra de Toros","Aproveitamentos"];
 const LANES=["Por atribuir",...CHARRIOTS];
 const TORO_PRESETS=["2550","2640","3100","2350"];
 const WIP_CMP_PRESETS=["2350","2550","2650","3100"];
 const WIP_LAR_FIXA=1200;
 const WIP_LOTES_TABELA=[[18,40],[22,35],[25,30],[32,25],[36,20],[42,16],
-  [52,14],[60,12],[70,10],[80,8],[90,7],[100,6],[110,6],[120,5],[130,5],
+  [52,14],[60,12],[70,10],[80,8],[88,7],[90,7],[100,6],[110,6],[120,5],[130,5],
   [140,4],[150,4],[160,4],[170,4],[180,4],[200,3]];
 function fiadasPorEspessura(espMm){
   if(espMm==null || isNaN(espMm)) return null;
@@ -1152,6 +1150,23 @@ async function definirDiaEntradaServidor(it, gsAnterior){
     log("local",`"${it.titulo}" com entrada movida para ${MASTER[it.gs].iso}`);
   }catch(e){ alert("Falhou a guardar: "+e); it.gs=gsAnterior; renderLanes(); }
 }
+// usado só pelo botão "Guardar" da ficha (pedido explícito do Rui,
+// 2026-10-06: "tem de ser possível alterá-la aí e não apenas movendo o
+// card na tabela") — mesmo endpoint do arrasto, mas reportando erros no
+// próprio formulário ($fErro), como o resto da ficha, em vez de alert().
+// Devolve false (e já escreve o erro) se falhar, para o chamador não
+// continuar a guardar o resto da ficha como se tivesse corrido tudo bem.
+async function guardarDiaEntradaSeMudou(it){
+  const novo=$("#fDiaEntrada").value;
+  if(!novo || novo===MASTER[it.gs].iso) return true;
+  const r=await fetch("/planeamento-entradas/dia-entrada",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({basecamp_card_id:it.id,dia_entrada:novo})});
+  const d=await r.json();
+  if(d.erro){ $("#fErro").textContent=d.erro; return false; }
+  it.gs=idxOf(novo);
+  return true;
+}
 async function definirLarguraServidor(it, anterior){
   try{
     const r=await fetch("/planeamento-entradas/largura-dias",{method:"POST",
@@ -1241,6 +1256,18 @@ function openSheet(id){
       Pode marcar mais que um charriot ao mesmo tempo (ex: a produzir em simultâneo no Charriot 1 e no
       Charriot 2) — nenhum marcado fica "por atribuir".</div>
 
+    <!-- data de entrada editável diretamente aqui (pedido explícito do
+         Rui, 2026-10-06: "tem de ser possível alterá-la aí e não apenas
+         movendo o card na tabela") — mesmo endpoint do arrasto
+         (definir_dia_entrada), com o mesmo aviso antes de confirmar (ver
+         guardarDiaEntradaSeMudou abaixo). -->
+    <div class="frow"><label class="destaque">Data de entrada</label>
+      <input id="fDiaEntrada" type="date" value="${MASTER[it.gs].iso}"></div>
+    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
+      ${it.buffer ? "Podes escrevê-la aqui diretamente, além de arrastar o card na tabela."
+        : "Calculada automaticamente a partir do início da produção (ver \"Em contínuo\" abaixo) — "
+          + "podes escrevê-la aqui diretamente, além de arrastar o card na tabela."}</div>
+
     <!-- todos os campos numéricos desta ficha usam type="text" + inputmode
          (nunca type="number"), pedido explícito do Rui (2026-10-04):
          tablets reais não deixavam escrever nalguns destes campos — bug
@@ -1256,8 +1283,8 @@ function openSheet(id){
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
     <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
-      Marcado: entra no charriot no mesmo dia do início da produção. Desmarcado: entra no dia anterior
-      (ou sábado, se isso cair a domingo).</div>`}
+      Por omissão vem sempre marcado: entra no charriot no mesmo dia do início da produção. Desmarcado:
+      entra no dia anterior (ou sábado, se isso cair a domingo).</div>`}
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
@@ -1315,6 +1342,26 @@ function openSheet(id){
   $("#fToroCmp").onchange=()=>{
     $("#fToroCmpOutroWrap").style.display = $("#fToroCmp").value==="outro" ? "" : "none";
   };
+  // avisar sempre antes de alterar a data de entrada calculada (pedido
+  // explícito do Rui, 2026-10-06), tanto aqui como ao desmarcar "Em
+  // contínuo" abaixo — mesmo aviso que já existia ao arrastar o card.
+  const diaEntradaOriginal = MASTER[it.gs].iso;
+  $("#fDiaEntrada").onchange=()=>{
+    const novo=$("#fDiaEntrada").value;
+    if(novo && novo!==diaEntradaOriginal
+        && !confirm(`Vais mudar a data de entrada calculada de ${diaEntradaOriginal} para ${novo}. Tens a certeza?`)){
+      $("#fDiaEntrada").value=diaEntradaOriginal;
+    }
+  };
+  if(!it.buffer){
+    $("#fEmContinuo").onchange=()=>{
+      if(!$("#fEmContinuo").checked && !confirm(
+          "Vais desmarcar \"Em contínuo\" — a data de entrada calculada deixa de ser o dia de início da "
+          + "produção e passa a ser o dia anterior (ou sábado, se isso cair a domingo). Tens a certeza?")){
+        $("#fEmContinuo").checked=true;
+      }
+    };
+  }
   $("#fIndiceWip").oninput=()=>recalcularQtd(it);
   $("#fIndiceToros").oninput=()=>recalcularQtd(it);
   $("#fWipCmp").onchange=()=>recalcularQtd(it);
@@ -1382,6 +1429,7 @@ function openSheet(id){
     if(it.buffer){
       const nLotes=$("#fNLotes").value?parseFloat($("#fNLotes").value):null;
       try{
+        if(!(await guardarDiaEntradaSeMudou(it))) return;
         const r=await fetch("/planeamento-entradas/buffer/guardar",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({id:Math.abs(it.id),charriots,largura_dias:larguraDias,wip_cmp:wipCmp,wip_esp:wipEsp,
             indice_wip:indiceWip,n_lotes:nLotes,toro_cmp:toroCmp,toro_tipo:toroTipo,indice_toros:indiceToros})});
@@ -1395,6 +1443,7 @@ function openSheet(id){
     }
     const emContinuo=$("#fEmContinuo").checked;
     try{
+      if(!(await guardarDiaEntradaSeMudou(it))) return;
       if(JSON.stringify(charriots)!==JSON.stringify(it.charriots||[])){
         const r0=await fetch("/planeamento-entradas/atribuir",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({basecamp_card_id:it.id,charriots})});
