@@ -416,8 +416,19 @@ def importar_historico_avaliacoes(anos: list = None) -> dict:
            "sem_qualidade_legivel": sem_qualidade, "ja_existiam": len(ja_existiam)}
 
 
+def _entradas_com_saldo_do_artigo(tipo: str, comprimento: float, espessura: str) -> list[dict]:
+    """Entradas com saldo para o mesmo artigo que `_chave_artigo` usa para
+    agrupar o "stock por artigo" (ver stock_por_artigo) — quando tipo ou
+    comprimento vêm None ("N.D.", ver registar_correcao), isso é o próprio
+    artigo "desconhecido" como um todo (db.entradas_parkin_desconhecidas_com_saldo),
+    nunca uma correspondência exata que nunca bateria certo com NULL."""
+    if _chave_artigo(tipo, comprimento, espessura) == _ARTIGO_DESCONHECIDO:
+        return db.entradas_parkin_desconhecidas_com_saldo()
+    return db.entradas_parkin_com_saldo(tipo, comprimento, espessura)
+
+
 def _saldo_disponivel(tipo: str, comprimento: float, espessura: str) -> float:
-    return sum(float(e["saldo_kg"]) for e in db.entradas_parkin_com_saldo(tipo, comprimento, espessura))
+    return sum(float(e["saldo_kg"]) for e in _entradas_com_saldo_do_artigo(tipo, comprimento, espessura))
 
 
 def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
@@ -427,10 +438,12 @@ def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: 
     db.guardar_depletion_parkin). Assume que o chamador já confirmou que
     há saldo suficiente (ver _saldo_disponivel) — mesmo assim devolve
     {"erro": ...} sem tocar em nada se não houver, como rede de segurança."""
-    entradas = db.entradas_parkin_com_saldo(tipo, comprimento, espessura)
+    entradas = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura)
     disponivel = sum(float(e["saldo_kg"]) for e in entradas)
     if disponivel + 1e-6 < quantidade_kg:
-        return {"erro": (f"só há {disponivel:.0f} kg em stock para o artigo {tipo} {comprimento} {espessura} "
+        rotulo = "artigo desconhecido" if _chave_artigo(tipo, comprimento, espessura) == _ARTIGO_DESCONHECIDO \
+            else f"artigo {tipo} {comprimento} {espessura}"
+        return {"erro": (f"só há {disponivel:.0f} kg em stock para o {rotulo} "
                          f"— não é possível tirar {quantidade_kg:.0f} kg")}
     restante = quantidade_kg
     depletadas = []
@@ -481,16 +494,25 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
     """Lançamento manual de uma correção de stock — `quantidade_kg` com
     sinal: positivo é uma sobra/ajuste de inventário (pede
     `categoria_qualidade` à mão, porque não vem de nenhuma entrada);
-    negativo é uma remoção, depletada por FIFO como uma saída normal."""
-    if tipo not in TIPOS_VALIDOS:
-        return {"erro": f"tipo inválido: {tipo!r} — tem de ser um de {TIPOS_VALIDOS}"}
-    if espessura not in ESPESSURAS_VALIDAS:
+    negativo é uma remoção, depletada por FIFO como uma saída normal.
+
+    `tipo` e `comprimento` podem vir `None` ("N.D." — não definido, pedido
+    explícito do Rui, 2026-10-06): não sabemos o artigo exato, por isso a
+    correção sai/entra no "Artigo desconhecido" do dashboard (ver
+    _chave_artigo/stock_por_artigo) em vez de um artigo específico — ex:
+    -3000 kg sem tipo nem comprimento remove 3000 kg do stock
+    "desconhecido" (as entradas mais antigas sem essa informação, ver
+    _entradas_com_saldo_do_artigo), nunca de um artigo real."""
+    if tipo is not None and tipo not in TIPOS_VALIDOS:
+        return {"erro": f"tipo inválido: {tipo!r} — tem de ser N.D. ou um de {TIPOS_VALIDOS}"}
+    if espessura is not None and espessura not in ESPESSURAS_VALIDAS:
         return {"erro": f"espessura inválida: {espessura!r} — tem de ser uma de {ESPESSURAS_VALIDAS}"}
     if not quantidade_kg:
         return {"erro": "a quantidade não pode ser zero"}
     if not motivo or not motivo.strip():
         return {"erro": "o motivo é obrigatório"}
 
+    artigo = _chave_artigo(tipo, comprimento, espessura)
     data_hoje = date.today()
     if quantidade_kg > 0:
         if categoria_qualidade not in CATEGORIAS_QUALIDADE:
@@ -498,16 +520,17 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
                            f"uma de {CATEGORIAS_QUALIDADE}"}
         id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                                categoria_qualidade=categoria_qualidade, registado_por=registado_por)
-        return {"ok": True, "id": id_gerado}
+        return {"ok": True, "id": id_gerado, "artigo": artigo}
 
     disponivel = _saldo_disponivel(tipo, comprimento, espessura)
     if disponivel + 1e-6 < abs(quantidade_kg):
-        return {"erro": (f"só há {disponivel:.0f} kg em stock para este artigo — não é possível remover "
+        rotulo = "artigo desconhecido" if artigo == _ARTIGO_DESCONHECIDO else "este artigo"
+        return {"erro": (f"só há {disponivel:.0f} kg em stock para {rotulo} — não é possível remover "
                          f"{abs(quantidade_kg):.0f} kg")}
     id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                            registado_por=registado_por)
     resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado)
-    return {"ok": True, "id": id_gerado, **resultado}
+    return {"ok": True, "id": id_gerado, "artigo": artigo, **resultado}
 
 
 def stock_total() -> dict:
@@ -564,7 +587,7 @@ def stock_por_artigo() -> list[dict]:
             a["sem_categoria_kg"] += saldo
 
     for c in db.correcoes_parkin_positivas():
-        comprimento = float(c["comprimento"])
+        comprimento = float(c["comprimento"]) if c["comprimento"] is not None else None
         chave = _chave_artigo(c["tipo"], comprimento, c["espessura"])
         a = _bucket(chave, c["tipo"], comprimento, c["espessura"])
         if c["categoria_qualidade"] in a["por_categoria_kg"]:
@@ -785,10 +808,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Correção de stock</h3>
   <div class="frow"><label>Tipo</label>
-    <select id="cTipo"><option value="IN">IN</option><option value="MT">MT</option></select>
+    <select id="cTipo"><option value="IN">IN</option><option value="MT">MT</option>
+      <option value="">N.D. — não definido</option></select>
   </div>
   <div class="frow"><label>Comprimento (m)</label>
-    <input type="text" inputmode="decimal" id="cComprimento" placeholder="ex: 2,35">
+    <input type="text" inputmode="decimal" id="cComprimento" placeholder="ex: 2,35 — ou N.D.">
   </div>
   <div class="frow"><label>Espessura</label>
     <select id="cEspessura"><option value="normal">Normal</option><option value="fina">Fina</option></select>
@@ -1076,23 +1100,30 @@ $("#bSaidaGuardar").onclick = async () => {
 };
 
 $("#bCorrecaoGuardar").onclick = async () => {
+  // Tipo e Comprimento aceitam "N.D." (não definido) — pedido explícito
+  // do Rui, 2026-10-06: uma correção sem tipo/comprimento definidos tem
+  // de sair do "Artigo desconhecido" (ver tools/parkin._chave_artigo),
+  // não de um artigo específico.
+  const compTxt = $("#cComprimento").value.trim();
+  const compND = /^n\.?d\.?$/i.test(compTxt);
+  const comprimento = compND ? null : parseFloat(compTxt.replace(",","."));
   const corpo = {
-    tipo: $("#cTipo").value,
-    comprimento: parseFloat($("#cComprimento").value.replace(",",".")),
+    tipo: $("#cTipo").value || null,
+    comprimento: comprimento,
     espessura: $("#cEspessura").value,
     quantidade_kg: parseFloat($("#cQuantidade").value.replace(",",".")),
     motivo: $("#cMotivo").value,
     categoria_qualidade: $("#cCategoria").value,
   };
-  if(!corpo.comprimento || !corpo.quantidade_kg || !corpo.motivo){
-    $("#correcaoMsg").innerHTML = '<div class="err">Preenche comprimento, quantidade e motivo.</div>'; return;
+  if((!compND && (!comprimento || Number.isNaN(comprimento))) || !corpo.quantidade_kg || !corpo.motivo){
+    $("#correcaoMsg").innerHTML = '<div class="err">Preenche comprimento (um número, ou "N.D."), quantidade e motivo.</div>'; return;
   }
   $("#bCorrecaoGuardar").disabled = true;
   try{
     const r = await fetch("/park-in/correcao", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(corpo)});
     const j = await r.json();
     if(j.erro){ $("#correcaoMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
-    else { $("#correcaoMsg").innerHTML = '<div class="ok">Correção registada.</div>'; carregar(); }
+    else { $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada${j.artigo==="desconhecido"?" (artigo desconhecido)":""}.</div>`; carregar(); }
   } catch(e){ $("#correcaoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bCorrecaoGuardar").disabled = false;
 };

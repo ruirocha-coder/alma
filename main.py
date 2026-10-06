@@ -999,14 +999,22 @@ async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] 
 @app.post("/park-in/correcao")
 def park_in_correcao(corpo: dict = Body(...)):
     """Lançamento manual de uma correção de stock — ver
-    tools/parkin.registar_correcao."""
+    tools/parkin.registar_correcao. tipo e comprimento podem vir None
+    ("N.D." — não definido, pedido explícito do Rui, 2026-10-06): a
+    correção sai/entra então no "Artigo desconhecido" do dashboard."""
     try:
         quantidade_kg = float(corpo.get("quantidade_kg"))
-        comprimento = float(corpo.get("comprimento"))
     except (TypeError, ValueError):
-        return JSONResponse({"erro": "quantidade_kg e comprimento têm de ser números"}, status_code=400)
+        return JSONResponse({"erro": "quantidade_kg tem de ser um número"}, status_code=400)
+    comprimento_bruto = corpo.get("comprimento")
+    comprimento = None
+    if comprimento_bruto not in (None, ""):
+        try:
+            comprimento = float(comprimento_bruto)
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "comprimento tem de ser um número ou N.D."}, status_code=400)
     resultado = parkin.registar_correcao(
-        corpo.get("tipo"), comprimento, corpo.get("espessura"), quantidade_kg, corpo.get("motivo"),
+        corpo.get("tipo") or None, comprimento, corpo.get("espessura") or None, quantidade_kg, corpo.get("motivo"),
         categoria_qualidade=corpo.get("categoria_qualidade"), registado_por=corpo.get("utilizador"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)

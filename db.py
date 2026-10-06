@@ -663,6 +663,15 @@ CREATE TABLE IF NOT EXISTS buffers_entrada_ecos_largos (
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
     atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- correção de stock do Park In com Tipo e/ou Comprimento "N.D." (pedido
+-- explícito do Rui, 2026-10-06): sai/entra no "Artigo desconhecido" (ver
+-- tools/parkin._chave_artigo), tal como já acontecia com parkin_entradas
+-- vindas da importação do histórico — sem isto, o INSERT com NULL falhava
+-- contra o NOT NULL original destas três colunas.
+ALTER TABLE parkin_correcoes ALTER COLUMN tipo DROP NOT NULL;
+ALTER TABLE parkin_correcoes ALTER COLUMN comprimento DROP NOT NULL;
+ALTER TABLE parkin_correcoes ALTER COLUMN espessura DROP NOT NULL;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -2485,6 +2494,24 @@ def entradas_parkin_com_saldo(tipo: str, comprimento: float, espessura: str) -> 
                    WHERE tipo = %s AND comprimento = %s AND espessura = %s AND saldo_kg > 0
                    ORDER BY data ASC, id ASC""",
                 (tipo, comprimento, espessura)
+            )
+            return cur.fetchall()
+
+def entradas_parkin_desconhecidas_com_saldo() -> list[dict]:
+    """Entradas do artigo "desconhecido" (tipo e/ou comprimento e/ou
+    espessura por definir — ver _chave_artigo em tools/parkin.py) com
+    saldo > 0, da mais antiga para a mais recente — mesma ordem FIFO de
+    entradas_parkin_com_saldo, usada quando uma correção vem com tipo ou
+    comprimento "N.D." (pedido explícito do Rui, 2026-10-06): aí uma
+    correspondência exata nunca bateria certo, porque é precisamente o
+    valor NULL que estas entradas têm."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, saldo_kg, categoria_qualidade
+                   FROM parkin_entradas
+                   WHERE (tipo IS NULL OR comprimento IS NULL OR espessura IS NULL) AND saldo_kg > 0
+                   ORDER BY data ASC, id ASC"""
             )
             return cur.fetchall()
 
