@@ -837,31 +837,39 @@ let ALTURAS_LANE=[], OFFSETS_LANE=[];
    mesmo que ocasionalmente ainda se toquem um pouco, porque nunca faz a
    tabela crescer nem esconde a informação por completo. */
 function tamanhoDe(e){
+  // só a envergadura em LANES conta como "tamanho" (não os dias de
+  // largura) — é o que determina quanto é que um card continua visível
+  // na vertical quando outro lhe cai em cima; um card estreito mas muito
+  // largo (ex: Moreira, 1 lane × 3 dias) é tão fácil de esconder como
+  // qualquer outro de 1 lane, não deve competir com um card realmente
+  // esticado por vários charriots (bug real, 2026-10-06: Moreira, 1 lane,
+  // empatava com um buffer de 3 lanes só por ser mais largo em dias, e
+  // ficava "de trás" — escondido — quando devia ficar à frente).
   const [minLane,maxLane]=minMaxLane(e);
-  return (maxLane-minLane+1)*(e.larguraDias||1);
+  return maxLane-minLane+1;
 }
 function empacotarGlobal(lista){
-  // os maiores (mais lanes/mais dias) são colocados PRIMEIRO, o que lhes
-  // dá a linha 0 — a posição mais "de trás" da cascata (sem desvio, sem
-  // zIndex, ver renderLanes). Os mais pequenos, colocados depois, acabam
-  // sempre a precisar de uma linha mais alta (mais à frente, com mais
-  // desvio) para não colidirem — pedido explícito do Rui, 2026-10-06:
+  // os maiores (mais lanes) são colocados PRIMEIRO. Cada novo card fica
+  // sempre numa linha estritamente acima de QUALQUER já colocado com que
+  // colida (nunca reaproveita uma linha livre "por baixo") — isto
+  // garante que, em qualquer par de cards em conflito, o mais pequeno
+  // (colocado depois) fica sempre numa linha mais alta, ou seja, mais à
+  // frente (mais desvio, mais zIndex, ver renderLanes), nunca escondido
+  // atrás de algo maior do que ele. Pedido explícito do Rui, 2026-10-06:
   // "os mais pequenos devem passar para a frente para ficarem mais
   // visíveis", porque um card grande continua bem visível mesmo tapado
   // em parte, mas um card pequeno tapado por um grande desaparece todo.
-  const ordenada=[...lista].sort((x,y)=> tamanhoDe(y)-tamanhoDe(x) || x.gs-y.gs || x.id-y.id);
+  const ordenada=[...lista].sort((x,y)=>
+    tamanhoDe(y)-tamanhoDe(x) || (y.larguraDias||1)-(x.larguraDias||1) || x.gs-y.gs || x.id-y.id);
   const colocados=[];  // {minLane,maxLane,fim,linha}
   const linhaPorId=new Map();
   ordenada.forEach(e=>{
     const [minLane,maxLane]=minMaxLane(e);
     const fim=e.gs+(e.larguraDias||1)-1;
     let linha=0;
-    while(true){
-      const conflito=colocados.some(o=>
-        o.fim>=e.gs && o.linha===linha && !(maxLane<o.minLane || minLane>o.maxLane));
-      if(!conflito) break;
-      linha++;
-    }
+    colocados.forEach(o=>{
+      if(o.fim>=e.gs && !(maxLane<o.minLane || minLane>o.maxLane)) linha=Math.max(linha,o.linha+1);
+    });
     colocados.push({minLane,maxLane,fim,linha});
     linhaPorId.set(e.id,linha);
   });
@@ -901,6 +909,13 @@ function renderLanes(){
     return `<div class="cell${NAO_PRODUZ(d)?" wk":""}${hoje?" hoje":""}${ehFeriado(d)?" feriado":""}"></div>`;
   }).join("")+'</div>'; });
   h+='<div class="blocks" id="blocks"></div>';
+  // reserva de espaço invisível no fundo (pedido explícito do Rui,
+  // 2026-10-06: "em baixo não deviam aparecer cortados") — um card na
+  // última lane que caia em cascata (ver renderLanes, desvio vertical até
+  // profVisual*16=48px) desloca-se para BAIXO do fim normal das lanes;
+  // sem esta reserva, o .scroll (overflow-y:hidden, ver CSS) corta essa
+  // parte porque a sua altura só tinha em conta as lanes "normais".
+  h+='<div style="height:56px"></div>';
   const lanes=$("#lanes"); lanes.innerHTML=h; lanes.style.width=(D.length*DAY)+"px";
   const bl=$("#blocks");
   // um único passo por entrada (não mais por lane): o empacotamento já é
