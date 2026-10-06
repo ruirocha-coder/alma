@@ -913,17 +913,18 @@ function renderLanes(){
     // "escada" ao estilo Google Calendar (pedido explícito do Rui,
     // 2026-10-06): um card em conflito com outro (linha>0, ver
     // empacotarGlobal) não ganha uma linha nova nem faz a lane crescer —
-    // desloca-se um bocado para a direita/baixo e encolhe, suficiente
-    // para nunca tapar por completo o que está por baixo. A diferença
-    // entre cards nunca deve ficar muito notória (pedido explícito do
-    // Rui, 2026-10-06) — por isso o desvio visual tem um máximo (3),
-    // mesmo que a "linha" real (só para evitar o conflito) seja maior,
-    // ex: 3 cards a disputarem o mesmo charriot ao mesmo tempo (um
-    // conflito real de agenda, não resolúvel só a empilhar).
-    const PASSO_CASCATA=6;
+    // desloca-se para a direita/baixo e encolhe, suficiente para nunca
+    // tapar por completo o que está por baixo. O desvio tem de ser
+    // visível o suficiente para se perceber que há cards por baixo e
+    // quais são (pedido explícito do Rui, 2026-10-06: a versão anterior,
+    // mais subtil, não dava para perceber), mas com um máximo (3) para
+    // nunca ficar exagerado mesmo quando há mais do que 3 cards em
+    // conflito real (ex: 3+ OFs a disputarem o mesmo charriot ao mesmo
+    // tempo, um conflito real de agenda, não resolúvel só a empilhar).
+    const PASSO_CASCATA=14;
     const profVisual=Math.min(linha,3);
     el.style.left=(aVis*DAY+3+profVisual*PASSO_CASCATA)+"px";
-    el.style.top=(topoPx+profVisual*5)+"px";
+    el.style.top=(topoPx+profVisual*10)+"px";
     el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-profVisual*PASSO_CASCATA))+"px";
     el.style.height=alturaPx+"px";
     if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
