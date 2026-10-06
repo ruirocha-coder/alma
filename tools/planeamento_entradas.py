@@ -950,10 +950,10 @@ function renderLanes(){
     // empacotarGlobal) não ganha uma linha nova nem faz a lane crescer —
     // desloca-se um bocado para a direita/baixo e encolhe, suficiente
     // para nunca tapar por completo o que está por baixo.
-    const PASSO_CASCATA=14;
+    const PASSO_CASCATA=8;
     el.style.left=(aVis*DAY+3+linha*PASSO_CASCATA)+"px";
     el.style.top=(topoPx+linha*6)+"px";
-    el.style.width=Math.max(40,((aFimVis-aVis+1)*DAY-8-linha*PASSO_CASCATA))+"px";
+    el.style.width=Math.max(70,((aFimVis-aVis+1)*DAY-8-linha*PASSO_CASCATA))+"px";
     el.style.height=alturaPx+"px";
     if(linha>0){ el.style.zIndex=10+linha; el.style.boxShadow="0 2px 8px rgba(0,0,0,.28)"; }
     // manípulos de arrastar para alargar (pedido explícito do Rui,
