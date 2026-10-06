@@ -964,7 +964,13 @@ def _debug_ofs_invisiveis():
                 "volume_m3": float(a["volume_m3"]) if a["volume_m3"] is not None else None,
                 "cor": a["cor"], "tipo_madeira": a["tipo_madeira"],
             })
-    return {"total_candidatos": len(candidatos), "afetados": afetados}
+    todos = [{
+        "basecamp_card_id": a["basecamp_card_id"],
+        "coluna_basecamp": (cards_por_id.get(a["basecamp_card_id"]) or {}).get("estado"),
+        "encontrado": a["basecamp_card_id"] in cards_por_id,
+        "inexistente_confirmado": a["basecamp_card_id"] in inexistentes,
+    } for a in candidatos]
+    return {"total_candidatos": len(candidatos), "afetados": afetados, "todos_candidatos": todos}
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
