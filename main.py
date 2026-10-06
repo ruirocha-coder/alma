@@ -949,7 +949,7 @@ def park_in_pagina():
 def _debug_talao_sample():
     import db
     todas = db.entradas_parkin_todas()
-    com_saldo = [e for e in todas if float(e["saldo_kg"] or 0) > 1]
+    com_saldo = [e for e in todas if float(e["saldo_kg"] or 0) > 1 and e["tipo"] is not None]
     return {"total": len(todas), "amostra": [
         {"talao": e["talao"], "saldo_kg": float(e["saldo_kg"]), "tipo": e["tipo"],
          "comprimento": float(e["comprimento"]) if e["comprimento"] is not None else None,
