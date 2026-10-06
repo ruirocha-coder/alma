@@ -425,6 +425,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
     --green:#2E9E4F; --green-bg:#E1F5E6; --feriado-bg:#FBDFDD;
     --day:92px; --lane:78px; --label:180px;
   }
+  /* ecrã de telemóvel (pedido explícito do Rui, 2026-10-06): a coluna de
+     etiquetas (180px) sozinha já não deixava espaço nenhum para os dias
+     num ecrã estreito — ver também metrics() (JS), que baixa a largura
+     mínima de cada dia só em ecrãs estreitos, para o "dense" (fonte/
+     espaçamento mais pequenos, já existente) entrar em ação em vez de
+     forçar sempre 84px por dia. */
+  @media (max-width:640px){
+    :root{ --label:68px; }
+    .wrap{padding:14px 8px 100px}
+    h1{font-size:21px}
+    .lbl{padding:6px 5px}
+    .lbl .n{font-size:11px;line-height:1.2}
+  }
   *{box-sizing:border-box}
   body{margin:0;background:var(--canvas);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
@@ -773,9 +786,16 @@ const numCurto=id=>String(id).slice(-4);
 
 function metrics(){
   const avail=$("#scroll").clientWidth||600;
-  if(view.mode==="mes"){ DAY=44; LANE=78; }
-  else if(view.mode==="duas"){ DAY=Math.max(72,Math.floor(avail/14)); LANE=78; }
-  else { DAY=Math.max(84,Math.floor(avail/7)); LANE=78; }
+  // ecrã de telemóvel (pedido explícito do Rui, 2026-10-06): com a largura
+  // mínima de sempre (84px/72px), 7 dias nunca cabiam perto de um ecrã
+  // estreito, obrigando a arrastar para o lado com os títulos cortados
+  // quase por completo — aqui deixa-se cada dia ficar mais estreito (o
+  // "dense" abaixo já reduz fonte/espaçamento para continuar legível),
+  // em vez de forçar sempre a mesma largura mínima do ecrã largo.
+  const movel=window.innerWidth<640;
+  if(view.mode==="mes"){ DAY=movel?34:44; LANE=78; }
+  else if(view.mode==="duas"){ DAY=Math.max(movel?48:72,Math.floor(avail/14)); LANE=78; }
+  else { DAY=Math.max(movel?56:84,Math.floor(avail/7)); LANE=78; }
   document.documentElement.style.setProperty("--day",DAY+"px");
   document.documentElement.style.setProperty("--lane",LANE+"px");
   $("#board").classList.toggle("dense",DAY<70);
