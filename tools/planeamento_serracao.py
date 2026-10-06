@@ -203,31 +203,12 @@ def estado_planeamento_serracao() -> dict:
         tem_agendamento = bool(agendamento and agendamento["linha"] and agendamento["dia_inicio"])
         # a fila (bolsa por agendar) só mostra OFs ainda em Triagem — uma OF
         # que já avançou no Basecamp (Programação/Em Produção/Produzido) sem
-        # NUNCA ter sido tocada aqui já não é "por agendar", é trabalho já
+        # nunca ter sido agendada aqui já não é "por agendar", é trabalho já
         # em curso fora deste quadro, por isso fica de fora por completo
-        # (pedido explícito do Rui, 2026-09).
-        #
-        # Mas uma OF que JÁ tem registo local (`agendamento is not None`) —
-        # mesmo sem linha/dia preenchidos — tem de continuar sempre
-        # visível ENQUANTO ainda estiver em curso, nem que seja de volta à
-        # fila: já foi configurada aqui (volume/cor/madeira), nunca deve
-        # desaparecer silenciosamente só por ter avançado de coluna no
-        # Basecamp entretanto ou por ter sido devolvida à fila com
-        # desagendar() depois de já ter avançado (bug real, 2026-10-06: a
-        # "Palcax OF 509" tinha volume/cor/madeira já definidos, mas por
-        # ter avançado para "Em Produção" sem (ou depois de perder)
-        # dia/linha, não aparecia em lado nenhum da página).
-        #
-        # Mas uma vez "Produzido" (ou "Vendido"), já não há nada para
-        # agendar — voltar a pô-la na fila seria só ruído (bug real,
-        # 2026-10-06, encontrado logo a seguir ao de cima: a "Palcax
-        # OF.593", já Produzida, reapareceu na fila como se ainda
-        # precisasse de ser agendada, só por também ter um registo local
-        # sem linha/dia). Essas continuam de fora por completo, tal como
-        # sempre aconteceu com "Vendido".
+        # (pedido explícito do Rui, 2026-09). Só continua a aparecer, na
+        # grelha, se já tiver um agendamento local guardado de antes.
         if not tem_agendamento and _normalizar(c.get("estado")) != "triagem":
-            if agendamento is None or _normalizar(c.get("estado")) in {"produzido", "vendido"}:
-                continue
+            continue
         info = {
             "basecamp_card_id": c["id"],
             "titulo": c["titulo"],
