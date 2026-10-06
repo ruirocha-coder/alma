@@ -945,6 +945,16 @@ def park_in_pagina():
     manualmente dentro do Basecamp."""
     return HTMLResponse(parkin.pagina_park_in())
 
+@app.get("/_debug-talao-sample")
+def _debug_talao_sample():
+    import db
+    todas = db.entradas_parkin_todas()
+    com_saldo = [e for e in todas if float(e["saldo_kg"] or 0) > 1]
+    return {"total": len(todas), "amostra": [
+        {"talao": e["talao"], "saldo_kg": float(e["saldo_kg"]), "tipo": e["tipo"],
+         "comprimento": float(e["comprimento"]) if e["comprimento"] is not None else None,
+         "espessura": e["espessura"]} for e in com_saldo[:5]]}
+
 @app.get("/park-in/dados")
 def park_in_dados(dias_top_entradas: int = 30):
     """Dados do dashboard: stock total, stock por artigo, top qualidade e
