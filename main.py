@@ -938,40 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-ofs-invisiveis")
-def _debug_ofs_invisiveis():
-    """Diagnóstico só de leitura: todas as OFs com registo local "tocado"
-    (volume/cor/madeira definidos) mas sem linha/dia, cujo card real no
-    Basecamp já avançou para além de Triagem — estas ficam invisíveis na
-    página de planeamento, tal como acontecia com a Palcax OF 509."""
-    import db
-    from tools import basecamp as bc, planeamento_serracao as ps
-    candidatos = [a for a in db.agendamentos_producao_ecos_largos()
-                  if not (a["linha"] and a["dia_inicio"])
-                  and (a["volume_m3"] is not None or a["cor"] or a["cor_fundo"] or a["tipo_madeira"])]
-    ids = {a["basecamp_card_id"] for a in candidatos}
-    encontrados, inexistentes = bc.obter_cards(ids, projeto=ps.PROJETO)
-    cards_por_id = {c["id"]: c for c in encontrados}
-    afetados = []
-    for a in candidatos:
-        c = cards_por_id.get(a["basecamp_card_id"])
-        if not c:
-            continue
-        if ps._normalizar(c.get("estado")) != "triagem":
-            afetados.append({
-                "basecamp_card_id": a["basecamp_card_id"], "titulo": c["titulo"],
-                "coluna_basecamp": c["estado"], "url": c["url"],
-                "volume_m3": float(a["volume_m3"]) if a["volume_m3"] is not None else None,
-                "cor": a["cor"], "tipo_madeira": a["tipo_madeira"],
-            })
-    todos = [{
-        "basecamp_card_id": a["basecamp_card_id"],
-        "coluna_basecamp": (cards_por_id.get(a["basecamp_card_id"]) or {}).get("estado"),
-        "encontrado": a["basecamp_card_id"] in cards_por_id,
-        "inexistente_confirmado": a["basecamp_card_id"] in inexistentes,
-    } for a in candidatos]
-    return {"total_candidatos": len(candidatos), "afetados": afetados, "todos_candidatos": todos}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
