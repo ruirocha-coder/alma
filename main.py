@@ -996,6 +996,31 @@ async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] 
         resultados.append({"ficheiro": ficheiro.filename, **resultado})
     return JSONResponse({"resultados": resultados})
 
+@app.get("/park-in/entrada-por-talao")
+def park_in_entrada_por_talao(talao: str = ""):
+    """Pré-visualização de um lote pelo nº de talão, antes de confirmar uma
+    saída "só pelo número" — ver tools/parkin.info_entrada_por_talao."""
+    resultado = parkin.info_entrada_por_talao(talao)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=404)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/saida-por-talao")
+def park_in_saida_por_talao(corpo: dict = Body(...)):
+    """Saída identificada só pelo nº de talão do lote de entrada — ver
+    tools/parkin.registar_saida_por_talao."""
+    quantidade_kg = None
+    if corpo.get("quantidade_kg") not in (None, ""):
+        try:
+            quantidade_kg = float(corpo.get("quantidade_kg"))
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "quantidade_kg tem de ser um número"}, status_code=400)
+    resultado = parkin.registar_saida_por_talao(
+        corpo.get("talao"), quantidade_kg, registado_por=corpo.get("utilizador"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/correcao")
 def park_in_correcao(corpo: dict = Body(...)):
     """Lançamento manual de uma correção de stock — ver

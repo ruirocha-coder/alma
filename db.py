@@ -2472,6 +2472,25 @@ def guardar_entrada_parkin(talao: str, fornecedor: str, data, tipo: str, comprim
         conn.commit()
     return id_gerado
 
+def entrada_parkin_por_talao(talao: str) -> dict:
+    """A entrada (lote) com este nº de talão, ou None se não existir — usada
+    pela Saída "só por número" (pedido explícito do Rui, 2026-10-06, ver
+    tools/parkin.registar_saida_por_talao): identifica exatamente ESSE
+    lote, em vez de correr o FIFO genérico do artigo (ver
+    entradas_parkin_com_saldo), para a saída descontar sempre da carga
+    certa, nunca de outra com o mesmo tipo/comprimento/espessura só por
+    coincidência. Não filtra por saldo > 0 — um lote já esgotado também
+    tem de ser encontrado, para dar um erro claro em vez de "não existe"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura,
+                          peso_liquido_kg, saldo_kg, categoria_qualidade
+                   FROM parkin_entradas WHERE talao = %s ORDER BY id DESC LIMIT 1""",
+                (talao,)
+            )
+            return cur.fetchone()
+
 def talaoes_parkin_existentes() -> set:
     """Todos os nºs de talão já registados como entrada no Park In — usado
     por importar_historico_avaliacoes (tools/parkin.py) para nunca

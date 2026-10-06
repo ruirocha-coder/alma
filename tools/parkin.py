@@ -489,6 +489,73 @@ def registar_saida(bruto: bytes, content_type: str, registado_por: str = None) -
            "quantidade_kg": quantidade, **resultado}
 
 
+def info_entrada_por_talao(talao: str) -> dict:
+    """Informação do lote (entrada) com este nº de talão — pré-visualização
+    antes de confirmar uma saída "só pelo número" (ver
+    registar_saida_por_talao), para o Rui ver logo que é mesmo a carga
+    certa (fornecedor, artigo, saldo atual) antes de guardar."""
+    talao = (talao or "").strip()
+    if not talao:
+        return {"erro": "o número do talão é obrigatório"}
+    entrada = db.entrada_parkin_por_talao(talao)
+    if not entrada:
+        return {"erro": f"não encontrei nenhuma entrada no Park In com o talão {talao!r}"}
+    comprimento = float(entrada["comprimento"]) if entrada["comprimento"] is not None else None
+    return {
+        "talao": entrada["talao"], "fornecedor": entrada["fornecedor"],
+        "tipo": entrada["tipo"], "comprimento": comprimento, "espessura": entrada["espessura"],
+        "artigo": _chave_artigo(entrada["tipo"], comprimento, entrada["espessura"]),
+        "saldo_kg": round(float(entrada["saldo_kg"] or 0), 1),
+    }
+
+
+def registar_saida_por_talao(talao: str, quantidade_kg: float = None, registado_por: str = None) -> dict:
+    """Saída identificada só pelo nº de talão do LOTE de entrada que está a
+    sair (pedido explícito do Rui, 2026-10-06, alternativa a fotografar um
+    novo talão de consumo) — tipo, comprimento, espessura e saldo vêm
+    todos da própria entrada já registada com esse talão (ver
+    db.entrada_parkin_por_talao), nunca pedidos outra vez à mão.
+
+    Desconta sempre exatamente ESSE lote (nunca o FIFO genérico do artigo,
+    ver _aplicar_fifo) — é precisamente a carga identificada pelo talão,
+    não "uma qualquer com o mesmo tipo/comprimento/espessura".
+    `quantidade_kg` é opcional: por omissão sai o saldo inteiro do lote —
+    o pedido foi literalmente "saber só pelo número... calcular
+    automaticamente quanto está a sair", sem indicar peso nenhum à mão; se
+    vier preenchida, sai só essa parte, desde que não exceda o saldo."""
+    talao = (talao or "").strip()
+    if not talao:
+        return {"erro": "o número do talão é obrigatório"}
+    entrada = db.entrada_parkin_por_talao(talao)
+    if not entrada:
+        return {"erro": f"não encontrei nenhuma entrada no Park In com o talão {talao!r}"}
+
+    saldo = float(entrada["saldo_kg"] or 0)
+    if saldo <= 1e-6:
+        return {"erro": f"o lote do talão {talao} já está esgotado (saldo 0 kg)"}
+
+    if quantidade_kg is None:
+        quantidade = saldo
+    else:
+        quantidade = float(quantidade_kg)
+        if quantidade <= 0:
+            return {"erro": "a quantidade tem de ser maior que zero"}
+        if quantidade > saldo + 1e-6:
+            return {"erro": (f"o lote do talão {talao} só tem {saldo:.0f} kg de saldo "
+                             f"— não é possível tirar {quantidade:.0f} kg")}
+
+    data_hoje = date.today()
+    saida_id = db.guardar_saida_parkin(entrada["tipo"], entrada["comprimento"], entrada["espessura"],
+                                       quantidade, data_hoje, talao=talao, registado_por=registado_por)
+    db.descontar_saldo_entrada_parkin(entrada["id"], quantidade)
+    db.guardar_depletion_parkin(entrada["id"], quantidade, saida_id=saida_id)
+    return {"ok": True, "id": saida_id,
+           "artigo": _chave_artigo(entrada["tipo"], entrada["comprimento"], entrada["espessura"]),
+           "quantidade_kg": round(quantidade, 1), "fornecedor": entrada["fornecedor"],
+           "depletadas": [{"entrada_id": entrada["id"], "talao": entrada["talao"],
+                           "quantidade_kg": round(quantidade, 1)}]}
+
+
 def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_kg: float, motivo: str,
                       categoria_qualidade: str = None, registado_por: str = None) -> dict:
     """Lançamento manual de uma correção de stock — `quantidade_kg` com
@@ -795,8 +862,24 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <div class="sheet" id="sheetSaida">
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Nova saída</h3>
-  <p class="sub" style="margin:0 0 12px">Fotos dos talões de consumo — escolhe várias de uma vez.</p>
-  <input type="file" id="fSaidaFotos" accept="image/*" multiple>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn primary" type="button" id="bSaidaModoFoto">Foto do talão</button>
+    <button class="btn" type="button" id="bSaidaModoTalao">Nº do talão</button>
+  </div>
+  <div id="saidaFotoBloco">
+    <p class="sub" style="margin:0 0 12px">Fotos dos talões de consumo — escolhe várias de uma vez.</p>
+    <input type="file" id="fSaidaFotos" accept="image/*" multiple>
+  </div>
+  <div id="saidaTalaoBloco" style="display:none">
+    <p class="sub" style="margin:0 0 12px">Escreve o nº do talão do lote que está a sair — o artigo e o saldo vêm automaticamente desse lote, sem foto nova.</p>
+    <div class="frow"><label>Nº do talão</label>
+      <input type="text" id="cSaidaTalao" placeholder="ex: 11293">
+    </div>
+    <div id="saidaTalaoInfo" class="sub" style="margin:2px 0 10px"></div>
+    <div class="frow"><label>Quantidade (kg)</label>
+      <input type="text" inputmode="decimal" id="cSaidaQtd" placeholder="deixa vazio para sair o lote todo">
+    </div>
+  </div>
   <div class="acts">
     <button class="btn" data-close>Cancelar</button>
     <button class="btn primary" id="bSaidaGuardar">Guardar</button>
@@ -1017,7 +1100,47 @@ $("#bAbrirEntrada").onclick = () => {
   renderEntradaAnexos();
   abrirSheet("#sheetEntrada");
 };
-$("#bAbrirSaida").onclick = () => { $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value=""; abrirSheet("#sheetSaida"); };
+let saidaModo = "foto";
+function definirSaidaModo(modo){
+  saidaModo = modo;
+  $("#bSaidaModoFoto").className = "btn" + (modo==="foto" ? " primary" : "");
+  $("#bSaidaModoTalao").className = "btn" + (modo==="talao" ? " primary" : "");
+  $("#saidaFotoBloco").style.display = modo==="foto" ? "" : "none";
+  $("#saidaTalaoBloco").style.display = modo==="talao" ? "" : "none";
+}
+$("#bSaidaModoFoto").onclick = () => definirSaidaModo("foto");
+$("#bSaidaModoTalao").onclick = () => definirSaidaModo("talao");
+
+function rotuloArtigo(info){
+  return info.artigo==="desconhecido" ? "Artigo desconhecido"
+    : `${info.tipo} · ${info.comprimento.toFixed(2)}m · ${info.espessura==="fina"?"Fina":"Normal"}`;
+}
+// pré-visualização automática ao escrever o nº do talão (pedido explícito
+// do Rui, 2026-10-06: "ir buscar a informação sobre essa carga") — o Rui
+// vê logo o artigo/fornecedor/saldo encontrados, antes de confirmar.
+let saidaTalaoDebounce = null;
+$("#cSaidaTalao").addEventListener("input", () => {
+  clearTimeout(saidaTalaoDebounce);
+  const talao = $("#cSaidaTalao").value.trim();
+  if(!talao){ $("#saidaTalaoInfo").innerHTML = ""; return; }
+  saidaTalaoDebounce = setTimeout(async () => {
+    try{
+      const r = await fetch("/park-in/entrada-por-talao?talao=" + encodeURIComponent(talao));
+      const j = await r.json();
+      if(j.erro){ $("#saidaTalaoInfo").innerHTML = `<span class="err">${j.erro}</span>`; return; }
+      $("#saidaTalaoInfo").innerHTML =
+        `${j.fornecedor} · ${rotuloArtigo(j)} · saldo atual: ${t(j.saldo_kg)}`;
+      $("#cSaidaQtd").placeholder = `deixa vazio para sair o lote todo (${t(j.saldo_kg)})`;
+    } catch(e){ $("#saidaTalaoInfo").innerHTML = `<span class="err">Falhou: ${e}</span>`; }
+  }, 400);
+});
+
+$("#bAbrirSaida").onclick = () => {
+  $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value="";
+  $("#cSaidaTalao").value=""; $("#cSaidaQtd").value=""; $("#saidaTalaoInfo").innerHTML="";
+  definirSaidaModo("foto");
+  abrirSheet("#sheetSaida");
+};
 $("#bAbrirCorrecao").onclick = () => { $("#correcaoMsg").innerHTML=""; abrirSheet("#sheetCorrecao"); };
 $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites"); };
 
@@ -1081,6 +1204,7 @@ $("#bEntradaGuardar").onclick = async () => {
 };
 
 $("#bSaidaGuardar").onclick = async () => {
+  if(saidaModo==="talao"){ await guardarSaidaPorTalao(); return; }
   const fs = $("#fSaidaFotos").files;
   if(!fs.length){ $("#saidaMsg").innerHTML = '<div class="err">Escolhe pelo menos uma foto.</div>'; return; }
   $("#bSaidaGuardar").disabled = true;
@@ -1098,6 +1222,26 @@ $("#bSaidaGuardar").onclick = async () => {
   } catch(e){ $("#saidaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bSaidaGuardar").disabled = false;
 };
+
+// saída "só pelo número do talão" (pedido explícito do Rui, 2026-10-06):
+// sem foto nova — o artigo e, por omissão, a quantidade inteira a sair
+// vêm automaticamente do próprio lote já registado com esse talão (ver
+// tools/parkin.registar_saida_por_talao).
+async function guardarSaidaPorTalao(){
+  const talao = $("#cSaidaTalao").value.trim();
+  if(!talao){ $("#saidaMsg").innerHTML = '<div class="err">Escreve o nº do talão.</div>'; return; }
+  const qtdTxt = $("#cSaidaQtd").value.trim();
+  const corpo = { talao, quantidade_kg: qtdTxt ? parseFloat(qtdTxt.replace(",",".")) : null };
+  $("#bSaidaGuardar").disabled = true;
+  $("#saidaMsg").innerHTML = '<div class="sub">A processar…</div>';
+  try{
+    const r = await fetch("/park-in/saida-por-talao", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(corpo)});
+    const j = await r.json();
+    if(j.erro){ $("#saidaMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else { $("#saidaMsg").innerHTML = `<div class="ok">Saída registada: ${t(j.quantidade_kg)} (${j.artigo}) — ${j.fornecedor}</div>`; carregar(); }
+  } catch(e){ $("#saidaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bSaidaGuardar").disabled = false;
+}
 
 $("#bCorrecaoGuardar").onclick = async () => {
   // Tipo e Comprimento aceitam "N.D." (não definido) — pedido explícito
