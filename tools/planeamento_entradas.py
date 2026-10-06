@@ -895,16 +895,17 @@ function calcularAlturasLanes(linhaPorId){
     let maxLinha=0;
     entradas.forEach(e=>{
       const [minLane,maxLane]=minMaxLane(e);
-      // conta tanto para a lane onde o card COMEÇA como para aquela onde
-      // ACABA (bug real, 2026-10-06: um card esticado por Charriot 1-3,
-      // em cascata por causa de outros dois exatamente na mesma posição,
-      // só fazia crescer a altura do Charriot 1 — o fim dele, em
-      // Charriot 3, continuava com a altura normal, e a cascata
-      // "entrava" visualmente na Multiserra de Toros a seguir, porque o
-      // desvio aplicado no topo empurra o fundo do card na mesma medida,
-      // ver renderLanes: fundo = OFFSETS_LANE[maxLane]+PAD+ITEM_H+linha*V,
-      // independente de onde o card começa).
-      if(minLane!==li && maxLane!==li) return;
+      // conta para TODAS as lanes que o card atravessa, não só onde
+      // começa e onde acaba (pedido explícito do Rui, 2026-10-06) — bug
+      // real: um card esticado por Charriot 1-3, em cascata por causa de
+      // outros dois exatamente na mesma posição, só fazia crescer a
+      // altura do Charriot 1 — o fim dele, em Charriot 3, continuava com
+      // a altura normal, e a cascata "entrava" visualmente na Multiserra
+      // de Toros a seguir, porque o desvio aplicado no topo empurra o
+      // fundo do card na mesma medida (ver renderLanes: fundo =
+      // OFFSETS_LANE[maxLane]+PAD+ITEM_H+linha*V, independente de onde o
+      // card começa).
+      if(li<minLane || li>maxLane) return;
       const fim=e.gs+(e.larguraDias||1)-1;
       if(fim<diaIni || e.gs>diaFim) return; // fora da vista
       maxLinha=Math.max(maxLinha, linhaPorId.get(e.id)||0);
