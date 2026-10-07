@@ -1157,6 +1157,20 @@ def definir_indice_igqc_avaliacao(id: int, indice_igqc: float):
                        (indice_igqc, id))
         conn.commit()
 
+def definir_artigo_avaliacao(id: int, tipo: str, comprimento: float, espessura: str):
+    """Backfill do artigo (tipo/comprimento/espessura) de uma avaliação
+    antiga, a par da correção em parkin_entradas (ver
+    corrigir_artigo_entrada_parkin) — mantém as duas tabelas consistentes
+    para talões anteriores a 2026-10-02, quando estes campos ainda não
+    eram capturados de forma estruturada."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE avaliacoes_cargas_toros SET tipo = %s, comprimento = %s, espessura = %s WHERE id = %s",
+                (tipo, comprimento, espessura, id)
+            )
+        conn.commit()
+
 def avaliacoes_cargas_toros_ano(ano: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2539,6 +2553,20 @@ def descontar_saldo_entrada_parkin(entrada_id: int, quantidade_kg: float):
         with conn.cursor() as cur:
             cur.execute("UPDATE parkin_entradas SET saldo_kg = saldo_kg - %s WHERE id = %s",
                        (quantidade_kg, entrada_id))
+        conn.commit()
+
+def corrigir_artigo_entrada_parkin(entrada_id: int, tipo: str, comprimento: float, espessura: str):
+    """Corrige o artigo (tipo/comprimento/espessura) de uma entrada já
+    registada — usado para recuperar talões antigos que ficaram
+    "desconhecido" por o talão não escrever "IN" no campo Produto (pedido
+    explícito do Rui, 2026-10-07: "sempre que não diz IN significa que a
+    madeira é MT"). Nunca mexe no saldo nem noutros campos."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE parkin_entradas SET tipo = %s, comprimento = %s, espessura = %s WHERE id = %s",
+                (tipo, comprimento, espessura, entrada_id)
+            )
         conn.commit()
 
 def guardar_saida_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,

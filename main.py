@@ -938,8 +938,8 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-tipos-desconhecidos")
-def _debug_tipos_desconhecidos():
+@app.post("/_debug-corrigir-tipos-desconhecidos")
+def _debug_corrigir_tipos_desconhecidos(aplicar: bool = False):
     import db
     from tools import parkin
     todas = db.entradas_parkin_todas()
@@ -949,20 +949,30 @@ def _debug_tipos_desconhecidos():
         for a in db.avaliacoes_cargas_toros_ano(ano):
             if a.get("talao"):
                 avaliacoes_por_talao[a["talao"].strip()] = a
-    resultado = []
+    corrigidas, falhas = [], []
     for e in desconhecidas:
         talao = (e.get("talao") or "").strip()
         a = avaliacoes_por_talao.get(talao)
-        linha = {"talao": talao, "entrada_id": e["id"], "tem_avaliacao": bool(a)}
-        if a:
-            linha["avaliacao_tipo_coluna"] = a.get("tipo")
-            m = parkin._RE_PRODUTO_LINHA.search(a.get("avaliacao") or "")
-            produto_linha = m.group(1) if m else None
-            linha["produto_linha_encontrada"] = produto_linha
-            if produto_linha:
-                linha["interpretado_agora"] = parkin._interpretar_produto(produto_linha)
-        resultado.append(linha)
-    return {"total_desconhecidas": len(desconhecidas), "detalhe": resultado}
+        if not a:
+            falhas.append({"talao": talao, "entrada_id": e["id"], "motivo": "sem avaliação"})
+            continue
+        m = parkin._RE_PRODUTO_LINHA.search(a.get("avaliacao") or "")
+        if not m:
+            falhas.append({"talao": talao, "entrada_id": e["id"], "motivo": "sem linha Produto"})
+            continue
+        interpretado = parkin._interpretar_produto(m.group(1))
+        if interpretado["erro"]:
+            falhas.append({"talao": talao, "entrada_id": e["id"], "motivo": interpretado["erro"]})
+            continue
+        corrigidas.append({"talao": talao, "entrada_id": e["id"], "avaliacao_id": a["id"], **interpretado})
+    if aplicar:
+        for c in corrigidas:
+            db.corrigir_artigo_entrada_parkin(c["entrada_id"], c["tipo"], c["comprimento"], c["espessura"])
+            if not avaliacoes_por_talao[c["talao"]].get("tipo"):
+                db.definir_artigo_avaliacao(c["avaliacao_id"], c["tipo"], c["comprimento"], c["espessura"])
+    return {"total_desconhecidas": len(desconhecidas), "corrigidas": len(corrigidas),
+            "falhas": len(falhas), "aplicado": aplicar, "detalhe_falhas": falhas,
+            "amostra_corrigidas": corrigidas[:10]}
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
