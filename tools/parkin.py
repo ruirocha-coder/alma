@@ -458,10 +458,18 @@ def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: 
     return {"depletadas": depletadas}
 
 
-def registar_saida(bruto: bytes, content_type: str, registado_por: str = None) -> dict:
+def registar_saida(bruto: bytes, content_type: str, data_saida: str = None, registado_por: str = None) -> dict:
     """Regista uma saída (consumo) a partir da foto de um talão — extrai o
     artigo e a quantidade, e deplete por FIFO as entradas mais antigas
-    desse artigo com saldo."""
+    desse artigo com saldo.
+
+    `data_saida` ("AAAA-MM-DD") é opcional e só serve para FORÇAR o dia do
+    movimento (pedido explícito do Rui, 2026-10-07: "por defeito o dia
+    será sempre o dia em que estamos a fazer esse movimento... mas caso
+    seja necessário... poder colocar a data certa", ex: o talão só chegou
+    com um dia de atraso) — por omissão (None/vazio) usa-se sempre a data
+    do próprio talão fotografado, tal como já acontecia (ver
+    _resolver_data), nunca "hoje" à partida."""
     campos = _extrair_campos_talao(bruto, content_type)
     if "erro" in campos:
         return campos
@@ -481,7 +489,7 @@ def registar_saida(bruto: bytes, content_type: str, registado_por: str = None) -
         return {"erro": (f"só há {disponivel:.0f} kg em stock para o artigo {tipo} {comprimento} {espessura} "
                          f"— não é possível tirar {quantidade:.0f} kg")}
 
-    data_resolvida = _resolver_data(campos.get("data"))
+    data_resolvida = _resolver_data(data_saida or campos.get("data"))
     saida_id = db.guardar_saida_parkin(tipo, comprimento, espessura, quantidade, data_resolvida,
                                        talao=campos.get("talao"), registado_por=registado_por)
     resultado = _aplicar_fifo(tipo, comprimento, espessura, quantidade, saida_id=saida_id)
@@ -509,7 +517,8 @@ def info_entrada_por_talao(talao: str) -> dict:
     }
 
 
-def registar_saida_por_talao(talao: str, quantidade_kg: float = None, registado_por: str = None) -> dict:
+def registar_saida_por_talao(talao: str, quantidade_kg: float = None, data_saida: str = None,
+                             registado_por: str = None) -> dict:
     """Saída identificada só pelo nº de talão do LOTE de entrada que está a
     sair (pedido explícito do Rui, 2026-10-06, alternativa a fotografar um
     novo talão de consumo) — tipo, comprimento, espessura e saldo vêm
@@ -522,7 +531,13 @@ def registar_saida_por_talao(talao: str, quantidade_kg: float = None, registado_
     `quantidade_kg` é opcional: por omissão sai o saldo inteiro do lote —
     o pedido foi literalmente "saber só pelo número... calcular
     automaticamente quanto está a sair", sem indicar peso nenhum à mão; se
-    vier preenchida, sai só essa parte, desde que não exceda o saldo."""
+    vier preenchida, sai só essa parte, desde que não exceda o saldo.
+
+    `data_saida` ("AAAA-MM-DD") também é opcional: por omissão é sempre
+    hoje, o dia do movimento (pedido explícito do Rui, 2026-10-07: "o
+    normal é não definir data... é no dia em que estamos que está a ser
+    feito corretamente") — só se define à mão quando o talão chega
+    atrasado ou foi esquecido."""
     talao = (talao or "").strip()
     if not talao:
         return {"erro": "o número do talão é obrigatório"}
@@ -544,9 +559,15 @@ def registar_saida_por_talao(talao: str, quantidade_kg: float = None, registado_
             return {"erro": (f"o lote do talão {talao} só tem {saldo:.0f} kg de saldo "
                              f"— não é possível tirar {quantidade:.0f} kg")}
 
-    data_hoje = date.today()
+    if data_saida:
+        try:
+            data_resolvida = date.fromisoformat(data_saida)
+        except ValueError:
+            return {"erro": "data de saída inválida — tem de ser AAAA-MM-DD"}
+    else:
+        data_resolvida = date.today()
     saida_id = db.guardar_saida_parkin(entrada["tipo"], entrada["comprimento"], entrada["espessura"],
-                                       quantidade, data_hoje, talao=talao, registado_por=registado_por)
+                                       quantidade, data_resolvida, talao=talao, registado_por=registado_por)
     db.descontar_saldo_entrada_parkin(entrada["id"], quantidade)
     db.guardar_depletion_parkin(entrada["id"], quantidade, saida_id=saida_id)
     return {"ok": True, "id": saida_id,
@@ -866,6 +887,14 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <button class="btn primary" type="button" id="bSaidaModoFoto">Foto do talão</button>
     <button class="btn" type="button" id="bSaidaModoTalao">Nº do talão</button>
   </div>
+  <!-- data do movimento opcional (pedido explícito do Rui, 2026-10-07):
+       por omissão fica em branco = hoje, o dia em que o movimento está a
+       ser feito; só se preenche quando o talão chega atrasado ou foi
+       esquecido. -->
+  <div class="frow"><label>Data de saída</label>
+    <input type="date" id="cSaidaData">
+  </div>
+  <p class="sub" style="margin:2px 0 12px">Deixa em branco para usar a data do talão (foto) ou hoje (nº do talão) — só preenche para forçar outro dia (ex: talão chegado atrasado).</p>
   <div id="saidaFotoBloco">
     <p class="sub" style="margin:0 0 12px">Fotos dos talões de consumo — escolhe várias de uma vez.</p>
     <input type="file" id="fSaidaFotos" accept="image/*" multiple>
@@ -1136,7 +1165,7 @@ $("#cSaidaTalao").addEventListener("input", () => {
 });
 
 $("#bAbrirSaida").onclick = () => {
-  $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value="";
+  $("#saidaMsg").innerHTML=""; $("#fSaidaFotos").value=""; $("#cSaidaData").value="";
   $("#cSaidaTalao").value=""; $("#cSaidaQtd").value=""; $("#saidaTalaoInfo").innerHTML="";
   definirSaidaModo("foto");
   abrirSheet("#sheetSaida");
@@ -1211,6 +1240,8 @@ $("#bSaidaGuardar").onclick = async () => {
   $("#saidaMsg").innerHTML = '<div class="sub">A processar…</div>';
   const fd = new FormData();
   for(const f of fs) fd.append("ficheiros", f);
+  const dataSaida = $("#cSaidaData").value;
+  if(dataSaida) fd.append("data_saida", dataSaida);
   try{
     const r = await fetch("/park-in/saida", {method:"POST", body:fd});
     const j = await r.json();
@@ -1231,7 +1262,9 @@ async function guardarSaidaPorTalao(){
   const talao = $("#cSaidaTalao").value.trim();
   if(!talao){ $("#saidaMsg").innerHTML = '<div class="err">Escreve o nº do talão.</div>'; return; }
   const qtdTxt = $("#cSaidaQtd").value.trim();
-  const corpo = { talao, quantidade_kg: qtdTxt ? parseFloat(qtdTxt.replace(",",".")) : null };
+  const dataSaida = $("#cSaidaData").value;
+  const corpo = { talao, quantidade_kg: qtdTxt ? parseFloat(qtdTxt.replace(",",".")) : null,
+    data_saida: dataSaida || null };
   $("#bSaidaGuardar").disabled = true;
   $("#saidaMsg").innerHTML = '<div class="sub">A processar…</div>';
   try{

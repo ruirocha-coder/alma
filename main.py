@@ -981,10 +981,14 @@ async def park_in_entrada(mensagem: str = Form(""), sessao: str = Form(None),
     )
 
 @app.post("/park-in/saida")
-async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] = File(...)):
+async def park_in_saida(utilizador: str = Form(""), data_saida: str = Form(""),
+                        ficheiros: list[UploadFile] = File(...)):
     """Regista saídas em lote — uma foto de talão por carga consumida (ver
     tools/parkin.registar_saida). Cada ficheiro é processado de forma
-    independente: uma falha num não impede os outros de serem registados."""
+    independente: uma falha num não impede os outros de serem registados.
+    `data_saida` opcional força o dia do movimento (pedido explícito do
+    Rui, 2026-10-07) em todas as fotos deste lote; vazio usa sempre a data
+    do próprio talão fotografado, como já acontecia."""
     resultados = []
     for ficheiro in ficheiros:
         bruto = await ficheiro.read()
@@ -992,7 +996,8 @@ async def park_in_saida(utilizador: str = Form(""), ficheiros: list[UploadFile] 
             resultados.append({"ficheiro": ficheiro.filename, "erro": "ficheiro demasiado grande (máx. 15 MB)"})
             continue
         resultado = await asyncio.to_thread(
-            parkin.registar_saida, bruto, ficheiro.content_type, utilizador or None)
+            parkin.registar_saida, bruto, ficheiro.content_type,
+            data_saida=data_saida or None, registado_por=utilizador or None)
         resultados.append({"ficheiro": ficheiro.filename, **resultado})
     return JSONResponse({"resultados": resultados})
 
@@ -1016,7 +1021,8 @@ def park_in_saida_por_talao(corpo: dict = Body(...)):
         except (TypeError, ValueError):
             return JSONResponse({"erro": "quantidade_kg tem de ser um número"}, status_code=400)
     resultado = parkin.registar_saida_por_talao(
-        corpo.get("talao"), quantidade_kg, registado_por=corpo.get("utilizador"))
+        corpo.get("talao"), quantidade_kg, data_saida=corpo.get("data_saida") or None,
+        registado_por=corpo.get("utilizador"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
