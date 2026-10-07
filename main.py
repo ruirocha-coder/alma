@@ -961,6 +961,19 @@ def _debug_coluna_info(coluna: str = "Triagem"):
     bucket_id, cards_url = bc._coluna_card_table(coluna, ps.PROJETO)
     return {"bucket_id": bucket_id, "cards_url": cards_url}
 
+@app.post("/_debug-tentar-mover")
+def _debug_tentar_mover(corpo: dict = Body(...)):
+    import httpx
+    from tools import basecamp as bc
+    url = corpo["url"]
+    metodo = corpo.get("metodo", "POST")
+    payload = corpo.get("payload", {})
+    try:
+        r = httpx.request(metodo, url, headers=bc._headers(), json=payload, timeout=30)
+        return {"status": r.status_code, "body": r.text[:2000]}
+    except Exception as e:
+        return {"erro": str(e)}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
