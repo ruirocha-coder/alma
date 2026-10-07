@@ -72,6 +72,14 @@ Regras de escrita, além do tom de voz geral acima:
   longa, corta — cada frase diz uma coisa só. Relê antes de responder: se
   o texto tiver mais de ~35-40 palavras ao todo, está longo demais,
   encurta-o.
+- Nunca repetitiva (pedido explícito do Rui, 2026-10-07): vais receber as
+  últimas mensagens já publicadas, mais recente primeiro — lê-as antes de
+  escreveres. Nunca repitas a mesma palavra-chave, imagem ou estrutura de
+  frase de abertura que já usaste numa delas (ex: se já escreveste sobre
+  "ritmo" ou "o que sustenta a equipa" há pouco, escolhe hoje uma ideia e
+  um vocabulário diferentes dentro das mesmas três perspetivas — o tema de
+  fundo pode repetir-se ao longo do tempo, as palavras e a forma de o
+  dizer não).
 - Nunca nomeies ninguém, nem apontes a nenhuma pessoa ou situação em
   concreto — é para toda a equipa, sem exceções nem casos particulares.
 - Nunca uses linguagem motivacional batida ("vamos conseguir", "força",
@@ -146,6 +154,32 @@ def _analisar_projetos() -> str:
     hoje = date.today()
     return "\n".join(_analisar_projeto(projeto, hoje) for projeto in PROJETOS)
 
+def _mensagens_recentes(n: int = 5) -> list[str]:
+    """Texto simples das últimas `n` mensagens diárias já publicadas (esta
+    mesma publicação, nunca "Resumo semanal de atividade" nem outra coisa
+    do mesmo Mural), da mais recente para trás — para dar à mensagem de
+    hoje algo concreto a não repetir (ver "Nunca repetitiva" em
+    MISSAO_MENSAGEM_DIARIA; pedido explícito do Rui, 2026-10-07). Uma
+    falha a ler isto nunca impede a publicação de hoje — só significa
+    escrever sem essa memória."""
+    try:
+        recentes = basecamp.listar_mural(projeto="Gestão", limite=15)
+    except Exception:
+        return []
+    textos = []
+    for m in recentes:
+        if m["assunto"] != "Antes de começar o dia":
+            continue
+        try:
+            lida = basecamp.ler_mensagem_mural(m["url"])
+        except Exception:
+            continue
+        if lida.get("conteudo"):
+            textos.append(lida["conteudo"])
+        if len(textos) >= n:
+            break
+    return textos
+
 # localização real da equipa (pedido do Rui, 2026-08-26, depois de a
 # mensagem de 24 de agosto falar de calor sem estar calor aqui) — a
 # previsão do tempo tem de ser sempre a desta cidade, nunca uma média
@@ -213,11 +247,18 @@ def _contexto_do_dia() -> str:
             continue
         return "".join(b.text for b in resposta.content if b.type == "text").strip()
 
-def _gerar_mensagem(analise_projetos: str, contexto_dia: str) -> str:
+def _gerar_mensagem(analise_projetos: str, contexto_dia: str, mensagens_recentes: list) -> str:
+    if mensagens_recentes:
+        bloco_recentes = "\n\n".join(f"({i+1} dia(s) útil/úteis atrás)\n{texto}"
+                                     for i, texto in enumerate(mensagens_recentes))
+    else:
+        bloco_recentes = "(nenhuma — escreve livremente)"
     entrada = (
         f"Estado geral do trabalho hoje (só para teu conhecimento, nunca para citar em concreto):\n"
         f"{analise_projetos}\n\n"
-        f"Contexto do dia em Portugal (idem, só pano de fundo):\n{contexto_dia}"
+        f"Contexto do dia em Portugal (idem, só pano de fundo):\n{contexto_dia}\n\n"
+        f"Últimas mensagens já publicadas, mais recente primeiro (ver \"Nunca repetitiva\" — "
+        f"não repitas palavras-chave, imagens nem estrutura de frase destas):\n{bloco_recentes}"
     )
     resposta = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=500,
@@ -242,7 +283,8 @@ def correr_mensagem_diaria_motivacional():
             return
         analise = _analisar_projetos()
         contexto = _contexto_do_dia()
-        texto = _gerar_mensagem(analise, contexto)
+        recentes = _mensagens_recentes()
+        texto = _gerar_mensagem(analise, contexto, recentes)
         basecamp.publicar_mural("Antes de começar o dia", texto, projeto="Gestão")
         print("[mensagem_motivacional_diaria] publicado no mural da Gestão")
     except Exception:
