@@ -365,20 +365,18 @@ def mover_card_para_coluna(card_id: int, coluna: str, projeto: str) -> None:
     para qualquer coluna de um card table, confirmado contra a estrutura
     já devolvida por _coluna_card_table/cards_de_card_table).
 
-    NOTA: segue o padrão documentado da API do Basecamp para mover um card
-    de coluna (POST .../card_tables/columns/{coluna_id}/moves.json), mas
-    NÃO foi ainda confirmado ao vivo contra a API real — testar com um
-    card de teste antes de confiar nisto a sério."""
+    CONFIRMADO AO VIVO (2026-10-07, contra a Palcax OF.200 real — ver
+    histórico: duas tentativas erradas primeiro, ambas 404:
+    ".../card_tables/columns/{coluna_id}/moves.json" e ".../card_tables/
+    lists/{coluna_id}/moves.json". O endpoint certo é no própria CARD, não
+    na coluna: POST .../card_tables/cards/{card_id}/moves.json com
+    {"column_id": coluna_id} — devolve 204 sem corpo."""
     bucket_id, cards_url = _coluna_card_table(coluna, projeto)
     m = re.search(r"/lists/(\d+)/cards", cards_url)
     if not m:
         raise ValueError(f"não consegui obter o id da coluna {coluna!r} a partir de {cards_url!r}")
-    # bug real, 2026-10-07: ".../card_tables/columns/{id}/moves.json" dá
-    # 404 — o recurso chama-se mesmo "lists" em todo o lado (tal como no
-    # próprio cards_url acima), nunca "columns", apesar do tipo do objeto
-    # em si ser "Kanban::Column".
-    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/card_tables/lists/{m.group(1)}/moves.json",
-                   headers=_headers(), json={"source_id": card_id}, timeout=30)
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/card_tables/cards/{card_id}/moves.json",
+                   headers=_headers(), json={"column_id": int(m.group(1))}, timeout=30)
     r.raise_for_status()
 
 def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None,
