@@ -348,6 +348,35 @@ def _coluna_card_table(coluna: str, projeto: str) -> tuple:
                 return p["id"], lista["cards_url"]
     raise ValueError(f"não encontrei a coluna {coluna!r} no quadro Kanban do projeto {p['name']!r}")
 
+def mover_card_para_coluna(card_id: int, coluna: str, projeto: str) -> None:
+    """Move um card já existente para outra coluna do mesmo card table
+    Kanban (ex: devolver uma OF à coluna "Triagem", esteja ela onde
+    estiver) — usado por tools/planeamento_serracao.desagendar (pedido
+    explícito do Rui, 2026-10-07: "quando (...) nos passarmos [a OF] para
+    a fila na página de produção, deve passar para triagem no basecamp
+    esteja onde estiver" — sem isto, uma OF já avançada no Basecamp mas
+    devolvida à fila aqui não tinha nenhum lugar certo para aparecer: já
+    não estava em Triagem [critério da fila] nem tinha linha/dia
+    [critério da grelha], bug real reportado 2x, Palcax OF 509 e OF.200).
+
+    Reaproveita _coluna_card_table para encontrar a coluna de destino; o
+    id da própria coluna (Kanban::Column) extrai-se do seu cards_url
+    (".../card_tables/lists/{id}/cards.json" — "lists" é o recurso usado
+    para qualquer coluna de um card table, confirmado contra a estrutura
+    já devolvida por _coluna_card_table/cards_de_card_table).
+
+    NOTA: segue o padrão documentado da API do Basecamp para mover um card
+    de coluna (POST .../card_tables/columns/{coluna_id}/moves.json), mas
+    NÃO foi ainda confirmado ao vivo contra a API real — testar com um
+    card de teste antes de confiar nisto a sério."""
+    bucket_id, cards_url = _coluna_card_table(coluna, projeto)
+    m = re.search(r"/lists/(\d+)/cards", cards_url)
+    if not m:
+        raise ValueError(f"não consegui obter o id da coluna {coluna!r} a partir de {cards_url!r}")
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/card_tables/columns/{m.group(1)}/moves.json",
+                   headers=_headers(), json={"source_id": card_id}, timeout=30)
+    r.raise_for_status()
+
 def criar_card(coluna: str, titulo: str, notas: str = "", projeto: str = None,
               assignee_ids: list = None) -> dict:
     """Cria um card novo diretamente numa coluna de um quadro Kanban (ex:

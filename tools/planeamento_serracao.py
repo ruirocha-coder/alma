@@ -958,7 +958,15 @@ def atualizar_cor_estado(estado: str, cor: str) -> dict:
     return db.atualizar_cor_estado_producao(estado, cor)
 
 def desagendar(basecamp_card_id: int) -> dict:
-    """Devolve uma OF à bolsa por agendar — só na base local.
+    """Devolve uma OF à bolsa por agendar — tanto aqui (local) como no
+    Basecamp, que volta sempre para a coluna "Triagem", esteja em que
+    coluna estiver (pedido explícito do Rui, 2026-10-07: sem isto, uma OF
+    já avançada no Basecamp mas devolvida à fila aqui ficava sem lugar
+    nenhum onde aparecer na página — bug real reportado 2x, Palcax OF 509
+    e OF.200 — a fila só mostra OFs em Triagem, ver
+    estado_planeamento_serracao). Uma falha a mover no Basecamp nunca
+    impede o desagendamento local — fica só por mover lá, registado nos
+    logs.
 
     Bug real (Rui, 2026-09-29): tal como apagar uma OF, devolvê-la à fila
     também liberta a capacidade que ela ocupava na linha, mas as outras
@@ -970,6 +978,12 @@ def desagendar(basecamp_card_id: int) -> dict:
     resultado = db.desagendar_producao(basecamp_card_id)
     if existente and existente["linha"] and existente["dia_inicio"]:
         _recalcular_linha(existente["linha"])
+    try:
+        basecamp.mover_card_para_coluna(basecamp_card_id, "Triagem", projeto=PROJETO)
+        _invalidar_cache_cards_ativos()
+    except Exception as e:
+        print(f"[planeamento_serracao] não consegui mover o card {basecamp_card_id} "
+             f"para Triagem no Basecamp ao desagendar: {e!r}")
     return resultado
 
 def definir_volume(basecamp_card_id: int, volume_m3: float) -> dict:
