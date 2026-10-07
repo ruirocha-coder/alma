@@ -946,9 +946,14 @@ def _debug_estado_card(card_id: int):
 
 @app.post("/_debug-mover-coluna")
 def _debug_mover_coluna(corpo: dict = Body(...)):
+    import traceback
     from tools import basecamp as bc, planeamento_serracao as ps
-    bc.mover_card_para_coluna(corpo["card_id"], corpo.get("coluna", "Triagem"), projeto=ps.PROJETO)
-    return {"ok": True}
+    try:
+        bc.mover_card_para_coluna(corpo["card_id"], corpo.get("coluna", "Triagem"), projeto=ps.PROJETO)
+        return {"ok": True}
+    except Exception as e:
+        body = getattr(getattr(e, "response", None), "text", None)
+        return JSONResponse({"erro": str(e), "body": body, "tb": traceback.format_exc()}, status_code=200)
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
