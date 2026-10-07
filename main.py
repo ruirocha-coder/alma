@@ -938,42 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-estado-card")
-def _debug_estado_card(card_id: int):
-    from tools import basecamp as bc, planeamento_serracao as ps
-    encontrados, inexistentes = bc.obter_cards({card_id}, projeto=ps.PROJETO)
-    return {"card": encontrados[0] if encontrados else None, "inexistente": card_id in inexistentes}
-
-@app.post("/_debug-mover-coluna")
-def _debug_mover_coluna(corpo: dict = Body(...)):
-    import traceback
-    from tools import basecamp as bc, planeamento_serracao as ps
-    try:
-        bc.mover_card_para_coluna(corpo["card_id"], corpo.get("coluna", "Triagem"), projeto=ps.PROJETO)
-        return {"ok": True}
-    except Exception as e:
-        body = getattr(getattr(e, "response", None), "text", None)
-        return JSONResponse({"erro": str(e), "body": body, "tb": traceback.format_exc()}, status_code=200)
-
-@app.get("/_debug-coluna-info")
-def _debug_coluna_info(coluna: str = "Triagem"):
-    from tools import basecamp as bc, planeamento_serracao as ps
-    bucket_id, cards_url = bc._coluna_card_table(coluna, ps.PROJETO)
-    return {"bucket_id": bucket_id, "cards_url": cards_url}
-
-@app.post("/_debug-tentar-mover")
-def _debug_tentar_mover(corpo: dict = Body(...)):
-    import httpx
-    from tools import basecamp as bc
-    url = corpo["url"]
-    metodo = corpo.get("metodo", "POST")
-    payload = corpo.get("payload", {})
-    try:
-        r = httpx.request(metodo, url, headers=bc._headers(), json=payload, timeout=30)
-        return {"status": r.status_code, "body": r.text[:2000]}
-    except Exception as e:
-        return {"erro": str(e)}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
