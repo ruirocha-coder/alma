@@ -530,9 +530,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
      demais de carregar sem querer), muda o fundo do card para verde. */
   .blk.produzido{background:var(--green-bg)}
   /* "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplicado
-     independente de um card, título a verde escuro para se distinguir
-     sempre à vista dos cards reais. */
-  .blk.buffer .ttText{color:#1B5E20}
+     independente de um card, título com cor própria para se distinguir
+     sempre à vista dos cards reais — esteve a verde escuro, mudado para
+     azul royal (pedido explícito do Rui, 2026-10-07: "tem de ficar a azul
+     royal para se notar diferença do preto" — o verde escuro, em cascata
+     sobre outros cards, ficava perto demais do preto do texto normal). */
+  .blk.buffer .ttText{color:#4169E1}
   /* manípulos de arrastar para "alargar" (pedido explícito do Rui,
      2026-10-02) — sempre presentes (não só ao passar o rato: num ecrã
      touch não há hover, por isso têm de já lá estar para se poderem tocar),
@@ -589,10 +592,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .btn.primary:hover{background:#175CAF;border-color:#175CAF}
   /* botão "Produzido" (pedido explícito do Rui, 2026-10-03) — na ficha, ao
      lado de Guardar/Fechar, de propósito: um botão pequeno no card era
-     fácil demais de carregar sem querer. Azul forte em vez de verde
-     (pedido explícito do Rui, 2026-10-06). */
-  .btn.azul{color:var(--blue);border-color:var(--blue)}
-  .btn.azul.ativo{background:var(--blue);color:#fff;font-weight:600}
+     fácil demais de carregar sem querer. Esteve a azul forte por um dia
+     (2026-10-06) mas voltou a verde a pedido explícito do Rui, 2026-10-07. */
+  .btn.verde{color:var(--green);border-color:var(--green)}
+  .btn.verde.ativo{background:var(--green);color:#fff;font-weight:600}
   /* "Fazer Buffer" (pedido explícito do Rui, 2026-10-04) — mesmo verde
      escuro do título do card duplicado, para se perceber de imediato que
      é o botão que o cria. */
@@ -1372,7 +1375,7 @@ function openSheet(id){
     <div class="err" id="fErro"></div>
     <div class="acts" style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
       ${it.url?`<a class="btn" target="_blank" rel="noopener" href="${it.url}">Abrir ${it.buffer?"OF de origem":"card"} no Basecamp</a>`:""}
-      <button class="btn azul${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
+      <button class="btn verde${it.produzido?" ativo":""}" id="btnProduzido">${it.produzido?"Produzido ✓":"Marcar Produzido"}</button>
       ${it.buffer
         ? `<button class="btn" id="btnApagarBuffer">Apagar Buffer</button>`
         : `<button class="btn buffer" id="btnFazerBuffer">Fazer Buffer</button>`}
