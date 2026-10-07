@@ -955,6 +955,12 @@ def _debug_mover_coluna(corpo: dict = Body(...)):
         body = getattr(getattr(e, "response", None), "text", None)
         return JSONResponse({"erro": str(e), "body": body, "tb": traceback.format_exc()}, status_code=200)
 
+@app.get("/_debug-coluna-info")
+def _debug_coluna_info(coluna: str = "Triagem"):
+    from tools import basecamp as bc, planeamento_serracao as ps
+    bucket_id, cards_url = bc._coluna_card_table(coluna, ps.PROJETO)
+    return {"bucket_id": bucket_id, "cards_url": cards_url}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
