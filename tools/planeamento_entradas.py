@@ -1315,10 +1315,6 @@ function openSheet(id){
          guardarDiaEntradaSeMudou abaixo). -->
     <div class="frow"><label class="destaque">Data de entrada</label>
       <input id="fDiaEntrada" type="date" value="${MASTER[it.gs].iso}"></div>
-    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
-      ${it.buffer ? "Podes escrevê-la aqui diretamente, além de arrastar o card na tabela."
-        : "Calculada automaticamente a partir do início da produção (ver \"Em contínuo\" abaixo) — "
-          + "podes escrevê-la aqui diretamente, além de arrastar o card na tabela."}</div>
 
     <!-- todos os campos numéricos desta ficha usam type="text" + inputmode
          (nunca type="number"), pedido explícito do Rui (2026-10-04):
@@ -1333,10 +1329,7 @@ function openSheet(id){
 
     ${it.buffer ? "" : `
     <div class="frow"><label class="destaque">Em contínuo</label>
-      <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>
-    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-top:4px">
-      Por omissão vem sempre marcado: entra no charriot no mesmo dia do início da produção. Desmarcado:
-      entra no dia anterior (ou sábado, se isso cair a domingo).</div>`}
+      <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>`}
 
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
