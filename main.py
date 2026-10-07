@@ -938,6 +938,17 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-listar-mural")
+def _debug_listar_mural():
+    from tools import basecamp as bc
+    return bc.listar_mural(projeto="Gestão", limite=5)
+
+@app.post("/_debug-editar-mural")
+def _debug_editar_mural(corpo: dict = Body(...)):
+    from tools import basecamp as bc
+    resultado = bc.editar_mensagem_mural(corpo["url"], mensagem=corpo["mensagem"], projeto="Gestão")
+    return {"id": resultado.get("id"), "content": resultado.get("content")}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
