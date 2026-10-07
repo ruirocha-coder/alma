@@ -373,7 +373,11 @@ def mover_card_para_coluna(card_id: int, coluna: str, projeto: str) -> None:
     m = re.search(r"/lists/(\d+)/cards", cards_url)
     if not m:
         raise ValueError(f"não consegui obter o id da coluna {coluna!r} a partir de {cards_url!r}")
-    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/card_tables/columns/{m.group(1)}/moves.json",
+    # bug real, 2026-10-07: ".../card_tables/columns/{id}/moves.json" dá
+    # 404 — o recurso chama-se mesmo "lists" em todo o lado (tal como no
+    # próprio cards_url acima), nunca "columns", apesar do tipo do objeto
+    # em si ser "Kanban::Column".
+    r = httpx.post(f"{_base_url()}/buckets/{bucket_id}/card_tables/lists/{m.group(1)}/moves.json",
                    headers=_headers(), json={"source_id": card_id}, timeout=30)
     r.raise_for_status()
 
