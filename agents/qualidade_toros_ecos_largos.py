@@ -164,7 +164,11 @@ o texto que a pessoa escreveu:
   ficam guardadas para reconstruir depois). A espécie é sempre Pinho,
   por isso não é preciso campo próprio para ela.
   - tipo: o código logo a seguir ao nº do produto (ex: "006-IN" -> "IN");
-    só pode ser "IN" ou "MT".
+    só pode ser "IN" ou "MT". Pedido explícito do Rui (2026-10-07): o
+    talão às vezes não escreve nenhum código aí — sempre que não disser
+    "IN", o tipo é "MT" (nunca deixes tipo por preencher só por não veres
+    nenhum código explícito; só é "IN" quando essa palavra está mesmo
+    escrita no talão).
   - comprimento: o número em metros a seguir a "MADEIRA PINHO" (ex: "2,35").
   - espessura: "fina" se tiver o sufixo "ACIMA" (ex: "16 ACIMA"), senão
     "normal" — nunca "fina" sem esse sufixo estar mesmo presente.

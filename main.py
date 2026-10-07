@@ -938,6 +938,32 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-tipos-desconhecidos")
+def _debug_tipos_desconhecidos():
+    import db
+    from tools import parkin
+    todas = db.entradas_parkin_todas()
+    desconhecidas = [e for e in todas if e["tipo"] is None]
+    avaliacoes_por_talao = {}
+    for ano in range(2025, 2027):
+        for a in db.avaliacoes_cargas_toros_ano(ano):
+            if a.get("talao"):
+                avaliacoes_por_talao[a["talao"].strip()] = a
+    resultado = []
+    for e in desconhecidas:
+        talao = (e.get("talao") or "").strip()
+        a = avaliacoes_por_talao.get(talao)
+        linha = {"talao": talao, "entrada_id": e["id"], "tem_avaliacao": bool(a)}
+        if a:
+            linha["avaliacao_tipo_coluna"] = a.get("tipo")
+            m = parkin._RE_PRODUTO_LINHA.search(a.get("avaliacao") or "")
+            produto_linha = m.group(1) if m else None
+            linha["produto_linha_encontrada"] = produto_linha
+            if produto_linha:
+                linha["interpretado_agora"] = parkin._interpretar_produto(produto_linha)
+        resultado.append(linha)
+    return {"total_desconhecidas": len(desconhecidas), "detalhe": resultado}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos

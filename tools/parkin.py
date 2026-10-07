@@ -124,19 +124,24 @@ def _interpretar_produto(produto: str) -> dict:
     de texto nunca se confiam à interpretação livre de um LLM. Pedido
     explícito do Rui (2026-10-02): "madeira fina é 16 acima" — o sufixo
     "ACIMA" no talão marca espessura fina; qualquer outro caso (incluindo
-    "ABAIXO" ou nenhum sufixo) é normal."""
-    m_tipo = re.search(r"-\s*(IN|MT)\b", produto, re.IGNORECASE) or re.search(r"\b(IN|MT)\b", produto, re.IGNORECASE)
-    tipo = m_tipo.group(1).upper() if m_tipo else None
+    "ABAIXO" ou nenhum sufixo) é normal.
+
+    Tipo (pedido explícito do Rui, 2026-10-07): o talão às vezes diz "IN"
+    no campo Produto, às vezes não diz nada — "sempre que não diz IN
+    significa que a madeira é MT". Nunca se procura "MT" explicitamente:
+    a sua AUSÊNCIA de "IN" já É o sinal de MT, por isso o tipo nunca fica
+    por reconhecer (antes disto, um talão sem "IN" nem "MT" escritos
+    literalmente falhava aqui com "não consegui reconhecer o tipo")."""
+    tipo = "IN" if re.search(r"\bIN\b", produto, re.IGNORECASE) else "MT"
 
     m_comp = re.search(r"(\d+,\d+)", produto)
     comprimento = float(m_comp.group(1).replace(",", ".")) if m_comp else None
 
     espessura = "fina" if "ACIMA" in produto.upper() else "normal"
 
-    if not tipo or comprimento is None:
+    if comprimento is None:
         return {"tipo": None, "comprimento": None, "espessura": None,
-               "erro": f"não consegui reconhecer o tipo (IN/MT) e/ou o comprimento no campo "
-                      f"\"Produto\" deste talão: {produto!r}"}
+               "erro": f"não consegui reconhecer o comprimento no campo \"Produto\" deste talão: {produto!r}"}
     return {"tipo": tipo, "comprimento": comprimento, "espessura": espessura, "erro": None}
 
 
