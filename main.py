@@ -938,6 +938,19 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-of-serracao")
+def _debug_of_serracao(titulo: str):
+    import db
+    from tools import planeamento_serracao as ps
+    ativos = ps._cards_of_ativos(forcar=True)
+    encontrados = [c for c in ativos if titulo.lower() in c["titulo"].lower()]
+    resultado = []
+    for c in encontrados:
+        agendamento = db.agendamento_producao(c["id"])
+        resultado.append({"id": c["id"], "titulo": c["titulo"], "estado_basecamp": c["estado"],
+                          "agendamento_local": agendamento})
+    return resultado
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
