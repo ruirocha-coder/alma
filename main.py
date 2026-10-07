@@ -938,6 +938,18 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-estado-card")
+def _debug_estado_card(card_id: int):
+    from tools import basecamp as bc, planeamento_serracao as ps
+    encontrados, inexistentes = bc.obter_cards({card_id}, projeto=ps.PROJETO)
+    return {"card": encontrados[0] if encontrados else None, "inexistente": card_id in inexistentes}
+
+@app.post("/_debug-mover-coluna")
+def _debug_mover_coluna(corpo: dict = Body(...)):
+    from tools import basecamp as bc, planeamento_serracao as ps
+    bc.mover_card_para_coluna(corpo["card_id"], corpo.get("coluna", "Triagem"), projeto=ps.PROJETO)
+    return {"ok": True}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
