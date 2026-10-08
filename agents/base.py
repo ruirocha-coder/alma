@@ -264,6 +264,24 @@ TOOLS_MURAL = [
             "properties": {"url": {"type": "string"}},
             "required": ["url"]
         }
+    },
+    {
+        "name": "listar_documentos_projeto",
+        "description": "Lista os documentos, ficheiros e páginas externas guardados nas pastas de Documentos (Vault, incluindo sub-pastas) de um projeto do Basecamp — pedido explícito do Rui (2026-10-08): tudo o que for colocado no Basecamp tens de saber ir buscar e ler, nunca dizer que não encontras sem antes teres procurado aqui. USA ISTO sempre que alguém perguntar por algo que pode estar guardado como documento/link no Basecamp (ex: \"onde está o link da página X\", \"o que diz o documento Y\") e não souberes já a resposta — procura primeiro aqui, pelo título mais parecido com o que foi pedido, antes de dizeres que não encontras ou pedires o link à pessoa. Devolve título, tipo e `url` de cada item; usa esse `url` em ler_documento_basecamp para leres o conteúdo do que encontrares.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"projeto": {"type": "string", "description": "nome do projeto do Basecamp (ex: \"Ecos Largos\", \"Gestão\")"}},
+            "required": ["projeto"]
+        }
+    },
+    {
+        "name": "ler_documento_basecamp",
+        "description": "Lê o conteúdo de um documento ou ficheiro do Basecamp, pelo `url` devolvido por listar_documentos_projeto. Um documento usado só para guardar o link de outra página (padrão comum no Basecamp da equipa) devolve esse link em `link`.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"]
+        }
     }
 ]
 
@@ -525,6 +543,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "listar_pausas_automaticas": lambda: db.pausas_automaticas_lista(),
         "listar_mural_basecamp": lambda projeto="Gestão", limite=20: basecamp.listar_mural(projeto, limite),
         "ler_mensagem_mural_basecamp": lambda url: basecamp.ler_mensagem_mural(url),
+        "listar_documentos_projeto": lambda projeto: basecamp.listar_documentos_projeto(projeto),
+        "ler_documento_basecamp": lambda url: basecamp.ler_documento_basecamp(url),
         "gerar_pdf": lambda titulo, conteudo_markdown: documentos_gerados.gerar_pdf(
             utilizador, titulo, conteudo_markdown),
         "gerar_excel": lambda titulo, colunas, linhas, subtitulo=None, linhas_destacadas=None: documentos_gerados.gerar_excel(

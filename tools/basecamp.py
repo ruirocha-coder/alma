@@ -1377,6 +1377,61 @@ def criar_documento(titulo: str, conteudo: str, projeto: str) -> dict:
     r.raise_for_status()
     return r.json()
 
+def _listar_pasta_vault(bucket_id: int, vault_id: int, caminho: str, profundidade: int = 0) -> list[dict]:
+    """Percorre um Vault (Docs & Files) recursivamente — documentos,
+    ficheiros e sub-pastas — devolvendo uma lista plana com título, tipo e
+    url de cada item. Usado por listar_documentos_projeto. `profundidade`
+    é só um limite de segurança contra pastas aninhadas em excesso."""
+    if profundidade > 4:
+        return []
+    itens = []
+    for d in _get_paginado(f"{_base_url()}/buckets/{bucket_id}/vaults/{vault_id}/documents.json"):
+        itens.append({"titulo": d["title"], "tipo": "documento", "pasta": caminho,
+                      "url": d["url"], "app_url": d["app_url"]})
+    for u in _get_paginado(f"{_base_url()}/buckets/{bucket_id}/vaults/{vault_id}/uploads.json"):
+        itens.append({"titulo": u.get("title") or u.get("filename"), "tipo": "ficheiro", "pasta": caminho,
+                      "url": u["url"], "app_url": u["app_url"]})
+    for v in _get_paginado(f"{_base_url()}/buckets/{bucket_id}/vaults/{vault_id}/vaults.json"):
+        itens.extend(_listar_pasta_vault(bucket_id, v["id"], f"{caminho}/{v['title']}", profundidade + 1))
+    return itens
+
+def listar_documentos_projeto(projeto: str) -> list[dict]:
+    """Lista todos os documentos, ficheiros e páginas externas guardadas nas
+    pastas de Documentos (Vault, incluindo sub-pastas) de um projeto do
+    Basecamp — pedido explícito do Rui (2026-10-08): a Alma tem de saber ir
+    buscar e ler o que já está guardado no Basecamp (ex: um documento que
+    guarda só o link para outra página interna da equipa) em vez de dizer
+    que não encontra nada. Devolve título, tipo e `url` de cada item — usa
+    esse `url` em ler_documento_basecamp para leres o conteúdo depois de
+    encontrares o item certo pelo título."""
+    p = _encontrar_projeto(projeto)
+    if not p:
+        return [{"erro": f"nenhum projeto encontrado para {projeto!r}"}]
+    itens = []
+    for ferramenta in p.get("dock", []):
+        if ferramenta.get("name") == "vault" and ferramenta.get("enabled"):
+            itens.extend(_listar_pasta_vault(p["id"], ferramenta["id"], ferramenta["title"]))
+    return itens
+
+def ler_documento_basecamp(url: str) -> dict:
+    """Lê o conteúdo de um documento ou ficheiro do Basecamp, pelo `url`
+    devolvido por listar_documentos_projeto. Um documento usado só para
+    guardar o link de outra página (padrão usado, por exemplo, no projeto
+    Ecos Largos) devolve esse link em `link`, além do texto simples em
+    `conteudo`."""
+    r = httpx.get(url, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    d = r.json()
+    html = d.get("content") or d.get("description") or ""
+    soup = BeautifulSoup(html, "html.parser")
+    link = soup.find("a")
+    return {
+        "titulo": d.get("title") or d.get("filename"),
+        "conteudo": soup.get_text(" ", strip=True),
+        "link": link["href"] if link else None,
+        "download_url": d.get("download_url"),
+    }
+
 def _resolver_schedule(projeto: str) -> tuple:
     """Descobre o bucket_id e o id da Agenda (Schedule) de um projeto pelo
     nome (ver _encontrar_projeto) — tal como _resolver_mural/
