@@ -938,6 +938,26 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-comprimento/{comprimento}")
+def _debug_comprimento(comprimento: float):
+    import db
+    todas = db.entradas_parkin_todas()
+    entradas = [e for e in todas if e["comprimento"] == comprimento]
+    resultado = []
+    for e in entradas:
+        a = db.avaliacao_carga_toros_por_talao(e["talao"])
+        resultado.append({
+            "talao": e["talao"], "entrada_id": e["id"], "fornecedor": e["fornecedor"],
+            "data": str(e["data"]), "tipo": e["tipo"], "espessura": e["espessura"],
+            "produto_linha": None,
+        })
+        if a and a.get("avaliacao"):
+            from tools import parkin
+            m = parkin._RE_PRODUTO_LINHA.search(a["avaliacao"])
+            resultado[-1]["produto_linha"] = m.group(1) if m else None
+    todos_comprimentos = sorted({float(e["comprimento"]) for e in todas if e["comprimento"] is not None})
+    return {"total": len(entradas), "detalhe": resultado, "todos_comprimentos_existentes": todos_comprimentos}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
