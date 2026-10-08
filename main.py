@@ -942,7 +942,7 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
 def _debug_comprimento(comprimento: float):
     import db
     todas = db.entradas_parkin_todas()
-    entradas = [e for e in todas if e["comprimento"] == comprimento]
+    entradas = [e for e in todas if e["comprimento"] is not None and abs(float(e["comprimento"]) - comprimento) < 0.001]
     resultado = []
     for e in entradas:
         a = db.avaliacao_carga_toros_por_talao(e["talao"])
