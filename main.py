@@ -938,10 +938,13 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-procurar/{termo}")
-def _debug_procurar(termo: str):
+@app.get("/_debug-cardtable/{card_table_id}")
+def _debug_cardtable(card_table_id: int, bucket_id: int = 38945758):
     from tools import basecamp
-    return basecamp.procurar_cards_basecamp(termo, "Ecos Largos")
+    r = basecamp.httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/card_tables/{card_table_id}.json",
+                           headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
