@@ -672,6 +672,17 @@ CREATE TABLE IF NOT EXISTS buffers_entrada_ecos_largos (
 ALTER TABLE parkin_correcoes ALTER COLUMN tipo DROP NOT NULL;
 ALTER TABLE parkin_correcoes ALTER COLUMN comprimento DROP NOT NULL;
 ALTER TABLE parkin_correcoes ALTER COLUMN espessura DROP NOT NULL;
+
+-- Bug real reportado pelo Rui (2026-10-08): uma correção positiva (sobra
+-- de inventário) só entrava em parkin_correcoes, nunca numa entrada —
+-- entrava na soma do "stock por artigo"/stock total do dashboard, mas
+-- nunca podia ser retirada depois (nem por saída nem por correção
+-- negativa), porque ambas só descontam o saldo_kg de parkin_entradas. Uma
+-- correção positiva passa agora a criar também uma entrada "normal" (ver
+-- tools/parkin.registar_correcao), ligada aqui para nunca mais ser
+-- contada a dobrar em stock_por_artigo/stock_total (ver
+-- correcoes_parkin_positivas, que passa a ignorar as já ligadas).
+ALTER TABLE parkin_correcoes ADD COLUMN IF NOT EXISTS entrada_id INTEGER REFERENCES parkin_entradas(id);
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -2603,17 +2614,21 @@ def guardar_saida_parkin(tipo: str, comprimento: float, espessura: str, quantida
 
 def guardar_correcao_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
                             motivo: str, data, categoria_qualidade: str = None,
-                            registado_por: str = None) -> int:
+                            registado_por: str = None, entrada_id: int = None) -> int:
     """`quantidade_kg` com sinal: positivo = sobra/adição (pede
-    `categoria_qualidade` à mão, não vem de nenhuma entrada), negativo =
-    remoção (deplete por FIFO como uma saída — ver tools/parkin.py)."""
+    `categoria_qualidade` à mão); negativo = remoção (deplete por FIFO como
+    uma saída — ver tools/parkin.py). `entrada_id` liga uma correção
+    positiva à entrada "normal" criada para ela poder ser retirada depois
+    (ver tools/parkin.registar_correcao e correcoes_parkin_positivas)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO parkin_correcoes
-                   (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por)
+                   (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por,
+                    entrada_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data, registado_por,
+                 entrada_id)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()
@@ -2648,16 +2663,30 @@ def entradas_parkin_todas() -> list[dict]:
             return cur.fetchall()
 
 def correcoes_parkin_positivas() -> list[dict]:
-    """Correções positivas (sobras/inventário sem entrada de origem) — a
-    somar diretamente ao stock por categoria/artigo (ver tools/parkin.py);
-    as negativas já ficam refletidas no saldo_kg das entradas depletadas."""
+    """Correções positivas SEM entrada ligada (ver guardar_correcao_parkin)
+    — histórico anterior a 2026-10-08, antes de uma correção positiva
+    passar a criar sempre a sua própria entrada; a somar diretamente ao
+    stock por categoria/artigo (ver tools/parkin.py) só enquanto não forem
+    migradas. As já ligadas (`entrada_id` preenchido) já contam através do
+    saldo_kg dessa entrada — contá-las aqui também seria a dobrar."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, data
-                   FROM parkin_correcoes WHERE quantidade_kg > 0"""
+                """SELECT id, tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, data
+                   FROM parkin_correcoes WHERE quantidade_kg > 0 AND entrada_id IS NULL"""
             )
             return cur.fetchall()
+
+def ligar_entrada_a_correcao(correcao_id: int, entrada_id: int):
+    """Liga uma correção positiva já registada à entrada criada para ela
+    (ver guardar_correcao_parkin/correcoes_parkin_positivas) — usado na
+    migração pontual das correções positivas antigas (2026-10-08), que já
+    existiam antes de uma correção positiva passar a criar a sua própria
+    entrada."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE parkin_correcoes SET entrada_id = %s WHERE id = %s", (entrada_id, correcao_id))
+        conn.commit()
 
 def limites_parkin() -> dict:
     """{chave: {"minimo_kg", "maximo_kg"}} — 'total' é o limite da barra de

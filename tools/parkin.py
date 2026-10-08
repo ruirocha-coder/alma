@@ -613,6 +613,17 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
                            f"uma de {CATEGORIAS_QUALIDADE}"}
         id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                                categoria_qualidade=categoria_qualidade, registado_por=registado_por)
+        # Bug real reportado pelo Rui (2026-10-08): sem uma entrada a
+        # suportar esta sobra, ela entrava no stock do dashboard mas nunca
+        # mais podia ser retirada (nem por saída nem por correção negativa
+        # — ambas só descontam o saldo_kg de uma entrada). Cria sempre essa
+        # entrada agora, com um "talão" próprio só para a identificar como
+        # vinda de uma correção, nunca de um talão real.
+        entrada_id = db.guardar_entrada_parkin(
+            talao=f"CORR-{id_gerado}", fornecedor="(correção de inventário)", data=data_hoje,
+            tipo=tipo, comprimento=comprimento, espessura=espessura, peso_liquido_kg=quantidade_kg,
+            categoria_qualidade=categoria_qualidade, registado_por=registado_por)
+        db.ligar_entrada_a_correcao(id_gerado, entrada_id)
         return {"ok": True, "id": id_gerado, "artigo": artigo}
 
     disponivel = _saldo_disponivel(tipo, comprimento, espessura)
