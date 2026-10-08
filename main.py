@@ -938,15 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.post("/_debug-corrigir-talao-11301")
-def _debug_corrigir_talao_11301():
-    """Correção pontual (pedido do Rui, 2026-10-08): o fornecedor do talão
-    11301 ficou escrito "TRANSGAIO" por engano, é "TRANSGALO"."""
-    import db
-    db.corrigir_fornecedor_entrada_parkin(672, "TRANSGALO")
-    db.corrigir_fornecedor_avaliacao(246, "TRANSGALO")
-    return {"ok": True}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
