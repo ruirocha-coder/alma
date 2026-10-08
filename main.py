@@ -938,20 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.post("/_debug-corrigir-talao-10989")
-def _debug_corrigir_talao_10989():
-    """Correção pontual (pedido do Rui, 2026-10-08): o talão 10989 tem
-    "Madeira 2,55", não 2,59 — a avaliação de 27/07/2026 leu mal o valor."""
-    import db
-    entrada = db.entrada_parkin_por_talao("10989")
-    avaliacao = db.avaliacao_carga_toros_por_talao("10989")
-    if not entrada:
-        return {"erro": "entrada não encontrada"}
-    db.corrigir_artigo_entrada_parkin(entrada["id"], entrada["tipo"], 2.55, entrada["espessura"])
-    if avaliacao:
-        db.definir_artigo_avaliacao(avaliacao["id"], entrada["tipo"], 2.55, entrada["espessura"])
-    return {"ok": True, "entrada_id": entrada["id"], "avaliacao_id": avaliacao["id"] if avaliacao else None}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
