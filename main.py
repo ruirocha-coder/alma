@@ -938,13 +938,21 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-dock/{projeto}")
-def _debug_dock(projeto: str):
+@app.get("/_debug-vault/{vault_id}")
+def _debug_vault(vault_id: int, bucket_id: int = 38945758):
     from tools import basecamp
-    p = basecamp._encontrar_projeto(projeto)
-    if not p:
-        return {"erro": "projeto não encontrado"}
-    return {"nome": p["name"], "dock": p.get("dock", [])}
+    import httpx
+    r = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}.json",
+                  headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    conteudo = r.json()
+    r2 = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}/documents.json",
+                   headers=basecamp._headers(), timeout=30)
+    documentos = r2.json() if r2.status_code == 200 else {"erro": r2.status_code}
+    r3 = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}/uploads.json",
+                   headers=basecamp._headers(), timeout=30)
+    uploads = r3.json() if r3.status_code == 200 else {"erro": r3.status_code}
+    return {"vault": conteudo, "documentos": documentos, "uploads": uploads}
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
