@@ -963,6 +963,11 @@ def _debug_migrar_correcoes_positivas(aplicar: bool = False):
         migradas.append(item)
     return {"aplicado": aplicar, "total": len(migradas), "migradas": migradas}
 
+@app.get("/_debug-saldo-disponivel")
+def _debug_saldo_disponivel(tipo: str, comprimento: float, espessura: str):
+    from tools import parkin
+    return {"saldo_disponivel_kg": parkin._saldo_disponivel(tipo, comprimento, espessura)}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
