@@ -952,7 +952,10 @@ def _debug_vault(vault_id: int, bucket_id: int = 38945758):
     r3 = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}/uploads.json",
                    headers=basecamp._headers(), timeout=30)
     uploads = r3.json() if r3.status_code == 200 else {"erro": r3.status_code}
-    return {"vault": conteudo, "documentos": documentos, "uploads": uploads}
+    r4 = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/vaults/{vault_id}/vaults.json",
+                   headers=basecamp._headers(), timeout=30)
+    subvaults = r4.json() if r4.status_code == 200 else {"erro": r4.status_code}
+    return {"vault": conteudo, "documentos": documentos, "uploads": uploads, "subvaults": subvaults}
 
 @app.get("/_debug-documento/{documento_id}")
 def _debug_documento(documento_id: int, bucket_id: int = 38945758):
