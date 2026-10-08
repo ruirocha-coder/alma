@@ -1157,6 +1157,14 @@ def definir_indice_igqc_avaliacao(id: int, indice_igqc: float):
                        (indice_igqc, id))
         conn.commit()
 
+def corrigir_fornecedor_avaliacao(id: int, fornecedor: str):
+    """Corrige o nome do fornecedor de uma avaliação antiga, a par da
+    correção em parkin_entradas (ver corrigir_fornecedor_entrada_parkin)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE avaliacoes_cargas_toros SET fornecedor = %s WHERE id = %s", (fornecedor, id))
+        conn.commit()
+
 def definir_artigo_avaliacao(id: int, tipo: str, comprimento: float, espessura: str):
     """Backfill do artigo (tipo/comprimento/espessura) de uma avaliação
     antiga, a par da correção em parkin_entradas (ver
@@ -2553,6 +2561,17 @@ def descontar_saldo_entrada_parkin(entrada_id: int, quantidade_kg: float):
         with conn.cursor() as cur:
             cur.execute("UPDATE parkin_entradas SET saldo_kg = saldo_kg - %s WHERE id = %s",
                        (quantidade_kg, entrada_id))
+        conn.commit()
+
+def corrigir_fornecedor_entrada_parkin(entrada_id: int, fornecedor: str):
+    """Corrige o nome do fornecedor de uma entrada já registada — para
+    erros de leitura pontuais do talão (ex: "TRANSGAIO" em vez de
+    "TRANSGALO") que, de outra forma, fariam o mesmo fornecedor aparecer
+    duas vezes separado no dashboard (stock por fornecedor, top
+    qualidade)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE parkin_entradas SET fornecedor = %s WHERE id = %s", (fornecedor, entrada_id))
         conn.commit()
 
 def corrigir_artigo_entrada_parkin(entrada_id: int, tipo: str, comprimento: float, espessura: str):

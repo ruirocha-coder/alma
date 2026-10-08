@@ -938,20 +938,14 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-fornecedor/{trecho}")
-def _debug_fornecedor(trecho: str):
+@app.post("/_debug-corrigir-talao-11301")
+def _debug_corrigir_talao_11301():
+    """Correção pontual (pedido do Rui, 2026-10-08): o fornecedor do talão
+    11301 ficou escrito "TRANSGAIO" por engano, é "TRANSGALO"."""
     import db
-    todas = db.entradas_parkin_todas()
-    entradas = [e for e in todas if trecho.upper() in (e["fornecedor"] or "").upper()]
-    avaliacoes = []
-    for ano in range(2025, 2027):
-        for a in db.avaliacoes_cargas_toros_ano(ano):
-            if trecho.upper() in (a.get("fornecedor") or "").upper():
-                avaliacoes.append({"id": a["id"], "fornecedor": a["fornecedor"], "talao": a.get("talao")})
-    return {
-        "entradas": [{"id": e["id"], "talao": e["talao"], "fornecedor": e["fornecedor"]} for e in entradas],
-        "avaliacoes": avaliacoes,
-    }
+    db.corrigir_fornecedor_entrada_parkin(672, "TRANSGALO")
+    db.corrigir_fornecedor_avaliacao(246, "TRANSGALO")
+    return {"ok": True}
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
