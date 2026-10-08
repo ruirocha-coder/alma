@@ -938,6 +938,25 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-correcoes-positivas")
+def _debug_correcoes_positivas():
+    import db
+    from tools import parkin
+    positivas = db.correcoes_parkin_positivas()
+    por_artigo = {}
+    for c in positivas:
+        comprimento = float(c["comprimento"]) if c["comprimento"] is not None else None
+        chave = parkin._chave_artigo(c["tipo"], comprimento, c["espessura"])
+        por_artigo.setdefault(chave, []).append({
+            "data": str(c["data"]), "quantidade_kg": float(c["quantidade_kg"]),
+            "categoria_qualidade": c["categoria_qualidade"],
+        })
+    resumo = {}
+    for chave, itens in por_artigo.items():
+        resumo[chave] = {"soma_correcoes_positivas_kg": sum(i["quantidade_kg"] for i in itens),
+                         "n_correcoes": len(itens), "itens": itens}
+    return resumo
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
