@@ -938,6 +938,14 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-bucket/{bucket_id}")
+def _debug_bucket(bucket_id: int):
+    from tools import basecamp
+    import httpx
+    r = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}.json", headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
