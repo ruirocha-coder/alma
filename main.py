@@ -942,9 +942,14 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
 def _debug_bucket(bucket_id: int):
     from tools import basecamp
     import httpx
-    r = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}.json", headers=basecamp._headers(), timeout=30)
-    r.raise_for_status()
-    return r.json()
+    resultado = {}
+    for nome, url in [
+        ("buckets", f"{basecamp._base_url()}/buckets/{bucket_id}.json"),
+        ("projects", f"{basecamp._base_url()}/projects/{bucket_id}.json"),
+    ]:
+        r = httpx.get(url, headers=basecamp._headers(), timeout=30)
+        resultado[nome] = {"status": r.status_code, "corpo": r.text[:3000]}
+    return resultado
 
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
