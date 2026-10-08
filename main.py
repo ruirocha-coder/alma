@@ -938,6 +938,21 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-fornecedor/{trecho}")
+def _debug_fornecedor(trecho: str):
+    import db
+    todas = db.entradas_parkin_todas()
+    entradas = [e for e in todas if trecho.upper() in (e["fornecedor"] or "").upper()]
+    avaliacoes = []
+    for ano in range(2025, 2027):
+        for a in db.avaliacoes_cargas_toros_ano(ano):
+            if trecho.upper() in (a.get("fornecedor") or "").upper():
+                avaliacoes.append({"id": a["id"], "fornecedor": a["fornecedor"], "talao": a.get("talao")})
+    return {
+        "entradas": [{"id": e["id"], "talao": e["talao"], "fornecedor": e["fornecedor"]} for e in entradas],
+        "avaliacoes": avaliacoes,
+    }
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
