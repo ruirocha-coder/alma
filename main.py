@@ -954,6 +954,16 @@ def _debug_vault(vault_id: int, bucket_id: int = 38945758):
     uploads = r3.json() if r3.status_code == 200 else {"erro": r3.status_code}
     return {"vault": conteudo, "documentos": documentos, "uploads": uploads}
 
+@app.get("/_debug-documento/{documento_id}")
+def _debug_documento(documento_id: int, bucket_id: int = 38945758):
+    from tools import basecamp
+    import httpx
+    r = httpx.get(f"{basecamp._base_url()}/buckets/{bucket_id}/documents/{documento_id}.json",
+                  headers=basecamp._headers(), timeout=30)
+    r.raise_for_status()
+    d = r.json()
+    return {"title": d.get("title"), "content": d.get("content")}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
