@@ -1682,7 +1682,7 @@ const conteudo = {
     </div>`
 };
 
-const notaCondicaoCredito = `<p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram neste valor. A compra parcial fica a preço de tabela, sem crédito. ${projeto.validade}</p>`;
+const notaCondicaoCredito = `<p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram neste valor. A compra parcial fica a preço de tabela, sem crédito.</p>`;
 
 $('fases').innerHTML = projeto.fases.map((f,i)=>{
   let estado, bloco;
