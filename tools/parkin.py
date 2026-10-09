@@ -1201,9 +1201,9 @@ const NOMES_CAT={Boa:"Boa",Media:"Média",Fraca:"Fraca"};
 function t(kg){ return (kg/1000).toLocaleString("pt-PT",{minimumFractionDigits:1,maximumFractionDigits:1})+" t"; }
 function pct(v,tot){ return tot>0 ? Math.round(v/tot*100) : 0; }
 
-function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo){
+function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escalaForcada){
   if(totalKg<=0) return "";
-  const escala = Math.max(totalKg, maximo||0, 1) * 1.15;
+  const escala = escalaForcada || (Math.max(totalKg, maximo||0, 1) * 1.15);
   let segs = "";
   for(const cat of ["Boa","Media","Fraca"]){
     const v = porCategoria[cat]||0;
@@ -1255,12 +1255,20 @@ function renderStockArtigo(){
   const el = $("#stockArtigo");
   const lista = DADOS.stock_por_artigo;
   if(!lista.length){ el.innerHTML = '<div class="vazio">Ainda sem stock registado.</div>'; return; }
+  // Escala PARTILHADA por todas as barras (pedido explícito do Rui,
+  // 2026-10-09: "as linhas das cores deviam estar... maiores segundo a
+  // quantidade que cada artigo tem" — cada renderGauge calculava a sua
+  // própria escala a partir do seu próprio total, por isso todas ficavam
+  // à mesma largura (~87%) independentemente da quantidade real. Usando
+  // o maior total/máximo da lista para todas, o comprimento de cada
+  // barra passa a refletir mesmo a quantidade relativa entre artigos.
+  const escalaGlobal = Math.max(...lista.map(a => Math.max(a.total_kg, a.maximo_kg || 0)), 1) * 1.15;
   el.innerHTML = lista.map(a => `
     <div class="artigo-row">
       <div class="titulo"><span>${a.artigo==="desconhecido" ? "Artigo desconhecido (histórico sem essa informação)"
         : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`}</span>
         <span class="tot mono">${t(a.total_kg)}</span></div>
-      ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg)}
+      ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg, escalaGlobal)}
     </div>
   `).join("");
 }
