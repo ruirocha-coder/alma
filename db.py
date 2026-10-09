@@ -428,7 +428,8 @@ INSERT INTO cores_estado_ecos_largos (estado, cor) VALUES
     ('produzido', 'amarelo'),
     ('em_producao', 'laranja'),
     ('vendido', 'roxo'),
-    ('secagem', 'roxo_medio')
+    ('secagem', 'roxo_medio'),
+    ('armazem', 'castanho')
 ON CONFLICT (estado) DO NOTHING;
 """
 

@@ -29,12 +29,13 @@ PROJETO = "Ecos Largos"
 
 # colunas do card table real do Ecos Largos que representam OFs em fluxo de
 # fabrico (confirmado ao vivo, 2026-09, contra a API real; "secagem"
-# acrescentada a pedido explícito do Rui, 2026-09-25 — coluna real do
-# Basecamp, entra na cor automática de fundo tal como Produzido/Em
-# Produção/Vendido). As colunas "Linha 1" a "Linha 6" / Charriots /
-# Empilhadores do mesmo quadro guardam cards de ALOCAÇÃO DE PESSOAL, não
-# OFs — ficam de fora deste quadro, por pedido explícito do Rui.
-COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido", "secagem"}
+# acrescentada a pedido explícito do Rui, 2026-09-25, "armazem" a pedido
+# explícito do Rui, 2026-10-09 — colunas reais do Basecamp, entram na cor
+# automática de fundo tal como Produzido/Em Produção/Vendido). As colunas
+# "Linha 1" a "Linha 6" / Charriots / Empilhadores do mesmo quadro guardam
+# cards de ALOCAÇÃO DE PESSOAL, não OFs — ficam de fora deste quadro, por
+# pedido explícito do Rui.
+COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido", "secagem", "armazem"}
 # "Vendido" inclui-se para uma OF já agendada não desaparecer do quadro
 # quando a venda fecha no Basecamp — fica visível (cor automática roxa, ver
 # template) em vez de desaparecer; nunca entra na fila (só cards em Triagem
@@ -78,12 +79,14 @@ CORES_VALIDAS = {
     "verde_escuro", "verde", "verde_medio", "verde_claro",
     "azul_escuro", "azul", "azul_medio", "azul_claro",
     "roxo_escuro", "roxo", "roxo_medio", "roxo_claro",
+    "castanho",  # cor automática da coluna "Armazém" (pedido explícito do Rui, 2026-10-09)
 }
 
 # estados/colunas do Basecamp que têm uma cor automática de fundo no
 # quadro, editável pela equipa (ver atualizar_cor_estado) — chave interna
 # -> título exato da coluna no Basecamp.
-ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido", "secagem": "Secagem"}
+ESTADOS_COR = {"produzido": "Produzido", "em_producao": "Em Produção", "vendido": "Vendido", "secagem": "Secagem",
+              "armazem": "Armazém"}
 
 # colunas (normalizadas, ver _normalizar) anteriores ao início da
 # produção em si — usadas só para confirmar em definitivo o atraso de
@@ -1765,9 +1768,10 @@ const CORES={
   azul_claro:{hex:"#BBDEFB",label:"Azul claro"},
   roxo_claro:{hex:"#E1BEE7",label:"Roxo claro"},
   cinza:{hex:"#9AA0A6",label:"Automática"},
+  castanho:{hex:"#795548",label:"Castanho"},
 };
 // estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
-const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido","Secagem":"secagem"};
+const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido","Secagem":"secagem","Armazém":"armazem"};
 let CORES_ESTADO={}; // chave interna -> chave de CORES, carregado em carregar()
 function tintRgba(hex,alpha){
   const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
@@ -1859,9 +1863,9 @@ async function editarCapacidade(linha){
    ao que se vê no quadro. Gerada a partir dos mesmos dados
    (ESTADOS_COR/CORES_ESTADO) para nunca ficar desatualizada se a equipa
    mudar uma cor no painel. */
-const ROTULOS_ESTADO={"Em Produção":"Em produção","Secagem":"No secador","Produzido":"Produzido","Vendido":"Vendido"};
+const ROTULOS_ESTADO={"Em Produção":"Em produção","Secagem":"No secador","Produzido":"Produzido","Armazém":"Armazém","Vendido":"Vendido"};
 function renderLegenda(){
-  const ordem=["Em Produção","Secagem","Produzido","Vendido"];
+  const ordem=["Em Produção","Secagem","Produzido","Armazém","Vendido"];
   $("#legenda").innerHTML=
     ordem.filter(coluna=>ESTADOS_COR[coluna]!==undefined).map(coluna=>{
       const corNome=CORES_ESTADO[ESTADOS_COR[coluna]];
