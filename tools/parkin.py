@@ -476,6 +476,55 @@ def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: 
     return {"depletadas": depletadas}
 
 
+def _aplicar_fifo_com_preferencia(entradas: list[dict], quantidade_kg: float, categoria_preferida: str,
+                                  saida_id: int = None, correcao_id: int = None) -> dict:
+    """Deplete `quantidade_kg` de `entradas` (já com saldo, de um artigo),
+    preferindo a categoria `categoria_preferida` — pedido explícito do
+    Rui (2026-10-09): tira o máximo possível dessa categoria primeiro; o
+    que faltar reparte pelas OUTRAS categorias com saldo, proporcional ao
+    que cada uma tem (nunca em partes iguais — uma categoria com o dobro
+    do saldo de outra perde o dobro). Nunca falha uma correção só por uma
+    categoria em concreto não chegar, desde que o artigo tenha saldo
+    suficiente no total (ver o `disponivel_total` já confirmado por quem
+    chama isto, registar_correcao). Dentro de cada categoria, continua a
+    tirar sempre da entrada mais antiga primeiro (FIFO) — `entradas` já
+    vem ordenada por data, por isso cada sub-lista por categoria também
+    fica ordenada, sem precisar de reordenar."""
+    por_categoria = {}
+    for e in entradas:
+        por_categoria.setdefault(e["categoria_qualidade"], []).append(e)
+
+    alvo = {}
+    preferida = por_categoria.get(categoria_preferida, [])
+    saldo_preferida = sum(float(e["saldo_kg"]) for e in preferida)
+    tirar_preferida = min(saldo_preferida, quantidade_kg)
+    if tirar_preferida > 1e-9:
+        alvo[categoria_preferida] = tirar_preferida
+
+    restante = quantidade_kg - tirar_preferida
+    if restante > 1e-9:
+        outras = {c: sum(float(e["saldo_kg"]) for e in lst) for c, lst in por_categoria.items()
+                 if c != categoria_preferida}
+        soma_outras = sum(outras.values())
+        for c, saldo_c in outras.items():
+            if saldo_c > 1e-9:
+                alvo[c] = restante * (saldo_c / soma_outras)
+
+    depletadas = []
+    for categoria, quantidade in alvo.items():
+        restante_cat = quantidade
+        for e in por_categoria[categoria]:
+            if restante_cat <= 1e-9:
+                break
+            tirar = min(float(e["saldo_kg"]), restante_cat)
+            db.descontar_saldo_entrada_parkin(e["id"], tirar)
+            db.guardar_depletion_parkin(e["id"], tirar, saida_id=saida_id, correcao_id=correcao_id)
+            depletadas.append({"entrada_id": e["id"], "talao": e["talao"], "quantidade_kg": round(tirar, 1),
+                              "categoria_qualidade": categoria})
+            restante_cat -= tirar
+    return {"depletadas": depletadas}
+
+
 def registar_saida(bruto: bytes, content_type: str, data_saida: str = None, registado_por: str = None) -> dict:
     """Regista uma saída (consumo) a partir da foto de um talão — extrai o
     artigo e a quantidade, e deplete por FIFO as entradas mais antigas
@@ -639,22 +688,27 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
         return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
                "categoria_qualidade": categoria_qualidade}
 
-    # categoria_qualidade aqui é um FILTRO opcional (pedido explícito do
-    # Rui, 2026-10-09): só retira dessa categoria em concreto, em vez de
-    # ser sempre pela entrada mais antiga de qualquer categoria (ver
-    # _entradas_com_saldo_do_artigo) — N.D. (None) mantém o comportamento
-    # de sempre, sem filtro nenhum.
-    disponivel = _saldo_disponivel(tipo, comprimento, espessura, categoria_qualidade)
-    if disponivel + 1e-6 < abs(quantidade_kg):
+    # categoria_qualidade aqui é uma PREFERÊNCIA, não um filtro rígido
+    # (pedido explícito do Rui, 2026-10-09): tira o máximo possível dessa
+    # categoria primeiro; se não chegar (ou não tiver nada), reparte o
+    # que falta pelas outras categorias com saldo, proporcional ao que
+    # cada uma tem — só falha se o artigo não tiver, no total, entre
+    # todas as categorias, o suficiente. N.D. (None) continua sem
+    # preferência nenhuma, sempre pela entrada mais antiga de qualquer
+    # categoria (ver _aplicar_fifo).
+    entradas_tudo = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura)
+    disponivel_total = sum(float(e["saldo_kg"]) for e in entradas_tudo)
+    if disponivel_total + 1e-6 < abs(quantidade_kg):
         rotulo = "artigo desconhecido" if artigo == _ARTIGO_DESCONHECIDO else "este artigo"
-        if categoria_qualidade:
-            rotulo += f" na categoria {categoria_qualidade}"
-        return {"erro": (f"só há {disponivel:.0f} kg em stock para {rotulo} — não é possível remover "
-                         f"{abs(quantidade_kg):.0f} kg")}
+        return {"erro": (f"só há {disponivel_total:.0f} kg no total em stock para {rotulo} — não é possível "
+                         f"remover {abs(quantidade_kg):.0f} kg")}
     id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                            registado_por=registado_por)
-    resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado,
-                              categoria_qualidade=categoria_qualidade)
+    if categoria_qualidade:
+        resultado = _aplicar_fifo_com_preferencia(entradas_tudo, abs(quantidade_kg), categoria_qualidade,
+                                                  correcao_id=id_gerado)
+    else:
+        resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado)
     return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
            "categoria_qualidade": categoria_qualidade, **resultado}
 
@@ -1281,7 +1335,7 @@ $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites
 function atualizarSubCategoria(){
   const v = parseFloat($("#cQuantidade").value.replace(",","."));
   $("#cCategoriaSub").textContent = (v<0)
-    ? "Numa remoção: N.D. tira da mais antiga de qualquer categoria; escolhendo uma categoria, só tira dessa."
+    ? "Numa remoção: N.D. tira da mais antiga de qualquer categoria; escolhendo uma, prefere essa, e só reparte pelas outras (proporcional ao que têm) se não chegar."
     : "A categoria desta sobra — N.D. fica sem categoria definida.";
 }
 $("#cQuantidade").addEventListener("input", atualizarSubCategoria);
@@ -1413,7 +1467,16 @@ $("#bCorrecaoGuardar").onclick = async () => {
       const artigoTxt = rotuloArtigo({artigo: j.artigo, tipo: corpo.tipo, comprimento: corpo.comprimento, espessura: corpo.espessura});
       const categoriaTxt = j.categoria_qualidade ? ` (categoria ${j.categoria_qualidade})`
         : (j.quantidade_kg > 0 ? " (sem categoria)" : "");
-      $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}.</div>`;
+      let detalhe = "";
+      if(j.depletadas && j.depletadas.length){
+        const porCategoria = {};
+        j.depletadas.forEach(d => { porCategoria[d.categoria_qualidade] = (porCategoria[d.categoria_qualidade]||0) + d.quantidade_kg; });
+        const categorias = Object.keys(porCategoria);
+        if(categorias.length > 1 || (categorias.length === 1 && categorias[0] !== j.categoria_qualidade)){
+          detalhe = " — " + categorias.map(c => `${c||"sem categoria"}: ${t(porCategoria[c])}`).join(", ");
+        }
+      }
+      $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}${detalhe}.</div>`;
       carregar();
     }
   } catch(e){ $("#correcaoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
