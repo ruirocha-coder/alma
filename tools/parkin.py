@@ -445,18 +445,43 @@ def _saldo_disponivel(tipo: str, comprimento: float, espessura: str, categoria_q
               for e in _entradas_com_saldo_do_artigo(tipo, comprimento, espessura, categoria_qualidade))
 
 
+def _criar_entrada_negativa(tipo: str, comprimento: float, espessura: str, categoria_qualidade: str,
+                            quantidade_kg: float, correcao_id: int, registado_por: str = None) -> dict:
+    """Cria a entrada "fantasma" que representa a parte de uma correção
+    negativa que excedeu o stock real disponível — pedido explícito do
+    Rui (2026-10-09): "fazendo correções tem de deixar ir a negativo", em
+    vez de bloquear com um erro quando o artigo (ou a categoria escolhida)
+    não tem o suficiente. Mesma lógica da entrada que já se cria para uma
+    correção POSITIVA (ver registar_correcao) — só que aqui com peso
+    negativo, para o saldo do artigo no dashboard refletir mesmo o
+    défice. Usa o mesmo prefixo "CORR-" no talão para ficar sempre fora
+    das listagens de Top Entradas/Top Qualidade/listar_movimentos, tal
+    como as outras entradas vindas de correções."""
+    entrada_id = db.guardar_entrada_parkin(
+        talao=f"CORR-{correcao_id}", fornecedor="(correção de inventário)", data=date.today(),
+        tipo=tipo, comprimento=comprimento, espessura=espessura, peso_liquido_kg=-quantidade_kg,
+        categoria_qualidade=categoria_qualidade, registado_por=registado_por)
+    return {"entrada_id": entrada_id, "talao": f"CORR-{correcao_id}", "quantidade_kg": round(quantidade_kg, 1),
+           "categoria_qualidade": categoria_qualidade, "negativo": True}
+
+
 def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
-                  saida_id: int = None, correcao_id: int = None, categoria_qualidade: str = None) -> dict:
+                  saida_id: int = None, correcao_id: int = None, categoria_qualidade: str = None,
+                  permitir_negativo: bool = False, registado_por: str = None) -> dict:
     """Deplete `quantidade_kg` das entradas mais antigas deste artigo
     exato com saldo (FIFO), gravando cada depleção para auditoria (ver
     db.guardar_depletion_parkin). Assume que o chamador já confirmou que
     há saldo suficiente (ver _saldo_disponivel) — mesmo assim devolve
-    {"erro": ...} sem tocar em nada se não houver, como rede de segurança.
+    {"erro": ...} sem tocar em nada se não houver, como rede de segurança,
+    A MENOS que `permitir_negativo` venha True (só as correções, nunca as
+    saídas — pedido explícito do Rui, 2026-10-09): nesse caso, deplete o
+    que houver e cria uma entrada negativa para o resto (ver
+    _criar_entrada_negativa), em vez de falhar.
     `categoria_qualidade` restringe a depleção só a essa categoria (ver
     _entradas_com_saldo_do_artigo)."""
     entradas = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura, categoria_qualidade)
     disponivel = sum(float(e["saldo_kg"]) for e in entradas)
-    if disponivel + 1e-6 < quantidade_kg:
+    if disponivel + 1e-6 < quantidade_kg and not permitir_negativo:
         rotulo = "artigo desconhecido" if _chave_artigo(tipo, comprimento, espessura) == _ARTIGO_DESCONHECIDO \
             else f"artigo {tipo} {comprimento} {espessura}"
         if categoria_qualidade:
@@ -473,23 +498,29 @@ def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: 
         db.guardar_depletion_parkin(e["id"], tirar, saida_id=saida_id, correcao_id=correcao_id)
         depletadas.append({"entrada_id": e["id"], "talao": e["talao"], "quantidade_kg": round(tirar, 1)})
         restante -= tirar
+    if restante > 1e-9:
+        depletadas.append(_criar_entrada_negativa(tipo, comprimento, espessura, categoria_qualidade,
+                                                   restante, correcao_id, registado_por))
     return {"depletadas": depletadas}
 
 
 def _aplicar_fifo_com_preferencia(entradas: list[dict], quantidade_kg: float, categoria_preferida: str,
-                                  saida_id: int = None, correcao_id: int = None) -> dict:
+                                  tipo: str, comprimento: float, espessura: str,
+                                  saida_id: int = None, correcao_id: int = None,
+                                  registado_por: str = None) -> dict:
     """Deplete `quantidade_kg` de `entradas` (já com saldo, de um artigo),
     preferindo a categoria `categoria_preferida` — pedido explícito do
     Rui (2026-10-09): tira o máximo possível dessa categoria primeiro; o
     que faltar reparte pelas OUTRAS categorias com saldo, proporcional ao
     que cada uma tem (nunca em partes iguais — uma categoria com o dobro
-    do saldo de outra perde o dobro). Nunca falha uma correção só por uma
-    categoria em concreto não chegar, desde que o artigo tenha saldo
-    suficiente no total (ver o `disponivel_total` já confirmado por quem
-    chama isto, registar_correcao). Dentro de cada categoria, continua a
-    tirar sempre da entrada mais antiga primeiro (FIFO) — `entradas` já
-    vem ordenada por data, por isso cada sub-lista por categoria também
-    fica ordenada, sem precisar de reordenar."""
+    do saldo de outra perde o dobro). Nunca falha uma correção: se mesmo
+    assim faltar (o artigo, no total, não tem o suficiente), o resto fica
+    a descoberto na própria categoria preferida — ver _criar_entrada_
+    negativa (pedido explícito do Rui, 2026-10-09: "fazendo correções tem
+    de deixar ir a negativo"). Dentro de cada categoria, continua a tirar
+    sempre da entrada mais antiga primeiro (FIFO) — `entradas` já vem
+    ordenada por data, por isso cada sub-lista por categoria também fica
+    ordenada, sem precisar de reordenar."""
     por_categoria = {}
     for e in entradas:
         por_categoria.setdefault(e["categoria_qualidade"], []).append(e)
@@ -522,6 +553,11 @@ def _aplicar_fifo_com_preferencia(entradas: list[dict], quantidade_kg: float, ca
             depletadas.append({"entrada_id": e["id"], "talao": e["talao"], "quantidade_kg": round(tirar, 1),
                               "categoria_qualidade": categoria})
             restante_cat -= tirar
+
+    faltante = quantidade_kg - sum(alvo.values())
+    if faltante > 1e-9:
+        depletadas.append(_criar_entrada_negativa(tipo, comprimento, espessura, categoria_preferida,
+                                                   faltante, correcao_id, registado_por))
     return {"depletadas": depletadas}
 
 
@@ -692,23 +728,21 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
     # (pedido explícito do Rui, 2026-10-09): tira o máximo possível dessa
     # categoria primeiro; se não chegar (ou não tiver nada), reparte o
     # que falta pelas outras categorias com saldo, proporcional ao que
-    # cada uma tem — só falha se o artigo não tiver, no total, entre
-    # todas as categorias, o suficiente. N.D. (None) continua sem
-    # preferência nenhuma, sempre pela entrada mais antiga de qualquer
-    # categoria (ver _aplicar_fifo).
+    # cada uma tem. N.D. (None) continua sem preferência nenhuma, sempre
+    # pela entrada mais antiga de qualquer categoria (ver _aplicar_fifo).
+    # Nunca falha por falta de stock — pedido explícito do Rui (2026-10-09):
+    # "fazendo correções tem de deixar ir a negativo" — o que não houver em
+    # stock real fica como défice (ver _criar_entrada_negativa).
     entradas_tudo = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura)
-    disponivel_total = sum(float(e["saldo_kg"]) for e in entradas_tudo)
-    if disponivel_total + 1e-6 < abs(quantidade_kg):
-        rotulo = "artigo desconhecido" if artigo == _ARTIGO_DESCONHECIDO else "este artigo"
-        return {"erro": (f"só há {disponivel_total:.0f} kg no total em stock para {rotulo} — não é possível "
-                         f"remover {abs(quantidade_kg):.0f} kg")}
     id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                            registado_por=registado_por)
     if categoria_qualidade:
         resultado = _aplicar_fifo_com_preferencia(entradas_tudo, abs(quantidade_kg), categoria_qualidade,
-                                                  correcao_id=id_gerado)
+                                                  tipo, comprimento, espessura,
+                                                  correcao_id=id_gerado, registado_por=registado_por)
     else:
-        resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado)
+        resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado,
+                                  permitir_negativo=True, registado_por=registado_por)
     return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
            "categoria_qualidade": categoria_qualidade, **resultado}
 
@@ -717,12 +751,16 @@ def stock_total() -> dict:
     """Stock total atual, por categoria de qualidade — para a barra
     empilhada principal do dashboard. Inclui o saldo das entradas e as
     correções positivas; as negativas já estão refletidas no saldo das
-    entradas que depletaram (ver _aplicar_fifo)."""
+    entradas que depletaram (ver _aplicar_fifo). Só ignora saldo
+    praticamente zero — um saldo negativo (défice de uma correção que foi
+    além do stock real, pedido explícito do Rui, 2026-10-09) tem de
+    continuar a contar, para o total refletir mesmo o défice em vez de o
+    esconder."""
     por_categoria = {c: 0.0 for c in CATEGORIAS_QUALIDADE}
     sem_categoria = 0.0
     for e in db.entradas_parkin_todas():
         saldo = float(e["saldo_kg"] or 0)
-        if saldo <= 1e-6:
+        if abs(saldo) <= 1e-6:
             continue
         if e["categoria_qualidade"] in por_categoria:
             por_categoria[e["categoria_qualidade"]] += saldo
@@ -745,7 +783,10 @@ def stock_total() -> dict:
 def stock_por_artigo() -> list[dict]:
     """Stock atual por artigo (tipo+comprimento+espessura), com a mesma
     repartição por categoria de qualidade — para as barras de "stock por
-    artigo" do dashboard, ordenadas da maior para a menor quantidade."""
+    artigo" do dashboard, ordenadas da maior para a menor quantidade. Um
+    artigo com saldo negativo (défice de uma correção, pedido explícito
+    do Rui, 2026-10-09) continua a aparecer, nunca é escondido — só se
+    ignora um artigo cujo total fique mesmo a zero."""
     artigos = {}
 
     def _bucket(chave, tipo, comprimento, espessura):
@@ -756,7 +797,7 @@ def stock_por_artigo() -> list[dict]:
 
     for e in db.entradas_parkin_todas():
         saldo = float(e["saldo_kg"] or 0)
-        if saldo <= 1e-6:
+        if abs(saldo) <= 1e-6:
             continue
         comprimento = float(e["comprimento"]) if e["comprimento"] is not None else None
         chave = _chave_artigo(e["tipo"], comprimento, e["espessura"])
@@ -777,7 +818,7 @@ def stock_por_artigo() -> list[dict]:
     resultado = []
     for chave, a in artigos.items():
         total = sum(a["por_categoria_kg"].values()) + a["sem_categoria_kg"]
-        if total <= 1e-6:
+        if abs(total) <= 1e-6:
             continue
         lim = limites.get(chave) or {}
         resultado.append({
@@ -1467,7 +1508,7 @@ $("#bCorrecaoGuardar").onclick = async () => {
       const artigoTxt = rotuloArtigo({artigo: j.artigo, tipo: corpo.tipo, comprimento: corpo.comprimento, espessura: corpo.espessura});
       const categoriaTxt = j.categoria_qualidade ? ` (categoria ${j.categoria_qualidade})`
         : (j.quantidade_kg > 0 ? " (sem categoria)" : "");
-      let detalhe = "";
+      let detalhe = "", aviso = "";
       if(j.depletadas && j.depletadas.length){
         const porCategoria = {};
         j.depletadas.forEach(d => { porCategoria[d.categoria_qualidade] = (porCategoria[d.categoria_qualidade]||0) + d.quantidade_kg; });
@@ -1475,8 +1516,13 @@ $("#bCorrecaoGuardar").onclick = async () => {
         if(categorias.length > 1 || (categorias.length === 1 && categorias[0] !== j.categoria_qualidade)){
           detalhe = " — " + categorias.map(c => `${c||"sem categoria"}: ${t(porCategoria[c])}`).join(", ");
         }
+        const negativa = j.depletadas.find(d => d.negativo);
+        if(negativa){
+          aviso = ` <span class="err">Aviso: não havia stock suficiente — ficaram ${t(negativa.quantidade_kg)} em défice`
+            + (negativa.categoria_qualidade ? ` na categoria ${negativa.categoria_qualidade}` : "") + ".</span>";
+        }
       }
-      $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}${detalhe}.</div>`;
+      $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}${detalhe}.${aviso}</div>`;
       carregar();
     }
   } catch(e){ $("#correcaoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
