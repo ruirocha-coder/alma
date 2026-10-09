@@ -1336,7 +1336,7 @@ function atualizarSubCategoria(){
   const v = parseFloat($("#cQuantidade").value.replace(",","."));
   $("#cCategoriaSub").textContent = (v<0)
     ? "Numa remoção: N.D. tira da mais antiga de qualquer categoria; escolhendo uma, prefere essa, e só reparte pelas outras (proporcional ao que têm) se não chegar."
-    : "A categoria desta sobra — N.D. fica sem categoria definida.";
+    : "";
 }
 $("#cQuantidade").addEventListener("input", atualizarSubCategoria);
 atualizarSubCategoria();
