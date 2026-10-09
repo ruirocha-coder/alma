@@ -938,18 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-entradas-artigo")
-def _debug_entradas_artigo(tipo: str, comprimento: float, espessura: str):
-    import db
-    todas = db.entradas_parkin_todas()
-    itens = [e for e in todas if e["tipo"] == tipo and e["comprimento"] is not None
-            and abs(float(e["comprimento"]) - comprimento) < 0.001 and e["espessura"] == espessura]
-    return {"total_entradas": len(itens), "soma_saldo_kg": sum(float(e["saldo_kg"]) for e in itens),
-           "soma_so_positivos_kg": sum(float(e["saldo_kg"]) for e in itens if float(e["saldo_kg"]) > 0),
-           "itens": [{"id": e["id"], "talao": e["talao"], "fornecedor": e["fornecedor"], "data": str(e["data"]),
-                     "peso_liquido_kg": float(e["peso_liquido_kg"]), "saldo_kg": float(e["saldo_kg"])}
-                    for e in itens]}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
