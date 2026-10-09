@@ -938,35 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.post("/_debug-corrigir-portais-validade")
-def _debug_corrigir_portais_validade(aplicar: bool = False):
-    """Remove a frase de validade da data da nota de condição do crédito
-    dos portais já gerados (ver tools/portal_projeto._construir_e_gravar)
-    — pedido explícito do Rui, 2026-10-09."""
-    import db
-    antigo = ('<p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de '
-             'fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram '
-             'neste valor. A compra parcial fica a preço de tabela, sem crédito. ${projeto.validade}</p>')
-    novo = ('<p class="nota"><b>Condição do crédito:</b> aplica-se apenas à compra de 100% da especificação de '
-           'fornecimento. Peças pré-existentes do cliente foram integradas na fase de desenho e não entram '
-           'neste valor. A compra parcial fica a preço de tabela, sem crédito.</p>')
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, pdf FROM documentos_gerados WHERE card_id IS NOT NULL AND formato = 'html'")
-            linhas = cur.fetchall()
-            afetados = []
-            for l in linhas:
-                html = bytes(l["pdf"]).decode("utf-8")
-                if antigo in html:
-                    afetados.append(l["id"])
-                    if aplicar:
-                        novo_html = html.replace(antigo, novo)
-                        cur.execute("UPDATE documentos_gerados SET pdf = %s WHERE id = %s",
-                                   (novo_html.encode("utf-8"), l["id"]))
-            if aplicar:
-                conn.commit()
-    return {"total_portais": len(linhas), "com_frase_antiga": afetados, "aplicado": aplicar}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
