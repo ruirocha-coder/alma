@@ -421,33 +421,46 @@ def importar_historico_avaliacoes(anos: list = None) -> dict:
            "sem_qualidade_legivel": sem_qualidade, "ja_existiam": len(ja_existiam)}
 
 
-def _entradas_com_saldo_do_artigo(tipo: str, comprimento: float, espessura: str) -> list[dict]:
+def _entradas_com_saldo_do_artigo(tipo: str, comprimento: float, espessura: str,
+                                  categoria_qualidade: str = None) -> list[dict]:
     """Entradas com saldo para o mesmo artigo que `_chave_artigo` usa para
     agrupar o "stock por artigo" (ver stock_por_artigo) — quando tipo ou
     comprimento vêm None ("N.D.", ver registar_correcao), isso é o próprio
     artigo "desconhecido" como um todo (db.entradas_parkin_desconhecidas_com_saldo),
-    nunca uma correspondência exata que nunca bateria certo com NULL."""
+    nunca uma correspondência exata que nunca bateria certo com NULL.
+    `categoria_qualidade`, se vier preenchida, restringe às entradas dessa
+    categoria (pedido explícito do Rui, 2026-10-09, para escolher de que
+    categoria retirar numa correção negativa, em vez de ser sempre pela
+    mais antiga de qualquer categoria)."""
     if _chave_artigo(tipo, comprimento, espessura) == _ARTIGO_DESCONHECIDO:
-        return db.entradas_parkin_desconhecidas_com_saldo()
-    return db.entradas_parkin_com_saldo(tipo, comprimento, espessura)
+        entradas = db.entradas_parkin_desconhecidas_com_saldo()
+        if categoria_qualidade:
+            entradas = [e for e in entradas if e["categoria_qualidade"] == categoria_qualidade]
+        return entradas
+    return db.entradas_parkin_com_saldo(tipo, comprimento, espessura, categoria_qualidade)
 
 
-def _saldo_disponivel(tipo: str, comprimento: float, espessura: str) -> float:
-    return sum(float(e["saldo_kg"]) for e in _entradas_com_saldo_do_artigo(tipo, comprimento, espessura))
+def _saldo_disponivel(tipo: str, comprimento: float, espessura: str, categoria_qualidade: str = None) -> float:
+    return sum(float(e["saldo_kg"])
+              for e in _entradas_com_saldo_do_artigo(tipo, comprimento, espessura, categoria_qualidade))
 
 
 def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
-                  saida_id: int = None, correcao_id: int = None) -> dict:
+                  saida_id: int = None, correcao_id: int = None, categoria_qualidade: str = None) -> dict:
     """Deplete `quantidade_kg` das entradas mais antigas deste artigo
     exato com saldo (FIFO), gravando cada depleção para auditoria (ver
     db.guardar_depletion_parkin). Assume que o chamador já confirmou que
     há saldo suficiente (ver _saldo_disponivel) — mesmo assim devolve
-    {"erro": ...} sem tocar em nada se não houver, como rede de segurança."""
-    entradas = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura)
+    {"erro": ...} sem tocar em nada se não houver, como rede de segurança.
+    `categoria_qualidade` restringe a depleção só a essa categoria (ver
+    _entradas_com_saldo_do_artigo)."""
+    entradas = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura, categoria_qualidade)
     disponivel = sum(float(e["saldo_kg"]) for e in entradas)
     if disponivel + 1e-6 < quantidade_kg:
         rotulo = "artigo desconhecido" if _chave_artigo(tipo, comprimento, espessura) == _ARTIGO_DESCONHECIDO \
             else f"artigo {tipo} {comprimento} {espessura}"
+        if categoria_qualidade:
+            rotulo += f" (categoria {categoria_qualidade})"
         return {"erro": (f"só há {disponivel:.0f} kg em stock para o {rotulo} "
                          f"— não é possível tirar {quantidade_kg:.0f} kg")}
     restante = quantidade_kg
@@ -600,6 +613,8 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
         return {"erro": f"tipo inválido: {tipo!r} — tem de ser N.D. ou um de {TIPOS_VALIDOS}"}
     if espessura is not None and espessura not in ESPESSURAS_VALIDAS:
         return {"erro": f"espessura inválida: {espessura!r} — tem de ser uma de {ESPESSURAS_VALIDAS}"}
+    if categoria_qualidade is not None and categoria_qualidade not in CATEGORIAS_QUALIDADE:
+        return {"erro": f"categoria inválida: {categoria_qualidade!r} — tem de ser N.D. ou uma de {CATEGORIAS_QUALIDADE}"}
     if not quantidade_kg:
         return {"erro": "a quantidade não pode ser zero"}
     if not motivo or not motivo.strip():
@@ -608,9 +623,6 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
     artigo = _chave_artigo(tipo, comprimento, espessura)
     data_hoje = date.today()
     if quantidade_kg > 0:
-        if categoria_qualidade not in CATEGORIAS_QUALIDADE:
-            return {"erro": f"categoria de qualidade obrigatória para uma correção positiva — "
-                           f"uma de {CATEGORIAS_QUALIDADE}"}
         id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                                categoria_qualidade=categoria_qualidade, registado_por=registado_por)
         # Bug real reportado pelo Rui (2026-10-08): sem uma entrada a
@@ -624,17 +636,27 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
             tipo=tipo, comprimento=comprimento, espessura=espessura, peso_liquido_kg=quantidade_kg,
             categoria_qualidade=categoria_qualidade, registado_por=registado_por)
         db.ligar_entrada_a_correcao(id_gerado, entrada_id)
-        return {"ok": True, "id": id_gerado, "artigo": artigo}
+        return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
+               "categoria_qualidade": categoria_qualidade}
 
-    disponivel = _saldo_disponivel(tipo, comprimento, espessura)
+    # categoria_qualidade aqui é um FILTRO opcional (pedido explícito do
+    # Rui, 2026-10-09): só retira dessa categoria em concreto, em vez de
+    # ser sempre pela entrada mais antiga de qualquer categoria (ver
+    # _entradas_com_saldo_do_artigo) — N.D. (None) mantém o comportamento
+    # de sempre, sem filtro nenhum.
+    disponivel = _saldo_disponivel(tipo, comprimento, espessura, categoria_qualidade)
     if disponivel + 1e-6 < abs(quantidade_kg):
         rotulo = "artigo desconhecido" if artigo == _ARTIGO_DESCONHECIDO else "este artigo"
+        if categoria_qualidade:
+            rotulo += f" na categoria {categoria_qualidade}"
         return {"erro": (f"só há {disponivel:.0f} kg em stock para {rotulo} — não é possível remover "
                          f"{abs(quantidade_kg):.0f} kg")}
     id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                            registado_por=registado_por)
-    resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado)
-    return {"ok": True, "id": id_gerado, "artigo": artigo, **resultado}
+    resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado,
+                              categoria_qualidade=categoria_qualidade)
+    return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
+           "categoria_qualidade": categoria_qualidade, **resultado}
 
 
 def stock_total() -> dict:
@@ -1015,8 +1037,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <input type="text" inputmode="decimal" id="cQuantidade" placeholder="+ adiciona, − remove">
   </div>
   <div class="frow" id="cCategoriaRow"><label>Categoria</label>
-    <select id="cCategoria"><option value="Boa">Boa</option><option value="Media">Média</option><option value="Fraca">Fraca</option></select>
+    <select id="cCategoria"><option value="Boa">Boa</option><option value="Media">Média</option><option value="Fraca">Fraca</option><option value="">N.D. — não definido</option></select>
   </div>
+  <p class="sub" id="cCategoriaSub" style="margin:2px 0 12px"></p>
   <div class="frow"><label>Motivo</label>
     <input type="text" id="cMotivo" placeholder="ex: inventário, erro de leitura…">
   </div>
@@ -1255,11 +1278,14 @@ $("#bAbrirSaida").onclick = () => {
 $("#bAbrirCorrecao").onclick = () => { $("#correcaoMsg").innerHTML=""; abrirSheet("#sheetCorrecao"); };
 $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites"); };
 
-$("#cCategoriaRow").style.display = "none";
-$("#cQuantidade").addEventListener("input", () => {
+function atualizarSubCategoria(){
   const v = parseFloat($("#cQuantidade").value.replace(",","."));
-  $("#cCategoriaRow").style.display = (v>0) ? "flex" : "none";
-});
+  $("#cCategoriaSub").textContent = (v<0)
+    ? "Numa remoção: N.D. tira da mais antiga de qualquer categoria; escolhendo uma categoria, só tira dessa."
+    : "A categoria desta sobra — N.D. fica sem categoria definida.";
+}
+$("#cQuantidade").addEventListener("input", atualizarSubCategoria);
+atualizarSubCategoria();
 
 $("#bEntradaGuardar").onclick = async () => {
   if(!entradaAnexos.length){ $("#entradaMsg").innerHTML = '<div class="err">Anexa pelo menos a foto do talão.</div>'; return; }
@@ -1382,7 +1408,14 @@ $("#bCorrecaoGuardar").onclick = async () => {
     const r = await fetch("/park-in/correcao", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(corpo)});
     const j = await r.json();
     if(j.erro){ $("#correcaoMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
-    else { $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada${j.artigo==="desconhecido"?" (artigo desconhecido)":""}.</div>`; carregar(); }
+    else {
+      const sinal = j.quantidade_kg > 0 ? "+" : "−";
+      const artigoTxt = rotuloArtigo({artigo: j.artigo, tipo: corpo.tipo, comprimento: corpo.comprimento, espessura: corpo.espessura});
+      const categoriaTxt = j.categoria_qualidade ? ` (categoria ${j.categoria_qualidade})`
+        : (j.quantidade_kg > 0 ? " (sem categoria)" : "");
+      $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}.</div>`;
+      carregar();
+    }
   } catch(e){ $("#correcaoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bCorrecaoGuardar").disabled = false;
 };

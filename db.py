@@ -2534,18 +2534,24 @@ def talaoes_parkin_existentes() -> set:
             cur.execute("SELECT DISTINCT talao FROM parkin_entradas")
             return {l["talao"] for l in cur.fetchall()}
 
-def entradas_parkin_com_saldo(tipo: str, comprimento: float, espessura: str) -> list[dict]:
+def entradas_parkin_com_saldo(tipo: str, comprimento: float, espessura: str,
+                              categoria_qualidade: str = None) -> list[dict]:
     """Entradas deste artigo exato com saldo > 0, da mais antiga para a
     mais recente — ordem de consumo FIFO (ver aplicar_fifo_parkin em
-    tools/parkin.py, partilhada por saídas e correções negativas)."""
+    tools/parkin.py, partilhada por saídas e correções negativas).
+    `categoria_qualidade`, se vier preenchida, restringe às entradas dessa
+    categoria — pedido explícito do Rui (2026-10-09): poder escolher de
+    que categoria retirar numa correção negativa, em vez de ser sempre
+    pela mais antiga de qualquer categoria."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, talao, fornecedor, data, saldo_kg, categoria_qualidade
                    FROM parkin_entradas
                    WHERE tipo = %s AND comprimento = %s AND espessura = %s AND saldo_kg > 0
+                   AND (%s::text IS NULL OR categoria_qualidade = %s)
                    ORDER BY data ASC, id ASC""",
-                (tipo, comprimento, espessura)
+                (tipo, comprimento, espessura, categoria_qualidade, categoria_qualidade)
             )
             return cur.fetchall()
 

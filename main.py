@@ -1046,7 +1046,7 @@ def park_in_correcao(corpo: dict = Body(...)):
             return JSONResponse({"erro": "comprimento tem de ser um número ou N.D."}, status_code=400)
     resultado = parkin.registar_correcao(
         corpo.get("tipo") or None, comprimento, corpo.get("espessura") or None, quantidade_kg, corpo.get("motivo"),
-        categoria_qualidade=corpo.get("categoria_qualidade"), registado_por=corpo.get("utilizador"))
+        categoria_qualidade=corpo.get("categoria_qualidade") or None, registado_por=corpo.get("utilizador"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
