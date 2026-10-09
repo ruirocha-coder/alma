@@ -781,9 +781,75 @@ def dados_dashboard(dias_top_entradas: int = 30) -> dict:
     }
 
 
+def listar_movimentos(dias: int = 30) -> list[dict]:
+    """Lista cronológica (mais recente primeiro) de todos os movimentos de
+    stock do Park In nos últimos `dias` dias — entradas, saídas e
+    correções — pedido explícito do Rui (2026-10-09): "uma listagem com os
+    movimentos que foram feitos no Park In", para a Alma poder responder
+    isto diretamente em vez de tentar (sem sucesso) ler a página através
+    de pesquisa/leitura genérica da internet, que não funciona numa
+    aplicação dinâmica como esta.
+
+    Uma correção positiva já aparece aqui como a sua própria entrada (ver
+    registar_correcao) — por isso ignora sempre correções com `entrada_id`
+    preenchido, para nunca listar o mesmo movimento duas vezes."""
+    movimentos = []
+    for e in db.entradas_parkin_movimentos_desde(dias):
+        if (e["talao"] or "").startswith("CORR-"):
+            continue
+        comprimento = float(e["comprimento"]) if e["comprimento"] is not None else None
+        movimentos.append({
+            "data": str(e["data"]), "tipo_movimento": "entrada",
+            "artigo": _chave_artigo(e["tipo"], comprimento, e["espessura"]),
+            "quantidade_kg": float(e["peso_liquido_kg"]),
+            "fornecedor": e["fornecedor"], "talao": e["talao"],
+        })
+    for s in db.saidas_parkin_desde(dias):
+        comprimento = float(s["comprimento"]) if s["comprimento"] is not None else None
+        movimentos.append({
+            "data": str(s["data"]), "tipo_movimento": "saida",
+            "artigo": _chave_artigo(s["tipo"], comprimento, s["espessura"]),
+            "quantidade_kg": -float(s["quantidade_kg"]),
+            "talao": s["talao"],
+        })
+    for c in db.correcoes_parkin_desde(dias):
+        if c["entrada_id"] is not None:
+            continue
+        comprimento = float(c["comprimento"]) if c["comprimento"] is not None else None
+        movimentos.append({
+            "data": str(c["data"]), "tipo_movimento": "correcao",
+            "artigo": _chave_artigo(c["tipo"], comprimento, c["espessura"]),
+            "quantidade_kg": float(c["quantidade_kg"]),
+            "motivo": c["motivo"],
+        })
+    movimentos.sort(key=lambda m: m["data"], reverse=True)
+    return movimentos
+
+
 def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None) -> dict:
     db.definir_limite_parkin(chave, minimo_kg, maximo_kg)
     return {"ok": True}
+
+
+# Ferramentas do Park In para a Alma (pedido explícito do Rui, 2026-10-09):
+# a página é dinâmica, não indexada, e o teu tool genérico de internet
+# (web_fetch/web_search) não a consegue ler — usa sempre estas, nunca
+# tentes ler https://alma-ia.up.railway.app/park-in pela internet.
+TOOLS_PARK_IN = [
+    {
+        "name": "stock_atual_parkin",
+        "description": "Stock atual de toros do Park In (Ecos Largos) — total, por categoria de qualidade e por artigo (tipo/comprimento/espessura), mais os fornecedores com melhor/pior qualidade média e com mais entregas recentes. Usa isto sempre que perguntarem pelo stock/quantidade atual de toros, nunca tentes ler a página do Park In pela internet (é uma aplicação dinâmica, não indexada — isso nunca funciona).",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "listar_movimentos_parkin",
+        "description": "Lista cronológica (mais recente primeiro) dos movimentos de stock do Park In — entradas, saídas e correções, cada um com data, artigo e quantidade (kg, negativo numa saída/correção de remoção). Usa isto sempre que pedirem os movimentos/histórico do Park In num período, nunca tentes ler a página pela internet.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"dias": {"type": "integer", "description": "Quantos dias para trás — por omissão 30"}}
+        }
+    }
+]
 
 
 def pagina_park_in() -> str:

@@ -2612,6 +2612,50 @@ def guardar_saida_parkin(tipo: str, comprimento: float, espessura: str, quantida
         conn.commit()
     return id_gerado
 
+def entradas_parkin_movimentos_desde(dias: int) -> list[dict]:
+    """Entradas dos últimos `dias` dias, com todos os campos relevantes
+    para a listagem de movimentos do Park In (ver
+    tools/parkin.listar_movimentos) — ao contrário de entradas_parkin_desde,
+    que só serve o agrupamento por fornecedor de top_entradas."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, peso_liquido_kg, fornecedor, talao, data
+                   FROM parkin_entradas WHERE data >= (CURRENT_DATE - %s * interval '1 day')
+                   ORDER BY data DESC, id DESC""",
+                (dias,)
+            )
+            return cur.fetchall()
+
+def saidas_parkin_desde(dias: int) -> list[dict]:
+    """Saídas registadas nos últimos `dias` dias — para a listagem de
+    movimentos do Park In (ver tools/parkin.listar_movimentos)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, quantidade_kg, talao, data, registado_por
+                   FROM parkin_saidas WHERE data >= (CURRENT_DATE - %s * interval '1 day')
+                   ORDER BY data DESC, id DESC""",
+                (dias,)
+            )
+            return cur.fetchall()
+
+def correcoes_parkin_desde(dias: int) -> list[dict]:
+    """Correções registadas nos últimos `dias` dias, com `entrada_id` (ver
+    guardar_correcao_parkin) — para a listagem de movimentos do Park In
+    poder ignorar uma correção positiva já representada pela sua própria
+    entrada (ver tools/parkin.listar_movimentos), nunca a contar a dobro."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, categoria_qualidade, quantidade_kg, motivo, data,
+                          registado_por, entrada_id
+                   FROM parkin_correcoes WHERE data >= (CURRENT_DATE - %s * interval '1 day')
+                   ORDER BY data DESC, id DESC""",
+                (dias,)
+            )
+            return cur.fetchall()
+
 def guardar_correcao_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
                             motivo: str, data, categoria_qualidade: str = None,
                             registado_por: str = None, entrada_id: int = None) -> int:

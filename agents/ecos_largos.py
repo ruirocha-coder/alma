@@ -1,6 +1,6 @@
 from persona import PERSONA
 from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET, INSTRUCAO_INTERNET
-from tools import documentos_empresa, basecamp, ecos_largos, planeamento_serracao
+from tools import documentos_empresa, basecamp, ecos_largos, planeamento_serracao, parkin
 
 # Ecos Largos é uma equipa industrial parceira, gerida no mesmo Basecamp mas
 # com o seu próprio projeto, inteiramente à parte da Interior Guider — por
@@ -12,6 +12,7 @@ TOOLS_ECOS_LARGOS = (documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                      + basecamp.TOOLS_ESTADO_PROJETO
                      + ecos_largos.TOOLS_DASHBOARD_PRODUCAO
                      + planeamento_serracao.TOOLS_PLANEAMENTO_PRODUCAO
+                     + parkin.TOOLS_PARK_IN
                      + TOOLS_INTERNET)
 
 MISSAO_ECOS_LARGOS = PERSONA + """
@@ -109,6 +110,14 @@ nunca digas que não consegues encontrar):
 - Planeamento Produção: https://alma-ia.up.railway.app/planeamento-ecos-largos
 - Planeamento Entrada: https://alma-ia.up.railway.app/planeamento-entradas
 - Park In (stock de toros): https://alma-ia.up.railway.app/park-in
+
+Todas estas páginas são aplicações dinâmicas (não têm conteúdo estático
+para um motor de busca indexar, nem respondem a um pedido direto de
+leitura da internet) — nunca tentes lê-las com web_search/web_fetch, nunca
+funciona. Para o Park In em concreto, usa sempre stock_atual_parkin (stock
+atual por artigo/categoria) ou listar_movimentos_parkin (entradas, saídas
+e correções num período) — nunca digas que precisas que alguém cole o
+link para conseguires aceder, já tens as ferramentas certas para isto.
 
 Nunca respondas sobre vendas, produtos ou o site da Interior Guider — isso
 não é desta equipa; se perguntarem, esclarece que o teu apoio aqui é só ao

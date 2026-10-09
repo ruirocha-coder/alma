@@ -1,7 +1,7 @@
 import anthropic, json, threading
 from datetime import date
 from tools import (bigcommerce, site, documentos_empresa, documentos_referencia, basecamp, ecos_largos,
-                   documentos_gerados, portal_projeto, tempo, calculadora, planeamento_serracao)
+                   documentos_gerados, portal_projeto, tempo, calculadora, planeamento_serracao, parkin)
 from agents import agendamento_entregas
 import db
 
@@ -129,6 +129,8 @@ FUNCOES = {
     "dashboard_producao_ecos_largos": ecos_largos.ler_dashboard_producao,
     "dashboard_producao_ecos_largos_intervalo": ecos_largos.ler_dashboard_producao_intervalo,
     "resumo_producao_planeada": planeamento_serracao.resumo_producao_planeada,
+    "stock_atual_parkin": parkin.dados_dashboard,
+    "listar_movimentos_parkin": lambda dias=30: parkin.listar_movimentos(dias),
     "ler_manual_qualidade_cargas_toros": ecos_largos.ler_manual_qualidade_cargas_toros,
     "guardar_avaliacao_carga_toros": ecos_largos.guardar_avaliacao_carga_toros,
     "resumo_avaliacoes_cargas_toros": ecos_largos.resumo_avaliacoes_cargas_toros,
