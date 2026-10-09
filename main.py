@@ -938,6 +938,12 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-movimentos-parkin")
+def _debug_movimentos_parkin(dias: int = 30):
+    from tools import parkin
+    m = parkin.listar_movimentos(dias)
+    return {"total": len(m), "amostra": m[:15]}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
