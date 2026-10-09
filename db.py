@@ -2777,12 +2777,17 @@ def entradas_parkin_qualidade_e_fornecedor() -> list[dict]:
 def entradas_parkin_desde(dias: int) -> list[dict]:
     """Fornecedor + peso líquido de cada entrada dos últimos `dias` dias —
     base para tools/parkin.top_entradas (mesma razão de agrupar por nome
-    normalizado em Python, não aqui em SQL — ver entradas_parkin_qualidade_e_fornecedor)."""
+    normalizado em Python, não aqui em SQL — ver entradas_parkin_qualidade_e_fornecedor).
+    Exclui as entradas sintéticas criadas para uma correção positiva (ver
+    tools/parkin.registar_correcao, talão "CORR-<id>") — pedido explícito
+    do Rui (2026-10-09): uma correção de inventário não é um fornecedor
+    real, não deve aparecer no "Top entradas"."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT fornecedor, peso_liquido_kg FROM parkin_entradas
-                   WHERE data >= (CURRENT_DATE - %s * interval '1 day')""",
+                   WHERE data >= (CURRENT_DATE - %s * interval '1 day')
+                   AND talao NOT LIKE 'CORR-%%'""",
                 (dias,)
             )
             return [{"fornecedor": l["fornecedor"], "peso_liquido_kg": float(l["peso_liquido_kg"] or 0)}
