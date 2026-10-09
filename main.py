@@ -938,16 +938,6 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
-@app.get("/_debug-mensagem-diaria")
-def _debug_mensagem_diaria():
-    import db
-    from datetime import date
-    from tools import basecamp
-    pausa = db.pausa_automatica_ativa(date.today())
-    posts = basecamp.listar_mural(projeto="Gestão", limite=10)
-    return {"hoje": str(date.today()), "pausa_ativa": pausa, "ultimos_posts_mural": posts,
-           "jobs_agendados": [str(j) for j in scheduler.get_jobs()]}
-
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
