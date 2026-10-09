@@ -938,6 +938,31 @@ def planeamento_entradas_buffer_apagar(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar id"}, status_code=400)
     return JSONResponse(planeamento_entradas.apagar_buffer(id))
 
+@app.get("/_debug-ofs-perdidas")
+def _debug_ofs_perdidas(data: str = "2026-10-08"):
+    """Investigação: OFs ativas no Basecamp com "Due on" (prazo) numa data
+    em concreto mas sem agendamento local — candidatas a terem sido
+    apagadas pelo bug de _cards_of_ativos (ver tools/planeamento_serracao.py),
+    já que agendar() escreve sempre dia_inicio no "Due on" do card real."""
+    import db
+    from tools import planeamento_serracao as ps
+    cards = ps._cards_of_ativos(forcar=True)
+    agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
+    suspeitas, todas_com_prazo_na_data = [], []
+    for c in cards:
+        if c.get("prazo") != data:
+            continue
+        a = agendamentos.get(c["id"])
+        tem_agendamento = bool(a and a["linha"] and a["dia_inicio"])
+        linha = {"basecamp_card_id": c["id"], "titulo": c["titulo"],
+                "coluna_basecamp": c["estado"], "prazo": c["prazo"], "url": c["url"],
+                "tem_agendamento_local": tem_agendamento}
+        todas_com_prazo_na_data.append(linha)
+        if not tem_agendamento:
+            suspeitas.append(linha)
+    return {"total_cards_ativos": len(cards), "data_investigada": data,
+           "todas_com_prazo_nesta_data": todas_com_prazo_na_data, "suspeitas": suspeitas}
+
 @app.get("/park-in", response_class=HTMLResponse)
 def park_in_pagina():
     """Página interna (sem login) de gestão do stock de toros da Ecos
