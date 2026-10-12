@@ -1071,6 +1071,32 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.get("/_debug-correcoes-duplicadas")
+def _debug_correcoes_duplicadas():
+    """Investigação (Rui, 2026-10-12): encontrar as duas correções
+    idênticas (-339.830 kg, "ACERTO 8/10/2026") para confirmar os ids
+    exatos antes de reverter uma delas."""
+    import db as db_mod
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, tipo, comprimento, espessura, quantidade_kg, motivo, data, criado_em, entrada_id
+                   FROM parkin_correcoes
+                   WHERE quantidade_kg = -339830 AND motivo = 'ACERTO 8/10/2026'
+                   ORDER BY id"""
+            )
+            correcoes = cur.fetchall()
+            resultado = []
+            for c in correcoes:
+                cur.execute(
+                    """SELECT d.quantidade_kg, e.id AS entrada_id, e.talao, e.fornecedor, e.data, e.saldo_kg
+                       FROM parkin_depletions d JOIN parkin_entradas e ON e.id = d.entrada_id
+                       WHERE d.correcao_id = %s ORDER BY e.data ASC, e.id ASC""",
+                    (c["id"],)
+                )
+                resultado.append({"correcao": c, "lotes_afetados": cur.fetchall()})
+    return resultado
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
