@@ -1078,6 +1078,15 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.get("/_debug-aprovisionamento-toros")
+def _debug_aprovisionamento_toros():
+    """Verificação (Rui, 2026-10-12): confirmar que o cruzamento de
+    necessidades (Planeamento de Entradas) com o stock (Park In) dá um
+    resultado sensato contra dados reais, antes de confiar no agendamento
+    de segunda ou em alguém disparar o relatório a sério (publica no
+    Mural, tagando a Sandra Martins) — nunca publica nada."""
+    return relatorio_aprovisionamento_toros.necessidades_por_artigo()
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
