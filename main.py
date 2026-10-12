@@ -1072,30 +1072,71 @@ def park_in_importar_historico():
     return parkin.importar_historico_avaliacoes()
 
 @app.get("/_debug-correcoes-duplicadas")
-def _debug_correcoes_duplicadas():
-    """Investigação (Rui, 2026-10-12): encontrar as duas correções
-    idênticas (-339.830 kg, "ACERTO 8/10/2026") para confirmar os ids
-    exatos antes de reverter uma delas."""
+def _debug_correcoes_duplicadas(dias: int = 7):
+    """Investigação (Rui, 2026-10-12): encontrar TODAS as correções com
+    exatamente o mesmo tipo/comprimento/espessura/quantidade/motivo/data
+    nos últimos `dias` dias — candidatas a duplicados causados pelo
+    formulário que não limpava depois de guardar (já corrigido)."""
     import db as db_mod
     with db_mod.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, tipo, comprimento, espessura, quantidade_kg, motivo, data, criado_em, entrada_id
+                """SELECT tipo, comprimento, espessura, quantidade_kg, motivo, data, COUNT(*) AS n,
+                          array_agg(id ORDER BY id) AS ids
                    FROM parkin_correcoes
-                   WHERE quantidade_kg = -339830 AND motivo = 'ACERTO 8/10/2026'
-                   ORDER BY id"""
+                   WHERE data >= CURRENT_DATE - %s::int
+                   GROUP BY tipo, comprimento, espessura, quantidade_kg, motivo, data
+                   HAVING COUNT(*) > 1
+                   ORDER BY data DESC""",
+                (dias,)
             )
-            correcoes = cur.fetchall()
+            grupos = cur.fetchall()
             resultado = []
-            for c in correcoes:
-                cur.execute(
-                    """SELECT d.quantidade_kg, e.id AS entrada_id, e.talao, e.fornecedor, e.data, e.saldo_kg
-                       FROM parkin_depletions d JOIN parkin_entradas e ON e.id = d.entrada_id
-                       WHERE d.correcao_id = %s ORDER BY e.data ASC, e.id ASC""",
-                    (c["id"],)
-                )
-                resultado.append({"correcao": c, "lotes_afetados": cur.fetchall()})
+            for g in grupos:
+                ids = g["ids"]
+                lotes_por_id = {}
+                for cid in ids:
+                    cur.execute(
+                        """SELECT d.quantidade_kg, e.id AS entrada_id, e.talao, e.fornecedor, e.data, e.saldo_kg
+                           FROM parkin_depletions d JOIN parkin_entradas e ON e.id = d.entrada_id
+                           WHERE d.correcao_id = %s ORDER BY e.data ASC, e.id ASC""",
+                        (cid,)
+                    )
+                    lotes_por_id[cid] = cur.fetchall()
+                resultado.append({**g, "lotes_por_id": lotes_por_id})
     return resultado
+
+@app.post("/_debug-reverter-correcao/{correcao_id}")
+def _debug_reverter_correcao(correcao_id: int):
+    """Reverte por completo uma correção (pedido explícito do Rui,
+    2026-10-12, para anular um duplicado): repõe o saldo de qualquer
+    entrada real que tenha sido depletada por ela, apaga a entrada
+    sintética "CORR-{id}" que a própria correção possa ter criado (sobra
+    positiva ou défice negativo — ver registar_correcao/
+    _criar_entrada_negativa), e apaga a correção em si. Nunca mexe nas
+    OUTRAS correções (ex: o duplicado que fica)."""
+    import db as db_mod
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM parkin_correcoes WHERE id = %s", (correcao_id,))
+            if not cur.fetchone():
+                return {"erro": f"sem correção com id {correcao_id}"}
+            cur.execute(
+                "SELECT entrada_id, quantidade_kg FROM parkin_depletions WHERE correcao_id = %s",
+                (correcao_id,)
+            )
+            depletions = cur.fetchall()
+            for d in depletions:
+                cur.execute("UPDATE parkin_entradas SET saldo_kg = saldo_kg + %s WHERE id = %s",
+                           (d["quantidade_kg"], d["entrada_id"]))
+            cur.execute("DELETE FROM parkin_depletions WHERE correcao_id = %s", (correcao_id,))
+            cur.execute("DELETE FROM parkin_entradas WHERE talao = %s RETURNING id",
+                       (f"CORR-{correcao_id}",))
+            entrada_sintetica_apagada = cur.fetchone()
+            cur.execute("DELETE FROM parkin_correcoes WHERE id = %s", (correcao_id,))
+        conn.commit()
+    return {"ok": True, "correcao_id": correcao_id, "depletions_revertidas": len(depletions),
+           "entrada_sintetica_apagada": bool(entrada_sintetica_apagada)}
 
 @app.get("/health")
 def health():
