@@ -10,7 +10,6 @@
 # explícito do Rui) — nunca guarda nada; lê sempre em direto o Planeamento
 # de Entradas (tools/planeamento_entradas.estado_planeamento_entradas) e o
 # stock do Park In (tools/parkin.stock_por_artigo) no momento em que corre.
-import re
 import threading
 from tools import basecamp, parkin
 from tools import planeamento_entradas as pe
@@ -33,16 +32,20 @@ KG_POR_M3 = 1000
 
 def _comprimento_m_de_toro_cmp(toro_cmp):
     """Converte o "Cmp" do toro do Planeamento de Entradas (texto, em
-    milímetros — ex: "2640", ou com qualificador de diâmetro, ex:
-    "255 ⌀16") para metros, para poder cruzar-se com o comprimento do Park
-    In (número, em metros — ex: 2.64). None sempre que não houver nenhum
-    número no início do texto."""
+    milímetros — ex: "2640") para metros, para poder cruzar-se com o
+    comprimento do Park In (número, em metros — ex: 2.64). Exige o texto
+    TODO como só dígitos (como os TORO_CMP_PRESETS) — nunca interpreta um
+    valor com qualificador de diâmetro (ex: "255 ⌀16") como um comprimento
+    simples: um valor assim não corresponde a nenhum artigo real do Park
+    In (seria lido como 0,26m, um comprimento que não existe), por isso
+    None aqui faz esta OF cair em `sem_info` em vez de entrar errado numa
+    linha de necessidade/stock que nunca vai bater certo."""
     if not toro_cmp:
         return None
-    m = re.match(r"^\s*(\d+)", str(toro_cmp))
-    if not m:
+    texto = str(toro_cmp).strip()
+    if not texto.isdigit():
         return None
-    return round(int(m.group(1)) / 1000, 2)
+    return round(int(texto) / 1000, 2)
 
 def necessidades_por_artigo() -> dict:
     """Para cada combinação tipo+comprimento de toro com necessidade
