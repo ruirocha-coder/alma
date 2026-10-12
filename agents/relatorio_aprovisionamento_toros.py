@@ -39,6 +39,13 @@ KG_POR_M3 = 1000
 # necessidade/stock que nunca bate certo.
 COMPRIMENTO_MIN_PLAUSIVEL_MM = 1000
 
+# Stock mínimo de segurança (pedido explícito do Rui, 2026-10-12): "o que
+# resta dos artigos tem de ser no mínimo 350 m3. Caso seja menos que isto,
+# já tem de avisar que não fica coberto" — um artigo só conta como "Coberto"
+# se, depois de descontar a necessidade desta semana, ainda sobrarem pelo
+# menos estes 350 m³ em stock (reserva de segurança, não zero).
+ESTOQUE_MINIMO_RESTANTE_M3 = 350
+
 def _comprimento_m_de_toro_cmp(toro_cmp):
     """Converte o "Cmp" do toro do Planeamento de Entradas (texto, em
     milímetros — ex: "2640") para metros, para poder cruzar-se com o
@@ -75,7 +82,10 @@ def necessidades_por_artigo() -> dict:
     compara com o stock atual desse artigo no Park In (kg, somado por cima
     das categorias de qualidade e das duas espessuras — o Planeamento de
     Entradas não distingue espessura). `falta_m3` positivo = por
-    encomendar; zero ou negativo = já coberto pelo stock atual.
+    encomendar; zero ou negativo = já coberto pelo stock atual — mas só
+    conta como coberto se, depois de descontar a necessidade desta semana,
+    ainda sobrarem pelo menos ESTOQUE_MINIMO_RESTANTE_M3 em stock (reserva
+    de segurança pedida pelo Rui, 2026-10-12).
 
     Devolve também:
     - `sem_info`: títulos das OFs com necessidade de toros (`qtd_toros_m3`
@@ -135,7 +145,7 @@ def necessidades_por_artigo() -> dict:
             "tipo": g["tipo"], "comprimento_m": g["comprimento_m"],
             "necessidade_m3": round(g["necessidade_m3"], 2),
             "stock_m3": round(stock_m3, 2),
-            "falta_m3": round(g["necessidade_m3"] - stock_m3, 2),
+            "falta_m3": round(g["necessidade_m3"] + ESTOQUE_MINIMO_RESTANTE_M3 - stock_m3, 2),
         })
     linhas.sort(key=lambda l: -l["falta_m3"])
     return {"linhas": linhas, "sem_info": sem_info, "suspeitos": suspeitos,
@@ -184,8 +194,10 @@ def _gerar_texto(dados: dict) -> str:
         for s in suspeitos:
             partes.append(f"- {s['titulo']} (Cmp: {s['toro_cmp']!r})")
 
-    partes.append("\n(stock e necessidades lidos em direto do Park In e do Planeamento de Entradas — "
-                  "podem mudar a qualquer momento)")
+    partes.append(f"\n(considera-se \"Coberto\" só quando sobrar pelo menos {_m3(ESTOQUE_MINIMO_RESTANTE_M3)} "
+                  "em stock depois de descontar a necessidade desta semana — reserva mínima de segurança. "
+                  "Stock e necessidades lidos em direto do Park In e do Planeamento de Entradas — podem "
+                  "mudar a qualquer momento)")
     return "\n".join(partes)
 
 def correr_relatorio_aprovisionamento_toros():
