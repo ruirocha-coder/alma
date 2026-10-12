@@ -1295,25 +1295,6 @@ def relatorio_aprovisionamento_toros_agora():
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.post("/_debug-corrigir-aprovisionamento-toros")
-def _debug_corrigir_aprovisionamento_toros():
-    """Temporário: corrige em direto o post de hoje do Aprovisionamento de Toros já publicado no
-    Mural da Ecos Largos, substituindo o texto pelo recalculado com a nova regra de reserva mínima
-    (350 m³) — em vez de publicar um post duplicado."""
-    from tools import basecamp
-    from datetime import date
-    posts = basecamp.listar_mural(relatorio_aprovisionamento_toros.PROJETO, limite=20)
-    hoje = date.today().isoformat()
-    alvo = next((p for p in posts if p["assunto"] == relatorio_aprovisionamento_toros.ASSUNTO
-                and p["criado_em"].startswith(hoje)), None)
-    if not alvo:
-        return {"erro": "post de hoje não encontrado", "posts": posts}
-    dados = relatorio_aprovisionamento_toros.necessidades_por_artigo()
-    texto = relatorio_aprovisionamento_toros._gerar_texto(dados)
-    basecamp.editar_mensagem_mural(alvo["url"], mensagem=texto, projeto=relatorio_aprovisionamento_toros.PROJETO)
-    return {"ok": True, "post": alvo["app_url"], "linhas": dados["linhas"]}
-
-
 @app.post("/basecamp/webhooks/registar")
 def registar_webhooks_basecamp():
     """Cria (de forma idempotente) um webhook de comentários/tarefas/cards em
