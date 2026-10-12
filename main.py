@@ -1071,6 +1071,16 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.post("/_debug-terminar-pausa-automatica")
+def _debug_terminar_pausa_automatica():
+    """Ação pontual pedida pelo Rui (2026-10-12): terminar já a pausa
+    automática ativa (id 2, "Duarte não trabalha — sem logística esta
+    semana", 2026-10-09 a 2026-10-13) que estava a bloquear também a
+    mensagem diária nos dois Murais, não só os avisos de logística."""
+    import db as db_mod
+    from datetime import date as date_mod
+    return db_mod.terminar_pausa_automatica(date_mod.today())
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
