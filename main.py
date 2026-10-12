@@ -1081,6 +1081,12 @@ def _debug_terminar_pausa_automatica():
     from datetime import date as date_mod
     return db_mod.terminar_pausa_automatica(date_mod.today())
 
+@app.get("/_debug-mural-recente/{projeto}")
+def _debug_mural_recente(projeto: str):
+    """Verificação (Rui, 2026-10-12): só uma das duas mensagens diárias
+    publicou depois de terminar a pausa — ver qual falta."""
+    return basecamp.listar_mural(projeto, limite=3)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
