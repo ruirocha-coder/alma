@@ -1071,6 +1071,13 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.get("/_debug-mural-recente/{projeto}")
+def _debug_mural_recente(projeto: str):
+    """Verificação (Rui, 2026-10-12): confirmar se as mensagens diárias
+    disparadas manualmente (depois de perdidas pelos deploys desta manhã,
+    em cima da hora de 9h/9h10) chegaram mesmo a publicar-se."""
+    return basecamp.listar_mural(projeto, limite=3)
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
