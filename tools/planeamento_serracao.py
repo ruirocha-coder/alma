@@ -1496,6 +1496,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 
   <div class="nav">
     <div class="seg" id="seg">
+      <button data-m="dia">Dia</button>
       <button data-m="semana">Semana</button>
       <button data-m="duas">Duas semanas</button>
       <button data-m="mes">Mês</button>
@@ -1911,6 +1912,13 @@ function setMode(m){
   if(m==="semana"||m==="duas"){
     view.len = m==="semana"?7:14;
     view.start = clamp(segundaDe(anchor), INICIO_MIN_SEMANA, Math.max(MASTER.length-view.len,0));
+  }else if(m==="dia"){
+    // pedido explícito do Rui (2026-10-12): vista diária, a par da semanal
+    // (que continua a ser a vista normal/por omissão, ver `view` inicial)
+    // — um único dia, sem alinhamento a segunda-feira (não faz sentido
+    // para um só dia).
+    view.len = 1;
+    view.start = clamp(anchor, 0, MASTER.length-1);
   }else{
     const d=MASTER[clamp(anchor,0,MASTER.length-1)];
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
@@ -1927,6 +1935,10 @@ function step(dir){
     const d=MASTER[i];
     view.start=MASTER.findIndex(x=>x.mo===d.mo && x.y===d.y);
     view.len=MASTER.filter(x=>x.mo===d.mo && x.y===d.y).length;
+  }else if(view.mode==="dia"){
+    // pedido explícito do Rui (2026-10-12): na vista diária, as setas
+    // avançam/recuam um único dia de cada vez.
+    view.start=clamp(view.start+dir,0,Math.max(MASTER.length-view.len,0));
   }else{
     // pedido explícito do Rui (2026-10-04): as setas avançam/recuam
     // sempre uma semana de cada vez (7 dias), mesmo em "Duas semanas" —
@@ -1945,6 +1957,7 @@ function rangeLabel(){
   const a=MASTER[view.start], b=MASTER[Math.min(view.start+view.len-1,MASTER.length-1)];
   if(!a||!b) return "";
   if(view.mode==="mes") return MES[a.mo][0].toUpperCase()+MES[a.mo].slice(1)+" "+a.y;
+  if(view.mode==="dia") return `${DOW[a.dow]}, ${a.dd} ${MESC[a.mo]}`;
   if(a.mo===b.mo) return `${a.dd}–${b.dd} ${MESC[a.mo]}`;
   return `${a.dd} ${MESC[a.mo]} – ${b.dd} ${MESC[b.mo]}`;
 }
@@ -1954,6 +1967,7 @@ function metrics(){
   const avail=$("#scroll").clientWidth||600;
   if(view.mode==="mes"){ DAY=44; LANE=64; }
   else if(view.mode==="duas"){ DAY=Math.max(72,Math.floor(avail/14)); LANE=78; }
+  else if(view.mode==="dia"){ DAY=Math.min(Math.max(140,avail),320); LANE=78; }
   else { DAY=Math.max(84,Math.floor(avail/7)); LANE=78; }
   document.documentElement.style.setProperty("--day",DAY+"px");
   document.documentElement.style.setProperty("--lane",LANE+"px");
