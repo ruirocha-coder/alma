@@ -1078,6 +1078,26 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.post("/_debug-corrigir-aprovisionamento-toros")
+def _debug_corrigir_aprovisionamento_toros():
+    """Ação pontual pedida pelo Rui (2026-10-12): o post de Aprovisionamento
+    de Toros já publicado hoje foi feito antes da correção que limita o
+    relatório à semana que está a começar — encontra esse post de hoje no
+    Mural da Ecos Largos e substitui o conteúdo pelo já corrigido, em vez
+    de publicar um duplicado."""
+    import datetime as dt
+    posts = basecamp.listar_mural(relatorio_aprovisionamento_toros.PROJETO, limite=5)
+    hoje = dt.date.today().isoformat()
+    alvo = next((p for p in posts if p["assunto"] == relatorio_aprovisionamento_toros.ASSUNTO
+                and (p["criado_em"] or "").startswith(hoje)), None)
+    if not alvo:
+        return {"erro": "não encontrei nenhum post de Aprovisionamento de Toros publicado hoje",
+               "posts_recentes": posts}
+    dados = relatorio_aprovisionamento_toros.necessidades_por_artigo()
+    texto = relatorio_aprovisionamento_toros._gerar_texto(dados)
+    basecamp.editar_mensagem_mural(alvo["url"], mensagem=texto, projeto=relatorio_aprovisionamento_toros.PROJETO)
+    return {"ok": True, "post_corrigido": alvo["app_url"], "linhas": len(dados["linhas"])}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
