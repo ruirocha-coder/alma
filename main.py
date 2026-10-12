@@ -1095,6 +1095,28 @@ def _debug_talao_parkin(talao: str):
             depletions = cur.fetchall()
     return {"entrada": entrada, "depletions": depletions}
 
+@app.get("/_debug-correcao-parkin/{correcao_id}")
+def _debug_correcao_parkin(correcao_id: int):
+    """Investigação (Rui, 2026-10-12): que talões/lotes concretos esta
+    correção esgotou, para perceber a extensão real do ajuste de
+    inventário (ver _debug_talao_parkin)."""
+    import db as db_mod
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM parkin_correcoes WHERE id = %s", (correcao_id,))
+            correcao = cur.fetchone()
+            cur.execute(
+                """SELECT d.quantidade_kg, e.id AS entrada_id, e.talao, e.fornecedor, e.data,
+                          e.peso_liquido_kg, e.saldo_kg
+                   FROM parkin_depletions d JOIN parkin_entradas e ON e.id = d.entrada_id
+                   WHERE d.correcao_id = %s ORDER BY e.data ASC, e.id ASC""",
+                (correcao_id,)
+            )
+            lotes = cur.fetchall()
+    if not correcao:
+        return {"erro": f"sem correção com id {correcao_id}"}
+    return {"correcao": correcao, "total_lotes_afetados": len(lotes), "lotes": lotes}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
