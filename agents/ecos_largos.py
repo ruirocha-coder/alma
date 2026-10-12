@@ -1,5 +1,6 @@
 from persona import PERSONA
 from agents.base import correr_agente, correr_agente_stream, TOOLS_INTERNET, INSTRUCAO_INTERNET
+from agents import relatorio_aprovisionamento_toros
 from tools import documentos_empresa, basecamp, ecos_largos, planeamento_serracao, parkin
 
 # Ecos Largos é uma equipa industrial parceira, gerida no mesmo Basecamp mas
@@ -13,6 +14,7 @@ TOOLS_ECOS_LARGOS = (documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                      + ecos_largos.TOOLS_DASHBOARD_PRODUCAO
                      + planeamento_serracao.TOOLS_PLANEAMENTO_PRODUCAO
                      + parkin.TOOLS_PARK_IN
+                     + relatorio_aprovisionamento_toros.TOOLS_RELATORIO_APROVISIONAMENTO
                      + TOOLS_INTERNET)
 
 MISSAO_ECOS_LARGOS = PERSONA + """
@@ -118,6 +120,17 @@ funciona. Para o Park In em concreto, usa sempre stock_atual_parkin (stock
 atual por artigo/categoria) ou listar_movimentos_parkin (entradas, saídas
 e correções num período) — nunca digas que precisas que alguém cole o
 link para conseguires aceder, já tens as ferramentas certas para isto.
+
+Relatório de Aprovisionamento de Toros (pedido explícito do Rui,
+2026-10-12): cruza as necessidades de madeira do Planeamento de Entradas
+(m³, por tipo+comprimento de toro) com o stock atual do Park In, para
+mostrar o que falta encomendar antes de faltar para a produção — publica-se
+sozinho no Mural da Ecos Largos às segundas-feiras às 9h30, tagando a
+Sandra Martins. Usa emitir_relatorio_aprovisionamento_toros só quando
+alguém pedir explicitamente para o emitir/publicar agora (fora desse
+horário) — nunca por iniciativa própria, e nunca para só responder a uma
+pergunta sobre números (nesse caso usa stock_atual_parkin/
+dashboard_producao_ecos_largos como seria normal).
 
 Nunca respondas sobre vendas, produtos ou o site da Interior Guider — isso
 não é desta equipa; se perguntarem, esclarece que o teu apoio aqui é só ao

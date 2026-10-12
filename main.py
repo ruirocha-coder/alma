@@ -20,7 +20,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     sugestao_logistica_semanal, estimativa_montagem,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
-                    verificar_portais_projeto)
+                    verificar_portais_projeto, relatorio_aprovisionamento_toros)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
 from db import inicializar_schema
 inicializar_schema()
@@ -37,6 +37,13 @@ scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal, "cron", day_of_
 # mesmo dia mas a horas diferentes para não publicarem os dois em simultâneo
 scheduler.add_job(resumo_semanal_basecamp.correr_resumo_semanal_ecos_largos, "cron",
                   day_of_week="mon", hour=9, minute=15)
+# relatório de Aprovisionamento de Toros (Mural da Ecos Largos), dirigido à
+# Sandra Martins — pedido explícito do Rui (2026-10-12): segundas-feiras às
+# 9h30, depois dos outros resumos semanais das 9h/9h15 para não publicarem
+# em simultâneo. Pode também ser disparado por solicitação (ver
+# POST /ecos-largos/relatorio-aprovisionamento-toros).
+scheduler.add_job(relatorio_aprovisionamento_toros.correr_relatorio_aprovisionamento_toros, "cron",
+                  day_of_week="mon", hour=9, minute=30)
 # análise diária do dashboard de produção, no Mural da Ecos Largos: às 19h, de segunda a sábado (não há produção aos domingos)
 scheduler.add_job(resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, "cron",
                   day_of_week="mon-sat", hour=19, minute=0)
@@ -1275,6 +1282,16 @@ def mensagem_diaria_motivacional_ecos_largos_agora():
     plano — publica de verdade, tal como a corrida agendada das 9h10 (sem modo de simulação)."""
     threading.Thread(
         target=mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diaria_motivacional_ecos_largos,
+        daemon=True).start()
+    return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
+
+@app.post("/ecos-largos/relatorio-aprovisionamento-toros")
+def relatorio_aprovisionamento_toros_agora():
+    """Dispara já o relatório de Aprovisionamento de Toros, no Mural da Ecos Largos, em segundo
+    plano — publica de verdade, tal como a corrida agendada de segunda às 9h30 (pedido explícito
+    do Rui, 2026-10-12: "emitido às segundas ou por solicitação")."""
+    threading.Thread(
+        target=relatorio_aprovisionamento_toros.correr_relatorio_aprovisionamento_toros,
         daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
