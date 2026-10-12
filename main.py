@@ -946,10 +946,10 @@ def park_in_pagina():
     return HTMLResponse(parkin.pagina_park_in())
 
 @app.get("/park-in/dados")
-def park_in_dados(dias_top_entradas: int = 30):
-    """Dados do dashboard: stock total, stock por artigo, top qualidade e
-    top entradas — ver tools/parkin.dados_dashboard."""
-    return parkin.dados_dashboard(dias_top_entradas)
+def park_in_dados(dias_top_entradas: int = 30, dias_movimentos: int = 14):
+    """Dados do dashboard: stock total, stock por artigo, top qualidade,
+    top entradas e movimentos recentes — ver tools/parkin.dados_dashboard."""
+    return parkin.dados_dashboard(dias_top_entradas, dias_movimentos)
 
 @app.post("/park-in/entrada")
 async def park_in_entrada(mensagem: str = Form(""), sessao: str = Form(None),

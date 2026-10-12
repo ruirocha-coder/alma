@@ -908,12 +908,19 @@ def top_entradas(dias: int = 30, limite: int = 5) -> list[dict]:
     return linhas[:limite]
 
 
-def dados_dashboard(dias_top_entradas: int = 30) -> dict:
+def dados_dashboard(dias_top_entradas: int = 30, dias_movimentos: int = 14) -> dict:
     return {
         "stock_total": stock_total(),
         "stock_por_artigo": stock_por_artigo(),
         "top_qualidade": top_qualidade(3),
         "top_entradas": top_entradas(dias_top_entradas, 5),
+        # pedido explícito do Rui (2026-10-12): a própria página do Park In
+        # tem de mostrar os movimentos feitos (não só a Alma, por chat, ver
+        # listar_movimentos) — sempre que uma saída/entrada/correção é
+        # guardada, a lista recarrega (ver carregar() no template) e o
+        # movimento aparece logo aqui, para ficar demonstrado que ficou
+        # mesmo guardado.
+        "movimentos": listar_movimentos(dias_movimentos),
     }
 
 
@@ -1198,6 +1205,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div id="stockArtigo"></div>
   </div>
 
+  <div class="board" style="margin-bottom:16px">
+    <h2>Movimentos <span class="nota">últimos 14 dias</span></h2>
+    <ul class="rank" id="movimentos"></ul>
+  </div>
+
   <div class="grid">
     <div class="board">
       <h2>Top qualidade</h2>
@@ -1259,6 +1271,34 @@ async function carregar(){
   renderStockArtigo();
   renderTopQualidade();
   renderTopEntradas();
+  renderMovimentos();
+}
+
+// pedido explícito do Rui (2026-10-12): a própria página mostrar os
+// movimentos feitos — carregar() é chamado logo a seguir a cada saída/
+// entrada/correção guardada com sucesso, por isso o movimento novo
+// aparece aqui de imediato, como prova visível de que ficou mesmo
+// guardado (não só uma mensagem de confirmação que pode passar
+// despercebida).
+function rotuloArtigoChave(chave){
+  if(chave === "desconhecido") return "Artigo desconhecido";
+  const [tipo, comprimento, espessura] = chave.split("|");
+  return `${tipo} · ${parseFloat(comprimento).toFixed(2)}m · ${espessura==="fina"?"Fina":"Normal"}`;
+}
+const ROTULOS_MOVIMENTO = {entrada:"Entrada", saida:"Saída", correcao:"Correção"};
+function renderMovimentos(){
+  const el = $("#movimentos");
+  const lista = DADOS.movimentos || [];
+  if(!lista.length){ el.innerHTML = '<li class="vazio">Sem movimentos nos últimos dias</li>'; return; }
+  el.innerHTML = lista.map(m => {
+    const positivo = m.quantidade_kg > 0;
+    const sinal = positivo ? "+" : "−";
+    const cor = positivo ? "#2E9E4F" : "#C4452E";
+    const detalhe = m.tipo_movimento === "entrada" ? (m.fornecedor || "")
+      : m.tipo_movimento === "correcao" ? (m.motivo || "") : (m.talao ? `talão ${m.talao}` : "");
+    return `<li><span class="nome">${m.data} · ${ROTULOS_MOVIMENTO[m.tipo_movimento]||m.tipo_movimento} · ${rotuloArtigoChave(m.artigo)}${detalhe ? " · " + detalhe : ""}</span>` +
+      `<span class="val mono" style="color:${cor}">${sinal}${t(Math.abs(m.quantidade_kg))}</span></li>`;
+  }).join("");
 }
 
 function renderStockTotal(){
@@ -1484,6 +1524,11 @@ $("#bSaidaGuardar").onclick = async () => {
       res.erro ? `<div class="err">${res.ficheiro}: ${res.erro}</div>`
                : `<div class="ok">${res.ficheiro}: ${t(res.quantidade_kg)} (${res.artigo})</div>`
     ).join("");
+    // Pedido explícito do Rui (2026-10-12): limpar sempre os campos depois
+    // de guardar, nunca deixar fotos/data por preencher no formulário —
+    // voltar a clicar "Guardar" sem reparar não pode voltar a submeter os
+    // mesmos talões já processados.
+    $("#fSaidaFotos").value = ""; $("#cSaidaData").value = "";
     carregar();
   } catch(e){ $("#saidaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bSaidaGuardar").disabled = false;
@@ -1509,6 +1554,11 @@ async function guardarSaidaPorTalao(){
     else {
       const aviso = j.aviso ? `<div class="err" style="margin-top:4px">Aviso: ${j.aviso}</div>` : "";
       $("#saidaMsg").innerHTML = `<div class="ok">Saída registada: ${t(j.quantidade_kg)} (${j.artigo}) — ${j.fornecedor}</div>${aviso}`;
+      // Pedido explícito do Rui (2026-10-12): limpar sempre os campos
+      // depois de guardar — um talão/quantidade que ficasse no formulário
+      // podia ser reenviado sem querer, duplicando o movimento.
+      $("#cSaidaTalao").value = ""; $("#cSaidaQtd").value = ""; $("#cSaidaData").value = "";
+      $("#saidaTalaoInfo").innerHTML = ""; $("#cSaidaQtd").placeholder = "deixa vazio para sair o lote todo";
       carregar();
     }
   } catch(e){ $("#saidaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
@@ -1559,6 +1609,12 @@ $("#bCorrecaoGuardar").onclick = async () => {
         }
       }
       $("#correcaoMsg").innerHTML = `<div class="ok">Correção registada: ${sinal}${t(Math.abs(j.quantidade_kg))} — ${artigoTxt}${categoriaTxt}${detalhe}.${aviso}</div>`;
+      // Pedido explícito do Rui (2026-10-12): limpar sempre o formulário
+      // depois de guardar — uma correção que ficasse preenchida podia ser
+      // reenviada sem querer, duplicando o movimento.
+      $("#cTipo").value = "IN"; $("#cComprimento").value = ""; $("#cEspessura").value = "normal";
+      $("#cQuantidade").value = ""; $("#cCategoria").value = "Boa"; $("#cMotivo").value = "";
+      atualizarSubCategoria();
       carregar();
     }
   } catch(e){ $("#correcaoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
