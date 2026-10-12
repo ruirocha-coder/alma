@@ -1224,7 +1224,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
        dobra) e colapsáveis, fechados por omissão — a lista pode crescer
        bastante (14 dias de entradas/saídas/correções), e a maior parte
        das visitas à página nem precisa de a ver. -->
-  <div class="board" style="margin-bottom:16px">
+  <div class="board" style="margin-top:16px;margin-bottom:16px">
     <h2 id="movimentosToggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">
       <span id="movimentosSeta">▸</span> Movimentos <span class="nota">últimos 14 dias</span>
     </h2>
