@@ -1071,6 +1071,30 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
+@app.get("/_debug-talao-parkin/{talao}")
+def _debug_talao_parkin(talao: str):
+    """Investigação (Rui, 2026-10-12): saída bloqueada com "lote já
+    esgotado" para o talão 11302 e outros — confirmar se o saldo 0 é real
+    (já foi mesmo consumido, por saída ou correção) ou um bug."""
+    import db as db_mod
+    entrada = db_mod.entrada_parkin_por_talao(talao)
+    if not entrada:
+        return {"erro": f"sem entrada com talão {talao!r}"}
+    with db_mod.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT d.id, d.quantidade_kg, d.saida_id, d.correcao_id,
+                          s.data AS saida_data, s.talao AS saida_talao,
+                          c.data AS correcao_data, c.motivo AS correcao_motivo, c.quantidade_kg AS correcao_total
+                   FROM parkin_depletions d
+                   LEFT JOIN parkin_saidas s ON s.id = d.saida_id
+                   LEFT JOIN parkin_correcoes c ON c.id = d.correcao_id
+                   WHERE d.entrada_id = %s ORDER BY d.id""",
+                (entrada["id"],)
+            )
+            depletions = cur.fetchall()
+    return {"entrada": entrada, "depletions": depletions}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
