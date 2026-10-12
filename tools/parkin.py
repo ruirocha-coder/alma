@@ -648,19 +648,35 @@ def registar_saida_por_talao(talao: str, quantidade_kg: float = None, data_saida
     if not entrada:
         return {"erro": f"não encontrei nenhuma entrada no Park In com o talão {talao!r}"}
 
+    # Pedido explícito do Rui (2026-10-12), período transitório enquanto o
+    # stock não está normalizado (ver a correção -245.100 kg de
+    # 2026-10-09, que esgotou vários lotes por FIFO): um lote já esgotado
+    # (ou sem saldo suficiente) já não bloqueia a saída — avisa que o
+    # talão parece já ter saído (duplicado) ou não ter saldo que chegue,
+    # mas deixa sempre sair a quantidade pedida à mão, mesmo que o stock
+    # deste lote fique negativo. Nunca deve ficar assim para sempre: isto
+    # é só para o período curto até normalizarem o stock.
     saldo = float(entrada["saldo_kg"] or 0)
+    aviso = None
     if saldo <= 1e-6:
-        return {"erro": f"o lote do talão {talao} já está esgotado (saldo 0 kg)"}
-
-    if quantidade_kg is None:
-        quantidade = saldo
-    else:
+        if quantidade_kg is None:
+            return {"erro": (f"o lote do talão {talao} já está esgotado (saldo 0 kg) — "
+                             f"indica a quantidade a retirar à mão")}
         quantidade = float(quantidade_kg)
         if quantidade <= 0:
             return {"erro": "a quantidade tem de ser maior que zero"}
-        if quantidade > saldo + 1e-6:
-            return {"erro": (f"o lote do talão {talao} só tem {saldo:.0f} kg de saldo "
-                             f"— não é possível tirar {quantidade:.0f} kg")}
+        aviso = (f"o lote do talão {talao} já está esgotado (saldo 0 kg) — provavelmente duplicado, "
+                 f"já tinha saído antes. A sair mesmo assim, o stock deste lote fica negativo.")
+    else:
+        if quantidade_kg is None:
+            quantidade = saldo
+        else:
+            quantidade = float(quantidade_kg)
+            if quantidade <= 0:
+                return {"erro": "a quantidade tem de ser maior que zero"}
+            if quantidade > saldo + 1e-6:
+                aviso = (f"o lote do talão {talao} só tinha {saldo:.0f} kg de saldo — a sair {quantidade:.0f} kg "
+                         f"mesmo assim, o stock deste lote fica negativo.")
 
     if data_saida:
         try:
@@ -673,11 +689,14 @@ def registar_saida_por_talao(talao: str, quantidade_kg: float = None, data_saida
                                        quantidade, data_resolvida, talao=talao, registado_por=registado_por)
     db.descontar_saldo_entrada_parkin(entrada["id"], quantidade)
     db.guardar_depletion_parkin(entrada["id"], quantidade, saida_id=saida_id)
-    return {"ok": True, "id": saida_id,
-           "artigo": _chave_artigo(entrada["tipo"], entrada["comprimento"], entrada["espessura"]),
-           "quantidade_kg": round(quantidade, 1), "fornecedor": entrada["fornecedor"],
-           "depletadas": [{"entrada_id": entrada["id"], "talao": entrada["talao"],
-                           "quantidade_kg": round(quantidade, 1)}]}
+    resultado = {"ok": True, "id": saida_id,
+                "artigo": _chave_artigo(entrada["tipo"], entrada["comprimento"], entrada["espessura"]),
+                "quantidade_kg": round(quantidade, 1), "fornecedor": entrada["fornecedor"],
+                "depletadas": [{"entrada_id": entrada["id"], "talao": entrada["talao"],
+                               "quantidade_kg": round(quantidade, 1)}]}
+    if aviso:
+        resultado["aviso"] = aviso
+    return resultado
 
 
 def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_kg: float, motivo: str,
@@ -1365,9 +1384,14 @@ $("#cSaidaTalao").addEventListener("input", () => {
       const r = await fetch("/park-in/entrada-por-talao?talao=" + encodeURIComponent(talao));
       const j = await r.json();
       if(j.erro){ $("#saidaTalaoInfo").innerHTML = `<span class="err">${j.erro}</span>`; return; }
+      const esgotado = j.saldo_kg <= 0;
       $("#saidaTalaoInfo").innerHTML =
-        `${j.fornecedor} · ${rotuloArtigo(j)} · saldo atual: ${t(j.saldo_kg)}`;
-      $("#cSaidaQtd").placeholder = `deixa vazio para sair o lote todo (${t(j.saldo_kg)})`;
+        `${j.fornecedor} · ${rotuloArtigo(j)} · saldo atual: ${t(j.saldo_kg)}`
+        + (esgotado ? ` <span class="err">— lote já esgotado (possível duplicado, já tinha saído) — `
+          + `indica a quantidade à mão para sair mesmo assim</span>` : "");
+      $("#cSaidaQtd").placeholder = esgotado
+        ? "indica a quantidade (kg) — lote já esgotado"
+        : `deixa vazio para sair o lote todo (${t(j.saldo_kg)})`;
     } catch(e){ $("#saidaTalaoInfo").innerHTML = `<span class="err">Falhou: ${e}</span>`; }
   }, 400);
 });
@@ -1482,7 +1506,11 @@ async function guardarSaidaPorTalao(){
     const r = await fetch("/park-in/saida-por-talao", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(corpo)});
     const j = await r.json();
     if(j.erro){ $("#saidaMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
-    else { $("#saidaMsg").innerHTML = `<div class="ok">Saída registada: ${t(j.quantidade_kg)} (${j.artigo}) — ${j.fornecedor}</div>`; carregar(); }
+    else {
+      const aviso = j.aviso ? `<div class="err" style="margin-top:4px">Aviso: ${j.aviso}</div>` : "";
+      $("#saidaMsg").innerHTML = `<div class="ok">Saída registada: ${t(j.quantidade_kg)} (${j.artigo}) — ${j.fornecedor}</div>${aviso}`;
+      carregar();
+    }
   } catch(e){ $("#saidaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bSaidaGuardar").disabled = false;
 }
