@@ -1205,11 +1205,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div id="stockArtigo"></div>
   </div>
 
-  <div class="board" style="margin-bottom:16px">
-    <h2>Movimentos <span class="nota">últimos 14 dias</span></h2>
-    <ul class="rank" id="movimentos"></ul>
-  </div>
-
   <div class="grid">
     <div class="board">
       <h2>Top qualidade</h2>
@@ -1221,6 +1216,22 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="board">
       <h2>Top entradas <span class="nota">últimos 30 dias</span></h2>
       <ul class="rank" id="topEntradas"></ul>
+    </div>
+  </div>
+
+  <!-- Pedido explícito do Rui (2026-10-12): os movimentos ficam no fim da
+       página (não competem com stock/top boards pelo espaço acima da
+       dobra) e colapsáveis, fechados por omissão — a lista pode crescer
+       bastante (14 dias de entradas/saídas/correções), e a maior parte
+       das visitas à página nem precisa de a ver. -->
+  <div class="board" style="margin-bottom:16px">
+    <h2 id="movimentosToggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">
+      <span id="movimentosSeta">▸</span> Movimentos <span class="nota">últimos 14 dias</span>
+    </h2>
+    <div id="movimentosCorpo" style="display:none">
+      <input type="search" id="movimentosBusca" placeholder="Pesquisar movimentos… (talão, fornecedor, motivo, artigo)"
+        style="width:100%;margin:8px 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit">
+      <ul class="rank" id="movimentos"></ul>
     </div>
   </div>
 </div>
@@ -1286,15 +1297,40 @@ function rotuloArtigoChave(chave){
   return `${tipo} · ${parseFloat(comprimento).toFixed(2)}m · ${espessura==="fina"?"Fina":"Normal"}`;
 }
 const ROTULOS_MOVIMENTO = {entrada:"Entrada", saida:"Saída", correcao:"Correção"};
+// Pedido explícito do Rui (2026-10-12): colapsável (fechado por omissão,
+// para não ocupar tanto espaço na página) e pesquisável.
+let movimentosAbertos = false;
+let movimentosFiltro = "";
+function toggleMovimentos(){
+  movimentosAbertos = !movimentosAbertos;
+  $("#movimentosCorpo").style.display = movimentosAbertos ? "" : "none";
+  $("#movimentosSeta").textContent = movimentosAbertos ? "▾" : "▸";
+}
+$("#movimentosToggle").onclick = toggleMovimentos;
+$("#movimentosBusca").addEventListener("input", () => {
+  movimentosFiltro = $("#movimentosBusca").value.trim().toLowerCase();
+  renderMovimentos();
+});
 function renderMovimentos(){
   const el = $("#movimentos");
-  const lista = DADOS.movimentos || [];
-  if(!lista.length){ el.innerHTML = '<li class="vazio">Sem movimentos nos últimos dias</li>'; return; }
+  let lista = DADOS.movimentos || [];
+  if(movimentosFiltro){
+    lista = lista.filter(m => [
+      m.data, ROTULOS_MOVIMENTO[m.tipo_movimento] || m.tipo_movimento, rotuloArtigoChave(m.artigo),
+      m.fornecedor, m.motivo, m.talao
+    ].filter(Boolean).join(" ").toLowerCase().includes(movimentosFiltro));
+  }
+  if(!lista.length){
+    el.innerHTML = movimentosFiltro
+      ? '<li class="vazio">Sem movimentos que correspondam à pesquisa</li>'
+      : '<li class="vazio">Sem movimentos nos últimos dias</li>';
+    return;
+  }
   el.innerHTML = lista.map(m => {
     const positivo = m.quantidade_kg > 0;
     const sinal = positivo ? "+" : "−";
     const cor = positivo ? "#2E9E4F" : "#C4452E";
-    const detalhe = m.tipo_movimento === "entrada" ? (m.fornecedor || "")
+    const detalhe = m.tipo_movimento === "entrada" ? [m.fornecedor, m.talao ? `talão ${m.talao}` : null].filter(Boolean).join(" · ")
       : m.tipo_movimento === "correcao" ? (m.motivo || "") : (m.talao ? `talão ${m.talao}` : "");
     return `<li><span class="nome">${m.data} · ${ROTULOS_MOVIMENTO[m.tipo_movimento]||m.tipo_movimento} · ${rotuloArtigoChave(m.artigo)}${detalhe ? " · " + detalhe : ""}</span>` +
       `<span class="val mono" style="color:${cor}">${sinal}${t(Math.abs(m.quantidade_kg))}</span></li>`;
