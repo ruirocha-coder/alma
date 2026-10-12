@@ -159,20 +159,18 @@ def _gerar_texto(dados: dict) -> str:
                       "entrada prevista neste período tem ainda Tipo e Comprimento de toro preenchidos "
                       "no Planeamento de Entradas.")
     else:
-        faltam = [l for l in linhas if l["falta_m3"] > 0.05]
-        cobertas = [l for l in linhas if l["falta_m3"] <= 0.05]
-        if faltam:
-            partes.append("\nPor encomendar:")
-            for l in faltam:
-                partes.append(f"- {l['tipo']} · {l['comprimento_m']:.2f}m — necessário {_m3(l['necessidade_m3'])}, "
-                             f"em stock {_m3(l['stock_m3'])}, falta {_m3(l['falta_m3'])}")
-        else:
-            partes.append("\nTudo coberto pelo stock atual — sem necessidade de encomendar mais toros.")
-        if cobertas:
-            partes.append("\nJá cobertas pelo stock atual:")
-            for l in cobertas:
-                partes.append(f"- {l['tipo']} · {l['comprimento_m']:.2f}m — necessário {_m3(l['necessidade_m3'])}, "
-                             f"em stock {_m3(l['stock_m3'])}")
+        # Pedido explícito do Rui (2026-10-12): "quero que saia em tabela" —
+        # ver tools/basecamp._markdown_para_basecamp (suporta tabelas em
+        # Markdown, mesmo formato já usado em agents/sugestao_logistica_
+        # semanal.py), converte este bloco "| ... |" num <table> a sério no
+        # Mural, não só texto com barras verticais.
+        partes.append("")
+        partes.append("| Artigo | Necessário | Stock atual | Falta encomendar |")
+        partes.append("|---|---|---|---|")
+        for l in linhas:
+            artigo = f"{l['tipo']} · {l['comprimento_m']:.2f}m"
+            falta = f"**{_m3(l['falta_m3'])}**" if l["falta_m3"] > 0.05 else "Coberto"
+            partes.append(f"| {artigo} | {_m3(l['necessidade_m3'])} | {_m3(l['stock_m3'])} | {falta} |")
 
     if sem_info:
         partes.append("\nOFs desta semana com necessidade de toros mas ainda sem Tipo/Comprimento "
