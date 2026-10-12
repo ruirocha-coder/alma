@@ -1071,52 +1071,6 @@ def park_in_importar_historico():
     chat, sem passar pelo botão Entrada."""
     return parkin.importar_historico_avaliacoes()
 
-@app.get("/_debug-talao-parkin/{talao}")
-def _debug_talao_parkin(talao: str):
-    """Investigação (Rui, 2026-10-12): saída bloqueada com "lote já
-    esgotado" para o talão 11302 e outros — confirmar se o saldo 0 é real
-    (já foi mesmo consumido, por saída ou correção) ou um bug."""
-    import db as db_mod
-    entrada = db_mod.entrada_parkin_por_talao(talao)
-    if not entrada:
-        return {"erro": f"sem entrada com talão {talao!r}"}
-    with db_mod.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT d.id, d.quantidade_kg, d.saida_id, d.correcao_id,
-                          s.data AS saida_data, s.talao AS saida_talao,
-                          c.data AS correcao_data, c.motivo AS correcao_motivo, c.quantidade_kg AS correcao_total
-                   FROM parkin_depletions d
-                   LEFT JOIN parkin_saidas s ON s.id = d.saida_id
-                   LEFT JOIN parkin_correcoes c ON c.id = d.correcao_id
-                   WHERE d.entrada_id = %s ORDER BY d.id""",
-                (entrada["id"],)
-            )
-            depletions = cur.fetchall()
-    return {"entrada": entrada, "depletions": depletions}
-
-@app.get("/_debug-correcao-parkin/{correcao_id}")
-def _debug_correcao_parkin(correcao_id: int):
-    """Investigação (Rui, 2026-10-12): que talões/lotes concretos esta
-    correção esgotou, para perceber a extensão real do ajuste de
-    inventário (ver _debug_talao_parkin)."""
-    import db as db_mod
-    with db_mod.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM parkin_correcoes WHERE id = %s", (correcao_id,))
-            correcao = cur.fetchone()
-            cur.execute(
-                """SELECT d.quantidade_kg, e.id AS entrada_id, e.talao, e.fornecedor, e.data,
-                          e.peso_liquido_kg, e.saldo_kg
-                   FROM parkin_depletions d JOIN parkin_entradas e ON e.id = d.entrada_id
-                   WHERE d.correcao_id = %s ORDER BY e.data ASC, e.id ASC""",
-                (correcao_id,)
-            )
-            lotes = cur.fetchall()
-    if not correcao:
-        return {"erro": f"sem correção com id {correcao_id}"}
-    return {"correcao": correcao, "total_lotes_afetados": len(lotes), "lotes": lotes}
-
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
