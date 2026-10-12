@@ -1078,6 +1078,28 @@ def _debug_mural_recente(projeto: str):
     em cima da hora de 9h/9h10) chegaram mesmo a publicar-se."""
     return basecamp.listar_mural(projeto, limite=3)
 
+@app.get("/_debug-mensagem-diaria-sync")
+def _debug_mensagem_diaria_sync():
+    """Investigação (Rui, 2026-10-12): re-disparar as mensagens diárias de
+    manhã não as fez aparecer no Mural mesmo sem mais deploys pelo meio —
+    corre a MESMA lógica de forma síncrona (sem o try/except que engole o
+    erro, nem a thread em 2º plano) para o erro real aparecer na resposta."""
+    import db as db_mod
+    import traceback
+    from datetime import date as date_mod
+    pausa = db_mod.pausa_automatica_ativa(date_mod.today())
+    if pausa:
+        return {"pausa_ativa": pausa}
+    from agents import mensagem_motivacional_diaria as m
+    try:
+        analise = m._analisar_projetos()
+        contexto = m._contexto_do_dia()
+        recentes = m._mensagens_recentes()
+        texto = m._gerar_mensagem(analise, contexto, recentes)
+        return {"pausa_ativa": None, "texto_gerado": texto, "publicado": False}
+    except Exception:
+        return {"pausa_ativa": None, "erro": traceback.format_exc()}
+
 @app.get("/health")
 def health():
     """Inclui o commit em produção (Railway define isto automaticamente) —
