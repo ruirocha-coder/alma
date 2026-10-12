@@ -30,20 +30,28 @@ _a_correr = threading.Lock()
 # toneladas (ver tools/parkin.py, função `t()` no template: kg/1000).
 KG_POR_M3 = 1000
 
+#  menor comprimento real de toro já visto (TORO_CMP_PRESETS vai de 2350 a
+# 3100mm) — qualquer valor bem abaixo disto é quase de certeza um erro de
+# preenchimento (ex: um diâmetro escrito no campo do comprimento por
+# engano), nunca um toro real; nunca vai corresponder a nenhum artigo do
+# Park In, por isso entra em `suspeitos` em vez de numa linha de
+# necessidade/stock que nunca bate certo.
+COMPRIMENTO_MIN_PLAUSIVEL_MM = 1000
+
 def _comprimento_m_de_toro_cmp(toro_cmp):
     """Converte o "Cmp" do toro do Planeamento de Entradas (texto, em
     milímetros — ex: "2640") para metros, para poder cruzar-se com o
     comprimento do Park In (número, em metros — ex: 2.64). Exige o texto
     TODO como só dígitos (como os TORO_CMP_PRESETS) — nunca interpreta um
     valor com qualificador de diâmetro (ex: "255 ⌀16") como um comprimento
-    simples: um valor assim não corresponde a nenhum artigo real do Park
-    In (seria lido como 0,26m, um comprimento que não existe), por isso
-    None aqui faz esta OF cair em `sem_info` em vez de entrar errado numa
-    linha de necessidade/stock que nunca vai bater certo."""
+    simples. None sempre que não for um comprimento plausível de toro (ver
+    COMPRIMENTO_MIN_PLAUSIVEL_MM) — faz essa OF cair em `suspeitos` em vez
+    de entrar errado numa linha de necessidade/stock que nunca vai bater
+    certo."""
     if not toro_cmp:
         return None
     texto = str(toro_cmp).strip()
-    if not texto.isdigit():
+    if not texto.isdigit() or int(texto) < COMPRIMENTO_MIN_PLAUSIVEL_MM:
         return None
     return round(int(texto) / 1000, 2)
 
@@ -56,11 +64,18 @@ def necessidades_por_artigo() -> dict:
     distingue espessura). `falta_m3` positivo = por encomendar; zero ou
     negativo = já coberto pelo stock atual.
 
-    Devolve também `sem_info`: títulos das OFs com necessidade de toros
-    (`qtd_toros_m3` já calculado a partir do volume) mas sem Tipo e/ou Cmp
-    de toro ainda preenchidos — pedido explícito do Rui: "algumas ainda não
-    estão preenchidas, mas vão ser tratadas agora", para o relatório
-    lembrar quais faltam."""
+    Devolve também:
+    - `sem_info`: títulos das OFs com necessidade de toros (`qtd_toros_m3`
+      já calculado a partir do volume) mas sem Tipo e/ou Cmp de toro ainda
+      preenchidos — pedido explícito do Rui: "algumas ainda não estão
+      preenchidas, mas vão ser tratadas agora", para o relatório lembrar
+      quais faltam.
+    - `suspeitos`: títulos das OFs com Tipo e Cmp PREENCHIDOS mas cujo Cmp
+      não é um comprimento plausível de toro (ver
+      COMPRIMENTO_MIN_PLAUSIVEL_MM — ex: um diâmetro escrito por engano no
+      campo do comprimento) — ficam de fora das contas (não entram em
+      nenhuma linha de necessidade/stock), mas são um erro de preenchimento
+      a corrigir, não uma falta de informação como `sem_info`."""
     entradas = pe.estado_planeamento_entradas()["entradas"]
     stock = parkin.stock_por_artigo()
 
@@ -73,6 +88,7 @@ def necessidades_por_artigo() -> dict:
 
     grupos = {}
     sem_info = []
+    suspeitos = []
     for e in entradas:
         # "Produzido" (marcador manual desta página, ver tools/
         # planeamento_entradas.definir_produzido) significa que os toros
@@ -80,9 +96,12 @@ def necessidades_por_artigo() -> dict:
         if e.get("produzido") or e.get("qtd_toros_m3") is None:
             continue
         toro_tipo, toro_cmp = e.get("toro_tipo"), e.get("toro_cmp")
-        comprimento_m = _comprimento_m_de_toro_cmp(toro_cmp) if toro_cmp else None
-        if not toro_tipo or comprimento_m is None:
+        if not toro_tipo or not toro_cmp:
             sem_info.append(e["titulo"])
+            continue
+        comprimento_m = _comprimento_m_de_toro_cmp(toro_cmp)
+        if comprimento_m is None:
+            suspeitos.append({"titulo": e["titulo"], "toro_cmp": toro_cmp})
             continue
         chave = (toro_tipo, comprimento_m)
         g = grupos.setdefault(chave, {"tipo": toro_tipo, "comprimento_m": comprimento_m, "necessidade_m3": 0.0})
@@ -98,13 +117,13 @@ def necessidades_por_artigo() -> dict:
             "falta_m3": round(g["necessidade_m3"] - stock_m3, 2),
         })
     linhas.sort(key=lambda l: -l["falta_m3"])
-    return {"linhas": linhas, "sem_info": sem_info}
+    return {"linhas": linhas, "sem_info": sem_info, "suspeitos": suspeitos}
 
 def _m3(v: float) -> str:
     return f"{v:.2f}".replace(".", ",") + " m³"
 
 def _gerar_texto(dados: dict) -> str:
-    linhas, sem_info = dados["linhas"], dados["sem_info"]
+    linhas, sem_info, suspeitos = dados["linhas"], dados["sem_info"], dados["suspeitos"]
     partes = [f"{PESSOA_APROVISIONAMENTO}, segue o ponto de aprovisionamento de toros de hoje."]
 
     if not linhas:
@@ -131,6 +150,12 @@ def _gerar_texto(dados: dict) -> str:
                       "Planeamento de Entradas (por isso fora das contas acima):")
         for titulo in sem_info:
             partes.append(f"- {titulo}")
+
+    if suspeitos:
+        partes.append("\nOFs com um Cmp de toro preenchido mas que não parece um comprimento real "
+                      "(por confirmar/corrigir no Planeamento de Entradas — também fora das contas acima):")
+        for s in suspeitos:
+            partes.append(f"- {s['titulo']} (Cmp: {s['toro_cmp']!r})")
 
     partes.append("\n(stock e necessidades lidos em direto do Park In e do Planeamento de Entradas — "
                   "podem mudar a qualquer momento)")
@@ -172,4 +197,4 @@ def emitir_agora() -> dict:
     texto = _gerar_texto(dados)
     basecamp.publicar_mural(ASSUNTO, texto, projeto=PROJETO)
     return {"ok": True, "publicado_em": "Mural Ecos Largos", "artigos_com_necessidade": len(dados["linhas"]),
-           "ofs_sem_toro_definido": len(dados["sem_info"])}
+           "ofs_sem_toro_definido": len(dados["sem_info"]), "ofs_com_cmp_suspeito": len(dados["suspeitos"])}
