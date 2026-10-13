@@ -22,7 +22,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
                     verificar_portais_projeto, relatorio_aprovisionamento_toros)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
-from db import inicializar_schema, get_conn
+from db import inicializar_schema, get_conn, corrigir_pesagem_entrada_parkin
 inicializar_schema()
 parkin.garantir_perfil_chat_parkin()
 
@@ -1042,6 +1042,16 @@ def _debug_entrada_parkin_completa(talao: str):
                 )
                 depletions = cur.fetchall()
     return {"entradas": entradas, "depletions": depletions}
+
+@app.post("/_debug-corrigir-pesagem-parkin")
+def _debug_corrigir_pesagem_parkin(corpo: dict = Body(...)):
+    """Temporário: corrige peso bruto/tara/líquido (e opcionalmente
+    matrícula/guia) de uma entrada do Park In mal lida — ver
+    db.corrigir_pesagem_entrada_parkin."""
+    corrigir_pesagem_entrada_parkin(
+        int(corpo["entrada_id"]), float(corpo["peso_bruto_kg"]), float(corpo["tara_kg"]),
+        float(corpo["peso_liquido_kg"]), matricula=corpo.get("matricula"), guia_req=corpo.get("guia_req"))
+    return {"ok": True}
 
 @app.post("/park-in/saida-por-talao")
 def park_in_saida_por_talao(corpo: dict = Body(...)):

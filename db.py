@@ -2616,6 +2616,28 @@ def corrigir_artigo_entrada_parkin(entrada_id: int, tipo: str, comprimento: floa
             )
         conn.commit()
 
+def corrigir_pesagem_entrada_parkin(entrada_id: int, peso_bruto_kg: float, tara_kg: float,
+                                    peso_liquido_kg: float, matricula: str = None, guia_req: str = None):
+    """Corrige os pesos (bruto/tara/líquido) de uma entrada já registada —
+    para um erro de leitura pontual do talão (ex: tara lida errada, que
+    desacerta o peso líquido). Ajusta `saldo_kg` pelo mesmo delta do peso
+    líquido (nunca o substitui pelo valor novo diretamente), para manter
+    certo mesmo que já tenham sido feitas saídas/correções sobre este lote
+    entretanto. `matricula`/`guia_req` são opcionais, só para corrigir esses
+    campos a par, se também vierem errados na leitura."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE parkin_entradas
+                   SET peso_bruto_kg = %s, tara_kg = %s,
+                       saldo_kg = saldo_kg + (%s - peso_liquido_kg),
+                       peso_liquido_kg = %s,
+                       matricula = COALESCE(%s, matricula), guia_req = COALESCE(%s, guia_req)
+                   WHERE id = %s""",
+                (peso_bruto_kg, tara_kg, peso_liquido_kg, peso_liquido_kg, matricula, guia_req, entrada_id)
+            )
+        conn.commit()
+
 def guardar_saida_parkin(tipo: str, comprimento: float, espessura: str, quantidade_kg: float,
                          data, talao: str = None, registado_por: str = None) -> int:
     with get_conn() as conn:
