@@ -1017,6 +1017,32 @@ def park_in_entrada_por_talao(talao: str = ""):
         return JSONResponse(resultado, status_code=404)
     return JSONResponse(resultado)
 
+@app.get("/_debug-entrada-parkin-completa")
+def _debug_entrada_parkin_completa(talao: str):
+    """Temporário: todos os campos de uma entrada do Park In (incluindo
+    peso bruto/tara, matrícula, guia) mais as depletions já feitas contra
+    ela — para investigar/corrigir um talão mal lido."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
+                          peso_bruto_kg, tara_kg, peso_liquido_kg, saldo_kg, indice_igqc, categoria_qualidade,
+                          registado_por, criado_em
+                   FROM parkin_entradas WHERE talao = %s ORDER BY id DESC""",
+                (talao,)
+            )
+            entradas = cur.fetchall()
+            ids = [e["id"] for e in entradas]
+            depletions = []
+            if ids:
+                cur.execute(
+                    """SELECT entrada_id, saida_id, correcao_id, quantidade_kg
+                       FROM parkin_depletions WHERE entrada_id = ANY(%s)""",
+                    (ids,)
+                )
+                depletions = cur.fetchall()
+    return {"entradas": entradas, "depletions": depletions}
+
 @app.post("/park-in/saida-por-talao")
 def park_in_saida_por_talao(corpo: dict = Body(...)):
     """Saída identificada só pelo nº de talão do lote de entrada — ver
