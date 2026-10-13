@@ -674,6 +674,16 @@ ALTER TABLE parkin_correcoes ALTER COLUMN tipo DROP NOT NULL;
 ALTER TABLE parkin_correcoes ALTER COLUMN comprimento DROP NOT NULL;
 ALTER TABLE parkin_correcoes ALTER COLUMN espessura DROP NOT NULL;
 
+-- Bug real (Rui, 2026-10-13): uma saída por nº de talão (ver
+-- tools/parkin.registar_saida_por_talao) herda tipo/comprimento/espessura
+-- da própria entrada identificada pelo talão — se essa entrada for
+-- "Artigo desconhecido" (NULL nas três colunas, ver ALTER acima em
+-- parkin_entradas), o INSERT em parkin_saidas falhava contra o NOT NULL
+-- original destas colunas, com um erro 500 sem tratamento nenhum.
+ALTER TABLE parkin_saidas ALTER COLUMN tipo DROP NOT NULL;
+ALTER TABLE parkin_saidas ALTER COLUMN comprimento DROP NOT NULL;
+ALTER TABLE parkin_saidas ALTER COLUMN espessura DROP NOT NULL;
+
 -- Bug real reportado pelo Rui (2026-10-08): uma correção positiva (sobra
 -- de inventário) só entrava em parkin_correcoes, nunca numa entrada —
 -- entrava na soma do "stock por artigo"/stock total do dashboard, mas
