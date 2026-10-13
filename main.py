@@ -21,7 +21,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     avisos_gestao_agendas, sincronizacao_calendario,
                     mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
                     verificar_portais_projeto, relatorio_aprovisionamento_toros)
-from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
+from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin, compras_toros
 from db import inicializar_schema
 inicializar_schema()
 parkin.garantir_perfil_chat_parkin()
@@ -1066,6 +1066,62 @@ def park_in_limites(corpo: dict = Body(...)):
     if not chave:
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
+
+@app.get("/park-in/compras-toros/dados")
+def park_in_compras_toros_dados():
+    """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
+    return compras_toros.dados_quadro()
+
+@app.post("/park-in/compras-toros/coluna")
+def park_in_compras_toros_criar_coluna(corpo: dict = Body(...)):
+    """Novo levantamento de necessidade — ver tools/compras_toros.criar_coluna."""
+    data_levantamento = corpo.get("data_levantamento")
+    if not data_levantamento:
+        return JSONResponse({"erro": "falta a data de levantamento"}, status_code=400)
+    resultado = compras_toros.criar_coluna(data_levantamento, corpo.get("utilizador"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/coluna/{coluna_id}/arquivar")
+def park_in_compras_toros_arquivar_coluna(coluna_id: int, corpo: dict = Body(default={})):
+    """Arquiva uma coluna à mão — ver tools/compras_toros.arquivar_coluna."""
+    return JSONResponse(compras_toros.arquivar_coluna(coluna_id, corpo.get("utilizador")))
+
+@app.post("/park-in/compras-toros/necessidade/{necessidade_id}")
+def park_in_compras_toros_atualizar_necessidade(necessidade_id: int, corpo: dict = Body(...)):
+    """Correção manual da necessidade proposta — ver
+    tools/compras_toros.atualizar_necessidade."""
+    try:
+        necessidade_kg = float(corpo["necessidade_kg"])
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"erro": "necessidade_kg tem de ser um número"}, status_code=400)
+    resultado = compras_toros.atualizar_necessidade(necessidade_id, necessidade_kg)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/card")
+def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
+    """Nova encomenda a um fornecedor — ver tools/compras_toros.criar_card."""
+    try:
+        coluna_id = int(corpo["coluna_id"])
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"erro": "falta coluna_id"}, status_code=400)
+    resultado = compras_toros.criar_card(coluna_id, corpo.get("fornecedor"), corpo.get("linhas") or [],
+                                         corpo.get("utilizador"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/card/{card_id}/fechar")
+def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
+    """Fecho à mão de um card (entrega parcial/cancelamento) — ver
+    tools/compras_toros.fechar_card."""
+    resultado = compras_toros.fechar_card(card_id, corpo.get("utilizador") or "equipa", corpo.get("nota_fecho"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
 
 @app.post("/park-in/importar-historico")
 def park_in_importar_historico():

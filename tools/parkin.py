@@ -1084,6 +1084,48 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .close{position:absolute;top:14px;right:16px;color:var(--dim);font-size:22px;line-height:1}
   .vazio{color:var(--dim);font-size:13.5px;padding:14px 0;text-align:center}
 
+  .tabs{display:flex;gap:4px;margin:16px 0 18px;border-bottom:1px solid var(--line)}
+  .tab{padding:9px 16px;font-size:14px;font-weight:600;color:var(--dim);
+    border-bottom:2px solid transparent;cursor:pointer;user-select:none}
+  .tab.on{color:var(--ink);border-bottom-color:var(--blue)}
+
+  .kanban{display:flex;gap:14px;overflow-x:auto;padding-bottom:16px;align-items:flex-start}
+  .kcol{flex:0 0 330px;background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .kcol.arquivada{opacity:.6}
+  .kcol-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
+  .kcol-head h3{font-size:14.5px;font-weight:700;margin:0}
+  .kcol-head .nota{font-size:11.5px;color:var(--dim)}
+  .kcol-acoes{display:flex;gap:6px;margin:10px 0 12px}
+  .kcol-acoes .btn{padding:5px 10px;font-size:12.5px}
+  .knec{border-top:1px solid var(--line);padding-top:4px;margin-bottom:10px}
+  .knec summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--dim);padding:6px 0;list-style:none}
+  .knec summary::-webkit-details-marker{display:none}
+  .knec-row{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-top:1px solid var(--line)}
+  .knec-row:first-of-type{border-top:none}
+  .knec-row .art{font-weight:600}
+  .knec-row .vals{color:var(--dim);text-align:right}
+  .knec-row input.ned{width:56px;font-size:12px;padding:2px 4px;border:1px solid var(--edge);
+    border-radius:5px;text-align:right}
+  .kcard{background:var(--canvas);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+  .kcard.fechado{opacity:.65}
+  .kcard .forn{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13.5px}
+  .kcard .linha{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:5px}
+  .kcard .tot{display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;margin-top:8px}
+  .kbar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+  .kbar .f{height:100%;background:var(--green);transition:width .3s}
+  .kbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.02em}
+  .kbadge.aberto{background:#E8F3EC;color:var(--green)}
+  .kbadge.fechado{background:var(--line);color:var(--dim)}
+  .kbadge.aviso{background:#FBF0DC;color:var(--gold)}
+  .kcard .nota-fecho{font-size:11.5px;color:var(--dim);margin-top:6px;font-style:italic}
+  .klinha-row{display:flex;gap:6px;align-items:center;margin-bottom:8px;border-top:1px solid var(--line);padding-top:8px}
+  .klinha-row:first-child{border-top:none;padding-top:0}
+  .klinha-row select,.klinha-row input{min-width:0}
+  .klinha-row .qtd{width:74px;flex:0 0 auto}
+  .klinha-row .rm{flex:0 0 auto;color:var(--red);font-size:18px;line-height:1;padding:0 4px}
+  .vazio-kanban{color:var(--dim);font-size:13.5px;padding:30px 0;text-align:center}
+
   #entradaChat .table-wrap{overflow-x:auto;margin:6px 0}
   #entradaChat table{border-collapse:collapse;width:100%;font-size:.92em}
   #entradaChat th,#entradaChat td{border:1px solid var(--edge);padding:6px 10px;text-align:left}
@@ -1206,6 +1248,12 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <button class="btn ghost" id="bAbrirLimites" style="margin-left:auto">Limites</button>
   </div>
 
+  <div class="tabs">
+    <div class="tab on" id="tabStock">Stock</div>
+    <div class="tab" id="tabComprasToros">Compras de Toro</div>
+  </div>
+
+  <div id="painelStock">
   <div class="board" style="margin-bottom:16px">
     <h2>Stock total</h2>
     <div id="stockTotal"></div>
@@ -1245,6 +1293,65 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <ul class="rank" id="movimentos"></ul>
     </div>
   </div>
+  </div>
+
+  <!-- Compras de Toro (pedido explícito do Rui, 2026-10-13): quadro Kanban
+       de requisições — ver tools/compras_toros.py. Só carrega os dados
+       (fetch) na primeira vez que o separador é aberto. -->
+  <div id="painelComprasToros" style="display:none">
+    <div class="bar">
+      <button class="btn primary" id="bAbrirNovaColuna">+ Levantamento</button>
+    </div>
+    <div class="board" id="boardExcessos" style="display:none;margin-bottom:16px">
+      <h2>Excessos por abater <span class="nota">talões sem card aberto para abater (fornecedor + artigo)</span></h2>
+      <ul class="rank" id="listaExcessos"></ul>
+    </div>
+    <div class="kanban" id="kanban"></div>
+  </div>
+</div>
+
+<div class="sheet" id="sheetNovaColuna" style="width:min(560px,calc(100vw - 32px))">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Novo levantamento de necessidade</h3>
+  <div class="frow"><label>Data de levantamento</label>
+    <input type="date" id="cColunaData">
+  </div>
+  <p class="sub" style="margin:2px 0 12px">Ao criar, calcula e congela já a necessidade por artigo (pode corrigir-se à mão depois, dentro da coluna).</p>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bColunaGuardar">Criar</button>
+  </div>
+  <div id="colunaMsg"></div>
+</div>
+
+<div class="sheet" id="sheetNovoCard" style="width:min(560px,calc(100vw - 32px));max-height:min(680px,calc(100vh - 32px));display:flex;flex-direction:column">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Nova encomenda</h3>
+  <div class="frow"><label>Fornecedor</label>
+    <input type="text" id="cCardFornecedor" placeholder="nome do fornecedor">
+  </div>
+  <p class="sub" style="margin:2px 0 8px">Artigo(s) e toneladas encomendadas:</p>
+  <div id="cardLinhas" style="overflow-y:auto;flex:1"></div>
+  <button class="btn" type="button" id="bCardAddLinha" style="margin-top:8px;align-self:flex-start">+ artigo</button>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bCardGuardar">Criar</button>
+  </div>
+  <div id="cardMsg"></div>
+</div>
+
+<div class="sheet" id="sheetFecharCard">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Fechar card à mão</h3>
+  <p class="sub" style="margin:0 0 12px">Entrega parcial ou cancelamento — a nota é obrigatória.</p>
+  <div class="frow"><label>Nota</label>
+    <input type="text" id="cFecharNota" placeholder="ex: fornecedor cancelou o resto">
+  </div>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bFecharGuardar">Fechar card</button>
+  </div>
+  <div id="fecharMsg"></div>
 </div>
 
 <script>
@@ -1771,6 +1878,192 @@ $("#bLimitesGuardar").onclick = async () => {
     carregar();
   } catch(e){ $("#limitesMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bLimitesGuardar").disabled = false;
+};
+
+// Compras de Toro (pedido explícito do Rui, 2026-10-13) — quadro Kanban
+// de requisições, ver tools/compras_toros.py. Só busca os dados na
+// primeira vez que o separador é aberto (nunca no carregamento normal
+// do Park In, para não pesar quem só quer ver o stock).
+let dadosComprasToros = null;
+$("#tabStock").onclick = () => {
+  $("#tabStock").classList.add("on"); $("#tabComprasToros").classList.remove("on");
+  $("#painelStock").style.display = ""; $("#painelComprasToros").style.display = "none";
+};
+$("#tabComprasToros").onclick = () => {
+  $("#tabComprasToros").classList.add("on"); $("#tabStock").classList.remove("on");
+  $("#painelStock").style.display = "none"; $("#painelComprasToros").style.display = "";
+  if(!dadosComprasToros) carregarComprasToros();
+};
+
+async function carregarComprasToros(){
+  try{
+    const r = await fetch("/park-in/compras-toros/dados");
+    dadosComprasToros = await r.json();
+    renderComprasToros();
+  } catch(e){ $("#kanban").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+}
+
+function dataPt(iso){
+  if(!iso) return "";
+  const [a,m,d] = iso.slice(0,10).split("-");
+  return `${d}/${m}/${a}`;
+}
+
+function renderComprasToros(){
+  const { colunas, excessos } = dadosComprasToros;
+
+  if(excessos.length){
+    $("#boardExcessos").style.display = "";
+    $("#listaExcessos").innerHTML = excessos.map(e => `
+      <li><span class="nome">Talão ${e.talao} · ${e.fornecedor} · ${e.artigo}</span>
+        <span class="val">${t(e.quantidade_kg)} · ${dataPt(e.criado_em)}</span></li>`).join("");
+  } else {
+    $("#boardExcessos").style.display = "none";
+  }
+
+  if(!colunas.length){
+    $("#kanban").innerHTML = '<div class="vazio-kanban">Ainda não há nenhum levantamento de necessidade — cria o primeiro com "+ Levantamento".</div>';
+    return;
+  }
+
+  $("#kanban").innerHTML = colunas.map(c => {
+    const arquivada = c.estado === "arquivada";
+    const necessidadesHtml = c.necessidades.map(n => `
+      <div class="knec-row">
+        <span class="art">${n.artigo}${n.excesso_encomenda ? ' <span class="kbadge aviso" title="encomendado ultrapassa a necessidade">excesso</span>' : ''}</span>
+        <span class="vals">
+          nec. ${arquivada ? t(n.necessidade_kg) : `<input class="ned mono" type="text" inputmode="decimal" value="${(n.necessidade_kg/1000).toLocaleString('pt-PT',{minimumFractionDigits:1,maximumFractionDigits:1})}" data-necessidade-id="${n.id}">`} t ·
+          enc. ${t(n.encomendado_kg)} · ent. ${t(n.entregue_kg)} · falta ${t(n.em_falta_kg)}
+        </span>
+      </div>`).join("");
+
+    const cardsHtml = c.cards.map(card => {
+      const pct = card.encomendado_kg > 0 ? Math.min(100, Math.round(card.entregue_kg/card.encomendado_kg*100)) : 0;
+      return `
+      <div class="kcard ${card.estado}">
+        <div class="forn"><span>${card.fornecedor}</span>
+          <span class="kbadge ${card.estado}">${card.estado === "aberto" ? "Aberto" : "Fechado"}</span></div>
+        ${card.linhas.map(l => `
+          <div class="linha"><span>${l.artigo}</span><span>${t(l.entregue_kg)} / ${t(l.encomendado_kg)}</span></div>`).join("")}
+        <div class="kbar"><div class="f" style="width:${pct}%"></div></div>
+        <div class="tot"><span>Em falta</span><span>${t(card.em_falta_kg)}</span></div>
+        ${card.estado === "fechado"
+          ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>`
+          : `<button class="btn" type="button" style="margin-top:8px;padding:5px 10px;font-size:12.5px" onclick="abrirFecharCard(${card.id})">Fechar card</button>`}
+      </div>`;
+    }).join("");
+
+    return `
+    <div class="kcol ${arquivada ? 'arquivada' : ''}" data-coluna-id="${c.id}">
+      <div class="kcol-head">
+        <div><h3>${dataPt(c.data_levantamento)}</h3><div class="nota">${arquivada ? 'Arquivada' : 'Em aberto'}</div></div>
+      </div>
+      <div class="kcol-acoes">
+        ${!arquivada ? `<button class="btn primary" type="button" onclick="abrirNovoCard(${c.id})">+ Card</button>
+          <button class="btn ghost" type="button" onclick="arquivarColuna(${c.id})">Arquivar</button>` : ''}
+      </div>
+      <details class="knec"><summary>Necessidade por artigo (${c.necessidades.length})</summary>${necessidadesHtml}</details>
+      ${cardsHtml || '<div class="sub" style="padding:8px 0">Sem cards ainda.</div>'}
+    </div>`;
+  }).join("");
+
+  document.querySelectorAll(".ned").forEach(inp => {
+    inp.addEventListener("change", async () => {
+      const kg = parseFloat(inp.value.replace(",", ".")) * 1000;
+      if(isNaN(kg) || kg < 0){ carregarComprasToros(); return; }
+      await fetch(`/park-in/compras-toros/necessidade/${inp.dataset.necessidadeId}`, {
+        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({necessidade_kg: kg})});
+      carregarComprasToros();
+    });
+  });
+}
+
+$("#bAbrirNovaColuna").onclick = () => {
+  $("#colunaMsg").innerHTML = "";
+  $("#cColunaData").value = new Date().toISOString().slice(0,10);
+  abrirSheet("#sheetNovaColuna");
+};
+$("#bColunaGuardar").onclick = async () => {
+  const data = $("#cColunaData").value;
+  if(!data){ $("#colunaMsg").innerHTML = '<div class="err">Escolhe uma data.</div>'; return; }
+  $("#bColunaGuardar").disabled = true;
+  try{
+    const r = await fetch("/park-in/compras-toros/coluna", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({data_levantamento: data})});
+    const j = await r.json();
+    if(j.erro){ $("#colunaMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregarComprasToros(); }
+  } catch(e){ $("#colunaMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bColunaGuardar").disabled = false;
+};
+
+async function arquivarColuna(colunaId){
+  if(!confirm("Arquivar este levantamento?")) return;
+  await fetch(`/park-in/compras-toros/coluna/${colunaId}/arquivar`, {method:"POST"});
+  carregarComprasToros();
+}
+
+let novoCardColunaId = null;
+function linhaCardHtml(){
+  const coluna = dadosComprasToros.colunas.find(c => c.id === novoCardColunaId);
+  const opcoes = coluna.necessidades.map(n =>
+    `<option value="${n.tipo}|${n.comprimento}|${n.espessura}">${n.artigo}</option>`).join("");
+  return `
+    <div class="klinha-row">
+      <select class="art-sel">${opcoes}</select>
+      <input type="text" inputmode="decimal" class="qtd" placeholder="toneladas">
+      <button type="button" class="rm" title="Remover">✕</button>
+    </div>`;
+}
+function abrirNovoCard(colunaId){
+  novoCardColunaId = colunaId;
+  $("#cardMsg").innerHTML = ""; $("#cCardFornecedor").value = "";
+  $("#cardLinhas").innerHTML = linhaCardHtml();
+  abrirSheet("#sheetNovoCard");
+}
+$("#bCardAddLinha").onclick = () => { $("#cardLinhas").insertAdjacentHTML("beforeend", linhaCardHtml()); };
+$("#cardLinhas").addEventListener("click", e => {
+  if(e.target.classList.contains("rm") && $("#cardLinhas").children.length > 1) e.target.closest(".klinha-row").remove();
+});
+$("#bCardGuardar").onclick = async () => {
+  const fornecedor = $("#cCardFornecedor").value.trim();
+  if(!fornecedor){ $("#cardMsg").innerHTML = '<div class="err">O fornecedor é obrigatório.</div>'; return; }
+  const linhas = [];
+  for(const row of $("#cardLinhas").querySelectorAll(".klinha-row")){
+    const [tipo, comprimento, espessura] = row.querySelector(".art-sel").value.split("|");
+    const qtd = parseFloat(row.querySelector(".qtd").value.replace(",", "."));
+    if(!qtd || qtd <= 0){ $("#cardMsg").innerHTML = '<div class="err">Indica as toneladas em todas as linhas.</div>'; return; }
+    linhas.push({tipo, comprimento: parseFloat(comprimento), espessura, encomendado_kg: qtd*1000});
+  }
+  $("#bCardGuardar").disabled = true;
+  try{
+    const r = await fetch("/park-in/compras-toros/card", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({coluna_id: novoCardColunaId, fornecedor, linhas})});
+    const j = await r.json();
+    if(j.erro){ $("#cardMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregarComprasToros(); }
+  } catch(e){ $("#cardMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bCardGuardar").disabled = false;
+};
+
+let fecharCardId = null;
+function abrirFecharCard(cardId){
+  fecharCardId = cardId;
+  $("#fecharMsg").innerHTML = ""; $("#cFecharNota").value = "";
+  abrirSheet("#sheetFecharCard");
+}
+$("#bFecharGuardar").onclick = async () => {
+  const nota = $("#cFecharNota").value.trim();
+  if(!nota){ $("#fecharMsg").innerHTML = '<div class="err">A nota é obrigatória.</div>'; return; }
+  $("#bFecharGuardar").disabled = true;
+  try{
+    const r = await fetch(`/park-in/compras-toros/card/${fecharCardId}/fechar`, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({nota_fecho: nota})});
+    const j = await r.json();
+    if(j.erro){ $("#fecharMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregarComprasToros(); }
+  } catch(e){ $("#fecharMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bFecharGuardar").disabled = false;
 };
 
 carregar();

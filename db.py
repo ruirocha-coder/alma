@@ -360,6 +360,107 @@ CREATE TABLE IF NOT EXISTS parkin_limites (
     minimo_kg NUMERIC,
     maximo_kg NUMERIC
 );
+
+-- Compras de Toro (pedido explícito do Rui, 2026-10-13): quadro Kanban de
+-- requisições de compra de madeira — ver tools/compras_toros.py. Cada
+-- "coluna" é um levantamento de necessidade (tipicamente mensal), que
+-- congela a necessidade por artigo no momento em que é criada; os
+-- "cards" são encomendas a um fornecedor, cada um com uma ou mais linhas
+-- (artigo + toneladas encomendadas).
+CREATE TABLE IF NOT EXISTS compras_toros_colunas (
+    id SERIAL PRIMARY KEY,
+    data_levantamento DATE NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'aberta',   -- 'aberta' | 'arquivada'
+    criado_por TEXT,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    arquivada_por TEXT,
+    arquivada_em TIMESTAMPTZ
+);
+
+-- necessidade por artigo, congelada no momento da criação da coluna —
+-- Lmi/Lmax/S são a fotografia do Park In nesse momento (nunca
+-- recalculados depois, só a própria necessidade_kg é editável à mão,
+-- pedido explícito do Rui: "a necessidade calculada é uma proposta").
+CREATE TABLE IF NOT EXISTS compras_toros_necessidades (
+    id SERIAL PRIMARY KEY,
+    coluna_id INTEGER NOT NULL REFERENCES compras_toros_colunas(id),
+    tipo TEXT NOT NULL,
+    comprimento NUMERIC NOT NULL,
+    espessura TEXT NOT NULL,
+    lmi_kg NUMERIC NOT NULL,
+    lmax_kg NUMERIC NOT NULL,
+    s_kg NUMERIC NOT NULL,
+    pendente_kg NUMERIC NOT NULL,
+    necessidade_kg NUMERIC NOT NULL,
+    UNIQUE (coluna_id, tipo, comprimento, espessura)
+);
+
+-- card = encomenda a um fornecedor dentro de uma coluna. Fecha sozinho
+-- quando entregue >= encomendado (somado pelas linhas, ver
+-- compras_toros_linhas) ou à mão (entrega parcial/cancelamento), sempre
+-- com nota quando é à mão.
+CREATE TABLE IF NOT EXISTS compras_toros_cards (
+    id SERIAL PRIMARY KEY,
+    coluna_id INTEGER NOT NULL REFERENCES compras_toros_colunas(id),
+    fornecedor TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'aberto',   -- 'aberto' | 'fechado'
+    nota_fecho TEXT,
+    criado_por TEXT,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    fechado_por TEXT,
+    fechado_em TIMESTAMPTZ
+);
+
+-- uma linha por artigo dentro de um card (um card pode encomendar mais
+-- do que um artigo ao mesmo fornecedor) — é a linha, não o card, que os
+-- talões abatem por FIFO (ver tools/compras_toros.processar_abates_pendentes).
+CREATE TABLE IF NOT EXISTS compras_toros_linhas (
+    id SERIAL PRIMARY KEY,
+    card_id INTEGER NOT NULL REFERENCES compras_toros_cards(id),
+    tipo TEXT NOT NULL,
+    comprimento NUMERIC NOT NULL,
+    espessura TEXT NOT NULL,
+    encomendado_kg NUMERIC NOT NULL,
+    entregue_kg NUMERIC NOT NULL DEFAULT 0
+);
+
+-- rastreabilidade: que talão (entrada do Park In) abateu a quanto de
+-- cada linha — um talão pode repartir-se por mais do que uma linha
+-- (FIFO: enche a mais antiga primeiro, o resto transita para a
+-- seguinte, ver compras_toros_excessos quando não há seguinte).
+CREATE TABLE IF NOT EXISTS compras_toros_abates (
+    id SERIAL PRIMARY KEY,
+    linha_id INTEGER NOT NULL REFERENCES compras_toros_linhas(id),
+    entrada_id INTEGER NOT NULL REFERENCES parkin_entradas(id),
+    quantidade_kg NUMERIC NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- excesso: parte (ou tudo) de um talão que não teve nenhum card aberto
+-- de fornecedor+artigo para abater (ou já esgotou o FIFO de todos os
+-- que havia) — pedido explícito do Rui: "fica registado como excesso e
+-- visível", nunca descartado silenciosamente.
+CREATE TABLE IF NOT EXISTS compras_toros_excessos (
+    id SERIAL PRIMARY KEY,
+    entrada_id INTEGER NOT NULL REFERENCES parkin_entradas(id),
+    fornecedor TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    comprimento NUMERIC NOT NULL,
+    espessura TEXT NOT NULL,
+    quantidade_kg NUMERIC NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- marca uma entrada do Park In como já considerada pelo motor de abates
+-- (ver tools/compras_toros.processar_abates_pendentes) — processada
+-- exatamente uma vez, para sempre, mesmo que não tenha abatido nada
+-- (nesse caso o restante todo vira excesso); nunca reprocessada, porque
+-- "só contam talões com data igual ou posterior à criação do card" já
+-- garante que um card novo nunca é retroativo sobre entradas antigas.
+CREATE TABLE IF NOT EXISTS compras_toros_entradas_processadas (
+    entrada_id INTEGER PRIMARY KEY REFERENCES parkin_entradas(id),
+    processado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 # período de férias já anunciado pelo Rui no Mural da Gestão (post "Boas
@@ -2825,3 +2926,235 @@ def entradas_parkin_desde(dias: int) -> list[dict]:
             )
             return [{"fornecedor": l["fornecedor"], "peso_liquido_kg": float(l["peso_liquido_kg"] or 0)}
                    for l in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Compras de Toro — quadro Kanban de requisições (ver tools/compras_toros.py)
+# ---------------------------------------------------------------------------
+
+def criar_coluna_compras_toros(data_levantamento, criado_por: str = None) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO compras_toros_colunas (data_levantamento, criado_por) VALUES (%s, %s) RETURNING id",
+                (data_levantamento, criado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def guardar_necessidade_compras_toros(coluna_id: int, tipo: str, comprimento: float, espessura: str,
+                                      lmi_kg: float, lmax_kg: float, s_kg: float, pendente_kg: float,
+                                      necessidade_kg: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO compras_toros_necessidades
+                   (coluna_id, tipo, comprimento, espessura, lmi_kg, lmax_kg, s_kg, pendente_kg, necessidade_kg)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (coluna_id, tipo, comprimento, espessura, lmi_kg, lmax_kg, s_kg, pendente_kg, necessidade_kg)
+            )
+        conn.commit()
+
+def colunas_compras_toros() -> list[dict]:
+    """Todas as colunas (levantamentos de necessidade), mais recente
+    primeiro — abertas e arquivadas (pedido explícito do Rui: "colunas
+    arquivadas ficam consultáveis")."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, data_levantamento, estado, criado_por, criado_em, arquivada_por, arquivada_em
+                   FROM compras_toros_colunas ORDER BY data_levantamento DESC, id DESC"""
+            )
+            return cur.fetchall()
+
+def necessidades_compras_toros(coluna_id: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, tipo, comprimento, espessura, lmi_kg, lmax_kg, s_kg, pendente_kg, necessidade_kg
+                   FROM compras_toros_necessidades WHERE coluna_id = %s ORDER BY tipo, comprimento, espessura""",
+                (coluna_id,)
+            )
+            return cur.fetchall()
+
+def atualizar_necessidade_compras_toros(necessidade_id: int, necessidade_kg: float):
+    """Correção manual da proposta de necessidade calculada — pedido
+    explícito do Rui: "tem de ser editável à mão antes de confirmar"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE compras_toros_necessidades SET necessidade_kg = %s WHERE id = %s",
+                (necessidade_kg, necessidade_id)
+            )
+        conn.commit()
+
+def arquivar_coluna_compras_toros(coluna_id: int, arquivada_por: str = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE compras_toros_colunas SET estado = 'arquivada', arquivada_por = %s, "
+                "arquivada_em = now() WHERE id = %s",
+                (arquivada_por, coluna_id)
+            )
+        conn.commit()
+
+def criar_card_compras_toros(coluna_id: int, fornecedor: str, criado_por: str = None) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO compras_toros_cards (coluna_id, fornecedor, criado_por) VALUES (%s,%s,%s) RETURNING id",
+                (coluna_id, fornecedor, criado_por)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def criar_linha_compras_toros(card_id: int, tipo: str, comprimento: float, espessura: str,
+                              encomendado_kg: float) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO compras_toros_linhas (card_id, tipo, comprimento, espessura, encomendado_kg)
+                   VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+                (card_id, tipo, comprimento, espessura, encomendado_kg)
+            )
+            id_gerado = cur.fetchone()["id"]
+        conn.commit()
+    return id_gerado
+
+def cards_compras_toros(coluna_id: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, fornecedor, estado, nota_fecho, criado_por, criado_em, fechado_por, fechado_em
+                   FROM compras_toros_cards WHERE coluna_id = %s ORDER BY criado_em ASC, id ASC""",
+                (coluna_id,)
+            )
+            return cur.fetchall()
+
+def card_compras_toros(card_id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, coluna_id, fornecedor, estado, nota_fecho, criado_por, criado_em,
+                          fechado_por, fechado_em
+                   FROM compras_toros_cards WHERE id = %s""",
+                (card_id,)
+            )
+            return cur.fetchone()
+
+def linhas_compras_toros_do_card(card_id: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, tipo, comprimento, espessura, encomendado_kg, entregue_kg
+                   FROM compras_toros_linhas WHERE card_id = %s ORDER BY id ASC""",
+                (card_id,)
+            )
+            return cur.fetchall()
+
+def linhas_compras_toros_da_coluna(coluna_id: int) -> list[dict]:
+    """Todas as linhas de todos os cards de uma coluna, já com o
+    card_id/fornecedor/estado a par — base para o cabeçalho da coluna
+    (encomendado/entregue/em falta por artigo, ver tools/compras_toros.py)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT l.id, l.card_id, l.tipo, l.comprimento, l.espessura, l.encomendado_kg, l.entregue_kg,
+                          c.fornecedor, c.estado AS card_estado
+                   FROM compras_toros_linhas l JOIN compras_toros_cards c ON c.id = l.card_id
+                   WHERE c.coluna_id = %s""",
+                (coluna_id,)
+            )
+            return cur.fetchall()
+
+def fechar_card_compras_toros(card_id: int, fechado_por: str, nota_fecho: str = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE compras_toros_cards SET estado = 'fechado', fechado_por = %s, fechado_em = now(),
+                   nota_fecho = %s WHERE id = %s""",
+                (fechado_por, nota_fecho, card_id)
+            )
+        conn.commit()
+
+def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
+                                                       espessura: str) -> list[dict]:
+    """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
+    primeiro (FIFO) — ver tools/compras_toros.processar_abates_pendentes.
+    `criado_em_data` serve para a regra "só contam talões com data igual
+    ou posterior à criação do card"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.criado_em::date AS criado_em_data
+                   FROM compras_toros_linhas l JOIN compras_toros_cards c ON c.id = l.card_id
+                   WHERE c.estado = 'aberto' AND c.fornecedor = %s
+                     AND l.tipo = %s AND l.comprimento = %s AND l.espessura = %s
+                   ORDER BY c.criado_em ASC, l.id ASC""",
+                (fornecedor, tipo, comprimento, espessura)
+            )
+            return cur.fetchall()
+
+def registar_abate_compras_toros(linha_id: int, entrada_id: int, quantidade_kg: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO compras_toros_abates (linha_id, entrada_id, quantidade_kg) VALUES (%s,%s,%s)",
+                (linha_id, entrada_id, quantidade_kg)
+            )
+            cur.execute(
+                "UPDATE compras_toros_linhas SET entregue_kg = entregue_kg + %s WHERE id = %s",
+                (quantidade_kg, linha_id)
+            )
+        conn.commit()
+
+def registar_excesso_compras_toros(entrada_id: int, fornecedor: str, tipo: str, comprimento: float,
+                                   espessura: str, quantidade_kg: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO compras_toros_excessos (entrada_id, fornecedor, tipo, comprimento, espessura, quantidade_kg)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (entrada_id, fornecedor, tipo, comprimento, espessura, quantidade_kg)
+            )
+        conn.commit()
+
+def excessos_compras_toros() -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT e.id, e.entrada_id, e.fornecedor, e.tipo, e.comprimento, e.espessura, e.quantidade_kg,
+                          e.criado_em, p.talao
+                   FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
+                   ORDER BY e.criado_em DESC"""
+            )
+            return cur.fetchall()
+
+def entradas_parkin_nao_processadas_compras_toros() -> list[dict]:
+    """Entradas reais do Park In (nunca as sintéticas de uma correção de
+    inventário, talão "CORR-<id>" — ver tools/parkin.registar_correcao)
+    ainda não vistas pelo motor de abates — mais antigas primeiro, para o
+    FIFO fazer sentido mesmo quando várias entradas da mesma
+    fornecedor+artigo chegam de uma vez."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg
+                   FROM parkin_entradas
+                   WHERE talao NOT LIKE 'CORR-%%'
+                     AND tipo IS NOT NULL AND comprimento IS NOT NULL AND espessura IS NOT NULL
+                     AND id NOT IN (SELECT entrada_id FROM compras_toros_entradas_processadas)
+                   ORDER BY data ASC, id ASC"""
+            )
+            return cur.fetchall()
+
+def marcar_entrada_processada_compras_toros(entrada_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO compras_toros_entradas_processadas (entrada_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                (entrada_id,)
+            )
+        conn.commit()
