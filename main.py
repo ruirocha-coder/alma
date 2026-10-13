@@ -1055,6 +1055,42 @@ def _debug_pdf_orcamento_portal(id: int):
     pdf_bytes = base64.b64decode(base64_dados)
     return Response(content=pdf_bytes, media_type="application/pdf")
 
+@app.post("/_debug-corrigir-valor-transporte-portal/{id}")
+def _debug_corrigir_valor_transporte_portal(id: int, corpo: dict = Body(...)):
+    """Temporário: regrava um portal já publicado, preenchendo
+    valorTransporte (lido à mão do PDF de orçamento já embutido) sem
+    tocar em mais nenhum campo — usa o mesmo caminho de
+    atualizar_portal_projeto_edicao que a página de edição usa."""
+    documento = obter_documento_gerado(id)
+    if not documento:
+        return JSONResponse({"erro": "não encontrado"}, status_code=404)
+    projeto = json.loads(documento["conteudo_markdown"])["projeto"]
+    fases_estado = {f["id"]: ({"estado": f["estado"], "data": f["data"]} if f.get("data")
+                              else {"estado": f["estado"]}) for f in projeto["fases"]}
+    honorarios_linhas = [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
+                         for l in projeto["honorarios"]["linhas"]]
+    contacto_cliente = projeto.get("clienteContacto") or {}
+    campos = {
+        "cliente": projeto["cliente"], "validade": projeto["validade"],
+        "cliente_telefone": contacto_cliente.get("telefone"), "cliente_email": contacto_cliente.get("email"),
+        "honorarios_total": projeto["honorarios"]["total"], "honorarios_total_com_iva": True,
+        "honorarios_linhas": honorarios_linhas,
+        "conceito": {"imagem": projeto["conceito"].get("imagem"), "leitura": projeto["conceito"].get("leitura"),
+                    "materiais": projeto["conceito"].get("materiais"), "documento": projeto["documentos"].get("conceito")},
+        "documento_apresentacao": projeto["documentos"].get("apresentacao"),
+        "documento_orcamento": projeto["documentos"].get("orcamento"),
+        "documento_honorarios": projeto["documentos"].get("honorarios"),
+        "projeto_imagem": projeto.get("projetoImagem"),
+        "ambientes": projeto["ambientes"],
+        "valor_produto": projeto.get("valorProduto"), "valor_produto_com_iva": True,
+        "valor_transporte": float(corpo["valor_transporte"]),
+        "fases_estado": fases_estado,
+    }
+    resultado = portal_projeto.atualizar_portal_projeto_edicao(id, "Alma (correção do crédito sobre transporte)", campos)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/saida-por-talao")
 def park_in_saida_por_talao(corpo: dict = Body(...)):
     """Saída identificada só pelo nº de talão do lote de entrada — ver
