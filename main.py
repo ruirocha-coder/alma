@@ -1102,6 +1102,26 @@ def _debug_apagar_entrada_teste_compras_toros(entrada_id: int):
         conn.commit()
     return {"ok": True}
 
+@app.post("/_debug-apagar-coluna-teste-compras-toros/{coluna_id}")
+def _debug_apagar_coluna_teste_compras_toros(coluna_id: int):
+    """Temporário: remove por completo uma coluna de teste (cards, linhas,
+    abates e necessidades) depois de validar o quadro de Compras de Toro."""
+    from db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM compras_toros_abates WHERE linha_id IN "
+                "(SELECT l.id FROM compras_toros_linhas l JOIN compras_toros_cards c ON c.id = l.card_id "
+                "WHERE c.coluna_id = %s)", (coluna_id,))
+            cur.execute(
+                "DELETE FROM compras_toros_linhas WHERE card_id IN "
+                "(SELECT id FROM compras_toros_cards WHERE coluna_id = %s)", (coluna_id,))
+            cur.execute("DELETE FROM compras_toros_cards WHERE coluna_id = %s", (coluna_id,))
+            cur.execute("DELETE FROM compras_toros_necessidades WHERE coluna_id = %s", (coluna_id,))
+            cur.execute("DELETE FROM compras_toros_colunas WHERE id = %s", (coluna_id,))
+        conn.commit()
+    return {"ok": True}
+
 @app.post("/park-in/limites")
 def park_in_limites(corpo: dict = Body(...)):
     """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
