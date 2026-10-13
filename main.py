@@ -22,7 +22,7 @@ from agents import (acolhimento, monitor_basecamp, responder_basecamp,
                     mensagem_motivacional_diaria, mensagem_motivacional_diaria_ecos_largos,
                     verificar_portais_projeto, relatorio_aprovisionamento_toros)
 from tools import basecamp, ficheiros as ficheiros_tool, voz, reuniao, documentos_empresa, ecos_largos, portal_projeto, planeamento_serracao, planeamento_entradas, parkin
-from db import inicializar_schema
+from db import inicializar_schema, get_conn
 inicializar_schema()
 parkin.garantir_perfil_chat_parkin()
 
@@ -1022,7 +1022,7 @@ def _debug_entrada_parkin_completa(talao: str):
     """Temporário: todos os campos de uma entrada do Park In (incluindo
     peso bruto/tara, matrícula, guia) mais as depletions já feitas contra
     ela — para investigar/corrigir um talão mal lido."""
-    with db.get_conn() as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
