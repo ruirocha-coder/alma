@@ -1083,6 +1083,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ok{color:var(--green);font-size:13px;margin-top:10px}
   .close{position:absolute;top:14px;right:16px;color:var(--dim);font-size:22px;line-height:1}
   .vazio{color:var(--dim);font-size:13.5px;padding:14px 0;text-align:center}
+
+  #entradaChat .table-wrap{overflow-x:auto;margin:6px 0}
+  #entradaChat table{border-collapse:collapse;width:100%;font-size:.92em}
+  #entradaChat th,#entradaChat td{border:1px solid var(--edge);padding:6px 10px;text-align:left}
+  #entradaChat th{background:var(--line);font-weight:600}
+  #entradaChat p{margin:0 0 8px}
+  #entradaChat p:last-child{margin-bottom:0}
+  #entradaChat ul,#entradaChat ol{margin:4px 0 8px;padding-left:22px}
+  #entradaChat li{margin-bottom:3px}
+  #entradaChat strong{font-weight:700}
+  #entradaChat code{background:var(--line);border-radius:4px;padding:1px 5px}
 </style>
 </head>
 <body>
@@ -1242,6 +1253,77 @@ const CORES={Boa:"#2E9E4F",Media:"#E0A02C",Fraca:"#C4452E"};
 const NOMES_CAT={Boa:"Boa",Media:"Média",Fraca:"Fraca"};
 function t(kg){ return (kg/1000).toLocaleString("pt-PT",{minimumFractionDigits:1,maximumFractionDigits:1})+" t"; }
 function pct(v,tot){ return tot>0 ? Math.round(v/tot*100) : 0; }
+
+// Interpretador minimal de markdown para as respostas da Alma no chat de
+// "Nova entrada" (pedido explícito do Rui, 2026-10-13: "a resposta que ela
+// dá quando é necessário tabelas é preciso mostrar a tabela mesmo... não
+// está a fazer o markup") — versão reduzida do renderMarkdown de
+// static/index.html (negrito, listas, títulos e tabelas), sem o botão de
+// download em Excel (não faz sentido numa bolha de chat pequena).
+function escapeHtmlEntrada(str){
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function splitTableRowEntrada(line){
+  let l = line.trim();
+  if(l.startsWith("|")) l = l.slice(1);
+  if(l.endsWith("|")) l = l.slice(0,-1);
+  return l.split("|").map(c=>c.trim());
+}
+function isTableSeparatorEntrada(line){
+  const cells = splitTableRowEntrada(line);
+  return cells.length>0 && cells.every(c=>/^:?-+:?$/.test(c));
+}
+function renderTableEntrada(header, rows){
+  let html = '<div class="table-wrap"><table><thead><tr>';
+  header.forEach(h=>{ html += `<th>${h}</th>`; });
+  html += "</tr></thead><tbody>";
+  rows.forEach(r=>{
+    html += "<tr>";
+    header.forEach((_,i)=>{ html += `<td>${r[i]!==undefined?r[i]:""}</td>`; });
+    html += "</tr>";
+  });
+  html += "</tbody></table></div>";
+  return html;
+}
+function renderMarkdownEntrada(raw){
+  let text = escapeHtmlEntrada(raw);
+  text = text.replace(/`([^`\n]+)`/g, (_,code)=>`<code>${code}</code>`);
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+
+  const lines = text.split("\n");
+  let html = "", inUl = false, inOl = false, paraLines = [];
+  const flushPara = () => { if(paraLines.length){ html += `<p>${paraLines.join("<br>")}</p>`; paraLines = []; } };
+  const closeLists = () => { if(inUl){ html += "</ul>"; inUl = false; } if(inOl){ html += "</ol>"; inOl = false; } };
+
+  let i = 0;
+  while(i < lines.length){
+    const line = lines[i];
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)/);
+    const ulMatch = trimmed.match(/^[-*]\s+(.*)/);
+    const olMatch = trimmed.match(/^\d+\.\s+(.*)/);
+    const looksLikeTable = trimmed.includes("|") && i+1 < lines.length && isTableSeparatorEntrada(lines[i+1].trim());
+
+    if(looksLikeTable){
+      flushPara(); closeLists();
+      const header = splitTableRowEntrada(trimmed);
+      const rows = [];
+      i += 2;
+      while(i < lines.length && lines[i].trim().includes("|")){ rows.push(splitTableRowEntrada(lines[i].trim())); i++; }
+      html += renderTableEntrada(header, rows);
+      continue;
+    }
+    if(!trimmed){ flushPara(); closeLists(); }
+    else if(headerMatch){ flushPara(); closeLists(); const level = headerMatch[1].length+2; html += `<h${level}>${headerMatch[2]}</h${level}>`; }
+    else if(ulMatch){ flushPara(); if(inOl){ html += "</ol>"; inOl = false; } if(!inUl){ html += "<ul>"; inUl = true; } html += `<li>${ulMatch[1]}</li>`; }
+    else if(olMatch){ flushPara(); if(inUl){ html += "</ul>"; inUl = false; } if(!inOl){ html += "<ol>"; inOl = true; } html += `<li>${olMatch[1]}</li>`; }
+    else { closeLists(); paraLines.push(line); }
+    i++;
+  }
+  flushPara(); closeLists();
+  return html;
+}
 
 function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escalaForcada){
   if(totalKg<=0) return "";
@@ -1528,7 +1610,7 @@ $("#bEntradaGuardar").onclick = async () => {
         if(dados.delta){
           if(!assistenteBolha) assistenteBolha = bolhaEntrada("assistant");
           texto2 += dados.delta;
-          assistenteBolha.textContent = texto2;
+          assistenteBolha.innerHTML = renderMarkdownEntrada(texto2);
           $("#entradaChat").scrollTop = $("#entradaChat").scrollHeight;
         } else if(dados.a_processar){
           if(!assistenteBolha){ assistenteBolha = bolhaEntrada("assistant"); assistenteBolha.textContent = "a escrever…"; }
