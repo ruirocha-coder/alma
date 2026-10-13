@@ -1038,6 +1038,23 @@ def _debug_portais_valor_transporte():
             linhas = cur.fetchall()
     return {"portais": linhas}
 
+@app.get("/_debug-pdf-orcamento-portal/{id}")
+def _debug_pdf_orcamento_portal(id: int):
+    """Temporário: devolve o PDF de orçamento embutido num portal já
+    gerado, para ler a linha "ENTREGA E INSTALAÇÃO" e corrigir
+    valorTransporte."""
+    import base64
+    documento = obter_documento_gerado(id)
+    if not documento:
+        return JSONResponse({"erro": "não encontrado"}, status_code=404)
+    projeto = json.loads(documento["conteudo_markdown"])["projeto"]
+    data_uri = projeto["documentos"].get("orcamento")
+    if not data_uri:
+        return JSONResponse({"erro": "sem PDF de orçamento"}, status_code=404)
+    base64_dados = data_uri.split(",", 1)[1]
+    pdf_bytes = base64.b64decode(base64_dados)
+    return Response(content=pdf_bytes, media_type="application/pdf")
+
 @app.post("/park-in/saida-por-talao")
 def park_in_saida_por_talao(corpo: dict = Body(...)):
     """Saída identificada só pelo nº de talão do lote de entrada — ver
