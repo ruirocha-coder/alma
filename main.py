@@ -1075,6 +1075,33 @@ def _debug_limpar_excessos_historicos_compras_toros():
         conn.commit()
     return {"ok": True, "excessos_historicos_apagados": apagados}
 
+@app.post("/_debug-entrada-teste-compras-toros")
+def _debug_entrada_teste_compras_toros(corpo: dict = Body(...)):
+    """Temporário: insere uma entrada de teste no Park In (talão/fornecedor
+    claramente fictícios) para testar o motor de abates do Compras de
+    Toro de ponta a ponta, sem usar dados reais."""
+    from datetime import date
+    from db import guardar_entrada_parkin
+    entrada_id = guardar_entrada_parkin(
+        talao=corpo["talao"], fornecedor=corpo["fornecedor"], data=date.today(),
+        tipo=corpo["tipo"], comprimento=float(corpo["comprimento"]), espessura=corpo["espessura"],
+        peso_liquido_kg=float(corpo["peso_liquido_kg"]), registado_por="teste (apagar)")
+    return {"ok": True, "entrada_id": entrada_id}
+
+@app.post("/_debug-apagar-entrada-teste-compras-toros/{entrada_id}")
+def _debug_apagar_entrada_teste_compras_toros(entrada_id: int):
+    """Temporário: remove por completo uma entrada de teste (e tudo o que
+    dela dependa no Compras de Toro) depois de testar o motor de abates."""
+    from db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM compras_toros_abates WHERE entrada_id = %s", (entrada_id,))
+            cur.execute("DELETE FROM compras_toros_excessos WHERE entrada_id = %s", (entrada_id,))
+            cur.execute("DELETE FROM compras_toros_entradas_processadas WHERE entrada_id = %s", (entrada_id,))
+            cur.execute("DELETE FROM parkin_entradas WHERE id = %s", (entrada_id,))
+        conn.commit()
+    return {"ok": True}
+
 @app.post("/park-in/limites")
 def park_in_limites(corpo: dict = Body(...)):
     """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
