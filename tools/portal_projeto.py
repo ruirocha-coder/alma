@@ -385,6 +385,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                          honorarios_total: float, honorarios_total_com_iva: bool, honorarios_linhas: list,
                          ambientes: list, fases_estado: dict,
                          valor_produto: float = None, valor_produto_com_iva: bool = False,
+                         valor_transporte: float = None,
                          conceito_pdf_download_url: str = None, conceito_materiais: str = None,
                          conceito_leitura: str = None, documento_apresentacao_download_url: str = None,
                          documento_orcamento_download_url: str = None,
@@ -483,6 +484,21 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     `valor_produto` a None se a fase "orcamento" em `fases_estado` for
     "prevista" (ainda não é a próxima em aberto) — se for "aguarda" ou
     "validada", o cliente vai ver essa secção e precisa de um valor real.
+
+    `valor_transporte` (pedido explícito do Rui, 2026-10-13): o "Crédito
+    na compra Interior Guider" (10%) só se aplica aos PRODUTOS, nunca ao
+    transporte/montagem/instalação — por isso é obrigatório sempre que
+    `valor_produto` não é None (mesma regra de `valor_produto_com_iva`),
+    para a função conseguir descontá-lo da base de cálculo do crédito.
+    É SEMPRE a última linha do PDF do orçamento, sob o título "ENTREGA E
+    INSTALAÇÃO", com este texto fixo (nunca varia de projeto para
+    projeto, por isso procura sempre por ele, nunca por um valor "que
+    parece ser o do transporte"): "Transporte, montagem e instalação de
+    todo o equipamento acima mencionado (...)" — lê o valor dessa linha
+    tal como está escrito, já com IVA incluído (é a mesma coluna de
+    valores do resto do documento, nunca precisa de confirmação de IVA à
+    parte). Nunca calculado, estimado, nem deixado a 0 só para preencher
+    o campo.
 
     `fases_estado` tem de ter exatamente as chaves "honorarios", "conceito",
     "projeto", "orcamento", cada uma com {"estado": "validada"|"aguarda"|
@@ -607,6 +623,11 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
         return {"erro": ("valor_produto é obrigatório quando a fase \"orcamento\" não é \"prevista\" — o "
                          "cliente vai ver essa secção e precisa de um valor real, nunca 0 como substituto de "
                          "\"ainda não há orçamento\".")}
+    if valor_produto is not None and valor_transporte is None:
+        return {"erro": ("valor_transporte é obrigatório sempre que valor_produto não é nulo — o crédito de "
+                         "10% só se aplica aos produtos, nunca ao transporte/montagem/instalação. Lê o valor "
+                         "da linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento (texto fixo: \"Transporte, "
+                         "montagem e instalação de todo o equipamento acima mencionado...\").")}
     if fases_estado["conceito"]["estado"] != "prevista" and conceito_pdf_download_url is None:
         return {"erro": ("conceito_pdf_download_url é obrigatório quando a fase \"conceito\" não é \"prevista\" "
                          "— o cliente vai ver essa secção e precisa pelo menos da imagem, extraída do PDF "
@@ -677,7 +698,7 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
                                ambientes_com_imagem, fases_estado, valor_produto, conceito_imagem,
                                conceito_materiais, conceito_leitura, documento_apresentacao, documento_orcamento,
                                documento_conceito, projeto_imagem, documento_honorarios,
-                               cliente_telefone, cliente_email)
+                               cliente_telefone, cliente_email, valor_transporte)
 
 
 def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: str, honorarios_total: float,
@@ -685,7 +706,8 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
                         conceito_imagem: str, conceito_materiais: str, conceito_leitura: str,
                         documento_apresentacao: str, documento_orcamento: str, documento_conceito: str = None,
                         projeto_imagem: str = None, documento_honorarios: str = None,
-                        cliente_telefone: str = None, cliente_email: str = None) -> dict:
+                        cliente_telefone: str = None, cliente_email: str = None,
+                        valor_transporte: float = None) -> dict:
     """Constrói o JSON `projeto`, renderiza o HTML e grava — partilhado
     por gerar_portal_projeto (extração a partir do PDF) e
     atualizar_portal_projeto_edicao (valores já editados à mão pela
@@ -715,6 +737,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
         "ambientes": ambientes,
         "projetoImagem": projeto_imagem,
         "valorProduto": valor_produto,
+        "valorTransporte": valor_transporte,
         "fases": fases_json,
         "acoes": acoes_json,
     }
@@ -743,7 +766,7 @@ def _construir_e_gravar(utilizador: str, card_id: int, cliente: str, validade: s
 
 def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_produto_com_iva: bool,
                            fases_estado: dict, conceito_imagem, documento_apresentacao, documento_orcamento,
-                           documento_honorarios=None) -> str:
+                           documento_honorarios=None, valor_transporte=None) -> str:
     """As mesmas regras de gerar_portal_projeto, reaproveitadas por
     atualizar_portal_projeto_edicao — nunca duplicadas à parte, para as
     duas nunca poderem divergir sobre o que é seguro publicar."""
@@ -758,6 +781,10 @@ def _validar_campos_edicao(honorarios_total_com_iva: bool, valor_produto, valor_
     if valor_produto is None and fases_estado["orcamento"]["estado"] != "prevista":
         return ("é obrigatório um valor de orçamento de produto quando a fase \"Orçamento\" não está como "
                "\"por abrir\" — a cliente vai ver essa secção e precisa de um valor real.")
+    if valor_produto is not None and valor_transporte is None:
+        return ("é obrigatório o valor do transporte/montagem/instalação quando há valor de orçamento de "
+               "produto — o crédito de 10% só se aplica aos produtos, nunca ao transporte (lê o valor da "
+               "linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento).")
     if fases_estado["orcamento"]["estado"] != "prevista" and not documento_orcamento:
         return ("é obrigatório o documento de orçamento discriminado quando a fase \"Orçamento\" não está como "
                "\"por abrir\" — a cliente vai ver essa secção e precisa do PDF do orçamento.")
@@ -784,7 +811,8 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
     erro = _validar_campos_edicao(campos["honorarios_total_com_iva"], campos.get("valor_produto"),
                                   campos.get("valor_produto_com_iva", False), campos["fases_estado"],
                                   campos["conceito"].get("imagem"), campos.get("documento_apresentacao"),
-                                  campos.get("documento_orcamento"), campos.get("documento_honorarios"))
+                                  campos.get("documento_orcamento"), campos.get("documento_honorarios"),
+                                  campos.get("valor_transporte"))
     if erro:
         return {"erro": erro}
 
@@ -795,7 +823,8 @@ def atualizar_portal_projeto_edicao(id_documento: int, editado_por: str, campos:
                                campos["conceito"].get("leitura"), campos.get("documento_apresentacao"),
                                campos.get("documento_orcamento"), campos["conceito"].get("documento"),
                                campos.get("projeto_imagem"), campos.get("documento_honorarios"),
-                               campos.get("cliente_telefone"), campos.get("cliente_email"))
+                               campos.get("cliente_telefone"), campos.get("cliente_email"),
+                               campos.get("valor_transporte"))
 
 
 def validar_fase_portal(card_id: int, fase: str) -> dict:
@@ -908,7 +937,8 @@ def obter_portal_atual(card_id: int) -> dict:
 
 
 def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
-                      valor_produto: float = None, valor_produto_com_iva: bool = False) -> dict:
+                      valor_produto: float = None, valor_produto_com_iva: bool = False,
+                      valor_transporte: float = None) -> dict:
     """Reabre UMA fase "prevista" (ainda por abrir) de um portal já
     gerado, passando-a a "aguarda" — sem tocares em mais nada do portal
     (cliente, honorários, outras fases, outros ambientes ficam exatamente
@@ -928,7 +958,11 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
     - fase "orcamento": passa download_url do PDF de "Orçamento" E
       valor_produto (o valor final, COM IVA, que tu própria leste no
       documento — nunca calculado, estimado, nem copiado de outra fase)
-      E valor_produto_com_iva=True a confirmar isso mesmo.
+      E valor_produto_com_iva=True a confirmar isso mesmo, E valor_transporte
+      (o valor da linha "ENTREGA E INSTALAÇÃO" desse mesmo PDF, texto fixo
+      "Transporte, montagem e instalação de todo o equipamento acima
+      mencionado..." — o crédito de 10% nunca se aplica a este valor,
+      só aos produtos).
 
     Recusa-se a fazer nada se a fase já não estiver "prevista" (ex: já
     está "aguarda" ou "validada" — validar só pode acontecer com um
@@ -966,6 +1000,7 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
     projeto_imagem = projeto.get("projetoImagem")
     documento_orcamento = projeto["documentos"].get("orcamento")
     valor_produto_final = projeto.get("valorProduto")
+    valor_transporte_final = projeto.get("valorTransporte")
     ambientes = projeto["ambientes"]
 
     if fase == "conceito":
@@ -1002,11 +1037,16 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
         if valor_produto is None or not valor_produto_com_iva:
             return {"erro": ("valor_produto (com IVA, lido mesmo do documento) e "
                              "valor_produto_com_iva=True são obrigatórios para abrir a fase \"orcamento\"")}
+        if valor_transporte is None:
+            return {"erro": ("valor_transporte é obrigatório para abrir a fase \"orcamento\" — o crédito de "
+                             "10% só se aplica aos produtos, nunca ao transporte (lê o valor da linha "
+                             "\"ENTREGA E INSTALAÇÃO\" do PDF do orçamento).")}
         resultado = _baixar_pdf_base64(download_url)
         if "erro" in resultado:
             return {"erro": f"não consegui obter o documento de orçamento: {resultado['erro']}"}
         documento_orcamento = resultado["pdf_base64"]
         valor_produto_final = valor_produto
+        valor_transporte_final = valor_transporte
 
     alvo["estado"] = "aguarda"
     alvo["data"] = None
@@ -1020,7 +1060,8 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
         projeto["honorarios"]["total"], honorarios_linhas, ambientes, fases_estado,
         valor_produto_final, conceito_imagem, conceito_materiais, conceito_leitura,
         documento_apresentacao, documento_orcamento, documento_conceito, projeto_imagem,
-        projeto["documentos"].get("honorarios"), contacto_cliente.get("telefone"), contacto_cliente.get("email"))
+        projeto["documentos"].get("honorarios"), contacto_cliente.get("telefone"), contacto_cliente.get("email"),
+        valor_transporte_final)
     return {"ok": True, "fase": fase, "novo_estado": "aguarda", "url": resultado["url"]}
 
 
@@ -1193,6 +1234,7 @@ TOOLS_PORTAL_PROJETO = [
                 "conceito_pdf_download_url": {"type": "string", "description": "o campo \"download_url\" de listar_pdfs_anexados_por_data para o PDF \"Conceito Psicoestético IG_[Nome cliente]\" anexado ao card (procura pela palavra-chave \"Conceito Psicoestético\"; usa o mais recente, se houver mais do que um) — a função extrai a imagem do moodboard internamente, nunca passes uma imagem já extraída. Obrigatório sempre que a fase \"conceito\" não for \"prevista\""},
                 "valor_produto": {"type": "number", "description": "total do orçamento de produto (sem honorários), valor final COM IVA, tal como está escrito no documento/comentário — nunca calculado. Omite (ou não passes) se ainda não existir nenhum orçamento de produto para este projeto — nunca passes 0 como substituto disso; só podes omitir se a fase \"orcamento\" em fases_estado for \"prevista\""},
                 "valor_produto_com_iva": {"type": "boolean", "description": "True só se `valor_produto` já inclui IVA — nunca True por suposição; nunca calcules o IVA tu mesma, passa False se só tiveres o valor sem IVA"},
+                "valor_transporte": {"type": "number", "description": "obrigatório sempre que valor_produto não é nulo — o crédito de 10% \"Crédito na compra Interior Guider\" só se aplica aos produtos, nunca ao transporte/montagem/instalação. É sempre a linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento, com este texto fixo (nunca varia): \"Transporte, montagem e instalação de todo o equipamento acima mencionado...\" — lê o valor exatamente dessa linha, já com IVA incluído, nunca calculado nem estimado"},
                 "ambientes": {
                     "type": "array",
                     "items": {
@@ -1250,7 +1292,8 @@ TOOLS_PORTAL_PROJETO = [
             "está gravado). Passa só o download_url do PDF novo (tal como veio de "
             "listar_pdfs_anexados_por_data) — a extração da imagem/documento fica em código, nunca "
             "precisas de base64. Para a fase \"orcamento\" é também obrigatório valor_produto (o valor "
-            "final, com IVA, que leste mesmo no documento) e valor_produto_com_iva=true. Usa isto para "
+            "final, com IVA, que leste mesmo no documento), valor_produto_com_iva=true, E valor_transporte "
+            "(o crédito de 10% só se aplica aos produtos, nunca ao transporte). Usa isto para "
             "abrir uma fase quando confirmares que o documento certo já está no card — nunca uses "
             "gerar_portal_projeto para isso. Recusa-se se a fase já não estiver \"prevista\"."
         ),
@@ -1265,7 +1308,9 @@ TOOLS_PORTAL_PROJETO = [
                 "valor_produto": {"type": "number",
                                   "description": "só para fase \"orcamento\": o valor final, COM IVA, lido no documento"},
                 "valor_produto_com_iva": {"type": "boolean",
-                                          "description": "só para fase \"orcamento\": true a confirmar que valor_produto já inclui IVA"}
+                                          "description": "só para fase \"orcamento\": true a confirmar que valor_produto já inclui IVA"},
+                "valor_transporte": {"type": "number",
+                                     "description": "só para fase \"orcamento\", obrigatório: o valor da linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento (texto fixo \"Transporte, montagem e instalação de todo o equipamento acima mencionado...\"), já com IVA — o crédito de 10% nunca se aplica a este valor"}
             },
             "required": ["card_id", "fase", "download_url"]
         }
@@ -1519,7 +1564,12 @@ function abrirDocumento(dataUri, nomeFicheiro){
 
 const totalProduto = projeto.valorProduto;
 const temProduto   = totalProduto != null;
-const credito      = temProduto ? Math.round(totalProduto/10) : 0;
+// O crédito de 10% só se aplica aos produtos, nunca ao transporte/montagem/
+// instalação (pedido explícito do Rui, 2026-10-13) — por isso desconta-se
+// valorTransporte da base de cálculo antes dos 10%, mas o valor total
+// mostrado ao cliente ("Ambiente completo") continua a incluir tudo.
+const valorTransporte = projeto.valorTransporte || 0;
+const credito      = temProduto ? Math.round((totalProduto - valorTransporte)/10) : 0;
 const totalAPagar  = temProduto ? totalProduto - credito : 0;
 const p50 = Math.round(totalAPagar*.5),
       p40 = Math.round(totalAPagar*.4),
@@ -1582,7 +1632,7 @@ const conteudo = {
     </div>
     <div class="credito-bloco credito-escuro">
       <h3>Crédito na compra Interior Guider</h3>
-      <p>Ao adquirir a totalidade dos produtos propostos pelo Studio Interior Guider, beneficia de 10% de crédito, aplicado diretamente na mesma compra. Em cada 10€ em produto oferecemos 1€ de crédito.</p>
+      <p>Ao adquirir a totalidade dos produtos propostos pelo Studio Interior Guider, beneficia de 10% de crédito, aplicado diretamente na mesma compra. Em cada 10€ em produto oferecemos 1€ de crédito (o transporte, montagem e instalação não entram nesta conta).</p>
     </div>`,
 
   conceito: () => `
@@ -1658,7 +1708,7 @@ const conteudo = {
     </div>
     <div class="credito-bloco">
       <h3>Crédito na compra Interior Guider: Comprando o projeto completo, <em>${eur(credito)}</em> abatem ao seu orçamento.</h3>
-      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto. A compra parcial não dá direito ao crédito e fica a preço de tabela.</p>
+      <p>Na compra de 100% da especificação com o Interior Guider, aplica-se um crédito de 1€ por cada 10€ do conjunto de produtos. A compra parcial não dá direito ao crédito e fica a preço de tabela. O transporte, montagem e instalação não entram nesta conta.</p>
     </div>
     <div class="pag-tit">Como se paga</div>
     <div class="painel-resumo">
@@ -2071,6 +2121,10 @@ _TEMPLATE_EDICAO = r"""<!DOCTYPE html>
     <div class="check" style="margin-top:22px"><input type="checkbox" id="f-valor-produto-com-iva">
       <label style="margin:0">Este valor já inclui IVA</label></div>
   </div>
+  <div class="campo">
+    <label>Valor do transporte, montagem e instalação (já incluído no valor total acima, com IVA) — linha "ENTREGA E INSTALAÇÃO" do PDF do orçamento. O crédito de 10% nunca se aplica a este valor, só aos produtos.</label>
+    <input type="number" step="0.01" id="f-valor-transporte">
+  </div>
 </section>
 
 <section>
@@ -2101,6 +2155,7 @@ document.getElementById('f-conceito-leitura').value = projeto.conceito.leitura |
 document.getElementById('f-conceito-materiais').value = projeto.conceito.materiais || '';
 document.getElementById('f-valor-produto').value = projeto.valorProduto ?? '';
 document.getElementById('f-valor-produto-com-iva').checked = projeto.valorProduto != null;
+document.getElementById('f-valor-transporte').value = projeto.valorTransporte ?? '';
 
 let conceitoImagemAtual = projeto.conceito.imagem || null;
 if (conceitoImagemAtual) {
@@ -2255,6 +2310,7 @@ function guardar() {
     fases_estado[div.dataset.faseId] = estado === 'validada' ? {estado, data} : {estado};
   });
   const valorProdutoTexto = document.getElementById('f-valor-produto').value;
+  const valorTransporteTexto = document.getElementById('f-valor-transporte').value;
 
   const campos = {
     cliente: document.getElementById('f-cliente').value,
@@ -2277,6 +2333,7 @@ function guardar() {
     ambientes,
     valor_produto: valorProdutoTexto === '' ? null : parseFloat(valorProdutoTexto),
     valor_produto_com_iva: document.getElementById('f-valor-produto-com-iva').checked,
+    valor_transporte: valorTransporteTexto === '' ? null : parseFloat(valorTransporteTexto),
     fases_estado,
   };
 
