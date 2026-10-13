@@ -1064,8 +1064,20 @@ def _debug_pdfs_orcamento_card(card_id: int):
     if not card:
         return JSONResponse({"erro": "card não encontrado"}, status_code=404)
     pdfs = basecamp.listar_pdfs_anexados_por_data(card["comments_url"])
-    orcamentos = [p for p in pdfs if "orçamento" in p["ficheiro"].lower() or "orcamento" in p["ficheiro"].lower()]
+    orcamentos = [p for p in pdfs if "orcamento" in p["ficheiro"].lower() or "orçamento" in p["ficheiro"].lower()]
     return {"card": card["titulo"], "orcamentos": orcamentos, "todos_os_pdfs": pdfs}
+
+@app.get("/_debug-pdf-basecamp")
+def _debug_pdf_basecamp(download_url: str):
+    """Temporário: descarrega um PDF do Basecamp pelo seu download_url
+    (tal como veio de listar_pdfs_anexados_por_data) e devolve-o direto —
+    para ler documentos ainda não embutidos em nenhum portal."""
+    resultado = portal_projeto._baixar_pdf_base64(download_url)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=502)
+    import base64
+    base64_dados = resultado["pdf_base64"].split(",", 1)[1]
+    return Response(content=base64.b64decode(base64_dados), media_type="application/pdf")
 
 @app.post("/_debug-corrigir-valor-transporte-portal/{id}")
 def _debug_corrigir_valor_transporte_portal(id: int, corpo: dict = Body(...)):
