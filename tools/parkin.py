@@ -518,6 +518,33 @@ def _aplicar_fifo(tipo: str, comprimento: float, espessura: str, quantidade_kg: 
     return {"depletadas": depletadas}
 
 
+def _depletar_entradas_lista(entradas: list[dict], quantidade_kg: float, correcao_id: int = None,
+                             saida_id: int = None, registado_por: str = None) -> tuple:
+    """Deplete até `quantidade_kg` de uma lista já dada de entradas (mais
+    antiga primeiro), sem voltar a consultar a base de dados — usado para
+    esvaziar primeiro o que já está "sem categoria" antes de tocar em
+    stock com qualidade conhecida (pedido explícito do Rui, 2026-10-13:
+    "com tanta correção, perdemos informação sobre a qualidade" — cada
+    correção negativa sem categoria escolhida drena primeiro o que já não
+    tinha qualidade nenhuma associada, em vez de ir buscar à mais antiga
+    de qualquer categoria e tornar ainda mais stock "sem categoria").
+    Devolve (depletadas, quanto ainda falta depois de esgotar a lista)."""
+    restante = quantidade_kg
+    depletadas = []
+    for e in entradas:
+        if restante <= 1e-9:
+            break
+        tirar = min(float(e["saldo_kg"]), restante)
+        if tirar <= 1e-9:
+            continue
+        db.descontar_saldo_entrada_parkin(e["id"], tirar)
+        db.guardar_depletion_parkin(e["id"], tirar, saida_id=saida_id, correcao_id=correcao_id)
+        depletadas.append({"entrada_id": e["id"], "talao": e["talao"], "quantidade_kg": round(tirar, 1),
+                          "categoria_qualidade": e.get("categoria_qualidade")})
+        restante -= tirar
+    return depletadas, restante
+
+
 def _aplicar_fifo_com_preferencia(entradas: list[dict], quantidade_kg: float, categoria_preferida: str,
                                   tipo: str, comprimento: float, espessura: str,
                                   saida_id: int = None, correcao_id: int = None,
@@ -769,13 +796,29 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
     entradas_tudo = _entradas_com_saldo_do_artigo(tipo, comprimento, espessura)
     id_gerado = db.guardar_correcao_parkin(tipo, comprimento, espessura, quantidade_kg, motivo, data_hoje,
                                            registado_por=registado_por)
-    if categoria_qualidade:
-        resultado = _aplicar_fifo_com_preferencia(entradas_tudo, abs(quantidade_kg), categoria_qualidade,
-                                                  tipo, comprimento, espessura,
-                                                  correcao_id=id_gerado, registado_por=registado_por)
+
+    # Pedido explícito do Rui (2026-10-13): "com tanta correção, perdemos
+    # informação sobre a qualidade da madeira" — ANTES de aplicar a
+    # preferência/FIFO normal, esvazia primeiro o que já está "sem
+    # categoria" (sem qualidade associada nenhuma), nunca stock com
+    # qualidade conhecida — uma correção de quantidade deixa de "comer"
+    # categorias que ainda tínhamos identificadas.
+    sem_categoria = [e for e in entradas_tudo if e["categoria_qualidade"] is None]
+    depletadas_sem_categoria, restante = _depletar_entradas_lista(
+        sem_categoria, abs(quantidade_kg), correcao_id=id_gerado, registado_por=registado_por)
+
+    if restante > 1e-9:
+        if categoria_qualidade:
+            entradas_restantes = [e for e in entradas_tudo if e["categoria_qualidade"] is not None]
+            resultado = _aplicar_fifo_com_preferencia(entradas_restantes, restante, categoria_qualidade,
+                                                      tipo, comprimento, espessura,
+                                                      correcao_id=id_gerado, registado_por=registado_por)
+        else:
+            resultado = _aplicar_fifo(tipo, comprimento, espessura, restante, correcao_id=id_gerado,
+                                      permitir_negativo=True, registado_por=registado_por)
     else:
-        resultado = _aplicar_fifo(tipo, comprimento, espessura, abs(quantidade_kg), correcao_id=id_gerado,
-                                  permitir_negativo=True, registado_por=registado_por)
+        resultado = {"depletadas": []}
+    resultado["depletadas"] = depletadas_sem_categoria + resultado["depletadas"]
     return {"ok": True, "id": id_gerado, "artigo": artigo, "quantidade_kg": quantidade_kg,
            "categoria_qualidade": categoria_qualidade, **resultado}
 
