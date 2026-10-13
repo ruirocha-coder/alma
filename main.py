@@ -1055,6 +1055,18 @@ def _debug_pdf_orcamento_portal(id: int):
     pdf_bytes = base64.b64decode(base64_dados)
     return Response(content=pdf_bytes, media_type="application/pdf")
 
+@app.get("/_debug-pdfs-orcamento-card/{card_id}")
+def _debug_pdfs_orcamento_card(card_id: int):
+    """Temporário: lista os PDFs de "Orçamento" anexados ao card do
+    Basecamp (mais recente primeiro) — para confirmar se há uma versão
+    mais atual do que a embutida num portal já publicado."""
+    card = basecamp.obter_card(card_id, "@ Interior Guider")
+    if not card:
+        return JSONResponse({"erro": "card não encontrado"}, status_code=404)
+    pdfs = basecamp.listar_pdfs_anexados_por_data(card["comments_url"])
+    orcamentos = [p for p in pdfs if "orçamento" in p["ficheiro"].lower() or "orcamento" in p["ficheiro"].lower()]
+    return {"card": card["titulo"], "orcamentos": orcamentos, "todos_os_pdfs": pdfs}
+
 @app.post("/_debug-corrigir-valor-transporte-portal/{id}")
 def _debug_corrigir_valor_transporte_portal(id: int, corpo: dict = Body(...)):
     """Temporário: regrava um portal já publicado, preenchendo
