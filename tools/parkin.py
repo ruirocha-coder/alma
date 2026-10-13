@@ -1089,9 +1089,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
     border-bottom:2px solid transparent;cursor:pointer;user-select:none}
   .tab.on{color:var(--ink);border-bottom-color:var(--blue)}
 
-  .kanban{display:flex;gap:14px;overflow-x:auto;padding-bottom:16px;align-items:flex-start}
-  .kcol{flex:0 0 330px;background:var(--paper);border:1px solid var(--line);border-radius:12px;
-    padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .kanban{display:flex;gap:16px;overflow-x:auto;padding-bottom:16px;align-items:flex-start}
+  .kcol{flex:0 0 50%;max-width:560px;box-sizing:border-box;background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
   .kcol.arquivada{opacity:.6}
   .kcol-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
   .kcol-head h3{font-size:14.5px;font-weight:700;margin:0}
