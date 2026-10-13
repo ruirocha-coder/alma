@@ -1058,6 +1058,23 @@ def park_in_correcao(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/_debug-limpar-excessos-historicos-compras-toros")
+def _debug_limpar_excessos_historicos_compras_toros():
+    """Temporário: ao ligar o motor de abates do Compras de Toro pela
+    primeira vez, TODAS as entradas já existentes no Park In (de antes de
+    a funcionalidade existir, sem nenhum card aberto para as abater)
+    ficaram registadas como "excesso" — ruído histórico sem valor nenhum
+    (nenhum card alguma vez existiu para elas). Limpa só a tabela de
+    excessos; as entradas ficam corretamente marcadas como já
+    processadas, para o FIFO só se aplicar a partir de agora."""
+    from db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM compras_toros_excessos")
+            apagados = cur.rowcount
+        conn.commit()
+    return {"ok": True, "excessos_historicos_apagados": apagados}
+
 @app.post("/park-in/limites")
 def park_in_limites(corpo: dict = Body(...)):
     """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
