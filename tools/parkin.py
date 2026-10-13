@@ -64,6 +64,20 @@ def _chave_artigo(tipo: str, comprimento: float, espessura: str) -> str:
     return f"{tipo}|{comprimento}|{espessura}"
 
 
+# Ordem de apresentação dos artigos, pedida explicitamente pelo Rui
+# (2026-10-13), usada em "Stock por artigo" e em "Compras de Toro": 1º
+# Normal antes de Fina, 2º dentro de cada espessura MT antes de IN, 3º
+# dentro de cada tipo do maior para o menor comprimento — nunca por
+# quantidade. Um artigo "desconhecido" (tipo/espessura None) cai sempre
+# no fim, por não corresponder a nenhuma das chaves conhecidas.
+_ORDEM_ESPESSURA = {"normal": 0, "fina": 1}
+_ORDEM_TIPO = {"MT": 0, "IN": 1}
+
+
+def _chave_ordenacao_artigo(tipo: str, comprimento: float, espessura: str) -> tuple:
+    return (_ORDEM_ESPESSURA.get(espessura, 2), _ORDEM_TIPO.get(tipo, 2), -float(comprimento or 0))
+
+
 _FERRAMENTA_EXTRAIR_TALAO = {
     "name": "extrair_talao",
     "description": "Extrai os campos do talão de pesagem fotografado, exatamente como estão impressos.",
@@ -847,7 +861,7 @@ def stock_por_artigo() -> list[dict]:
             "sem_categoria_kg": round(a["sem_categoria_kg"], 1),
             "minimo_kg": lim.get("minimo_kg"), "maximo_kg": lim.get("maximo_kg"),
         })
-    resultado.sort(key=lambda x: -x["total_kg"])
+    resultado.sort(key=lambda x: _chave_ordenacao_artigo(x["tipo"], x["comprimento"], x["espessura"]))
     return resultado
 
 

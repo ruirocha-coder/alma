@@ -72,7 +72,7 @@ def calcular_necessidades_propostas() -> list[dict]:
             "lmi_kg": round(lmi, 1), "lmax_kg": round(lmax, 1), "s_kg": round(s, 1),
             "pendente_kg": round(pendente, 1), "necessidade_kg": round(necessidade, 1),
         })
-    linhas.sort(key=lambda l: -l["necessidade_kg"])
+    linhas.sort(key=lambda l: parkin._chave_ordenacao_artigo(l["tipo"], l["comprimento"], l["espessura"]))
     return linhas
 
 
@@ -245,7 +245,7 @@ def dados_quadro() -> dict:
                 "em_falta_kg": round(max(0.0, necessidade_kg - entregue), 1),
                 "excesso_encomenda": encomendado > necessidade_kg + 1e-6,
             })
-        necessidades_resultado.sort(key=lambda n: -n["necessidade_kg"])
+        necessidades_resultado.sort(key=lambda n: parkin._chave_ordenacao_artigo(n["tipo"], n["comprimento"], n["espessura"]))
 
         cards_resultado = []
         for card in db.cards_compras_toros(coluna["id"]):
