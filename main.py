@@ -1017,6 +1017,27 @@ def park_in_entrada_por_talao(talao: str = ""):
         return JSONResponse(resultado, status_code=404)
     return JSONResponse(resultado)
 
+@app.get("/_debug-portais-valor-transporte")
+def _debug_portais_valor_transporte():
+    """Temporário: lista todos os portais de projeto com valorProduto
+    definido mas sem valorTransporte — candidatos a corrigir depois da
+    mudança do cálculo do crédito (pedido explícito do Rui, 2026-10-13)."""
+    from db import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, card_id,
+                          conteudo_markdown::json -> 'projeto' ->> 'cliente' AS cliente,
+                          (conteudo_markdown::json -> 'projeto' ->> 'valorProduto')::numeric AS valor_produto,
+                          (conteudo_markdown::json -> 'projeto' ->> 'valorTransporte')::numeric AS valor_transporte,
+                          (conteudo_markdown::json -> 'projeto' -> 'documentos' ->> 'orcamento') IS NOT NULL AS tem_pdf_orcamento
+                   FROM documentos_gerados
+                   WHERE formato = 'html' AND card_id IS NOT NULL
+                   ORDER BY id"""
+            )
+            linhas = cur.fetchall()
+    return {"portais": linhas}
+
 @app.post("/park-in/saida-por-talao")
 def park_in_saida_por_talao(corpo: dict = Body(...)):
     """Saída identificada só pelo nº de talão do lote de entrada — ver
