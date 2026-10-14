@@ -1080,6 +1080,15 @@ def park_in_registar_artigo(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/_debug-del-limite")
+def _debug_del_limite(corpo: dict = Body(...)):
+    import db as _db
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM parkin_limites WHERE chave = %s", (corpo.get("chave"),))
+        conn.commit()
+    return JSONResponse({"ok": True})
+
 @app.get("/park-in/compras-toros/dados")
 def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
