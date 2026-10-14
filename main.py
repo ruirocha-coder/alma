@@ -1123,6 +1123,19 @@ def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/park-in/compras-toros/card/{card_id}/mover")
+def park_in_compras_toros_mover_card(card_id: int, corpo: dict = Body(...)):
+    """Move um card para outro levantamento ainda aberto — ver
+    tools/compras_toros.mover_card."""
+    try:
+        nova_coluna_id = int(corpo["nova_coluna_id"])
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"erro": "falta nova_coluna_id"}, status_code=400)
+    resultado = compras_toros.mover_card(card_id, nova_coluna_id)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/importar-historico")
 def park_in_importar_historico():
     """Importa para o Park In todas as avaliações de qualidade já

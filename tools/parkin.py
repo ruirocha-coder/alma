@@ -1421,6 +1421,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div id="fecharMsg"></div>
 </div>
 
+<div class="sheet" id="sheetMoverCard" style="width:min(420px,calc(100vw - 32px))">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Mover card para outro levantamento</h3>
+  <div class="frow"><label>Levantamento</label>
+    <select id="cMoverColuna"></select>
+  </div>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bMoverGuardar">Mover</button>
+  </div>
+  <div id="moverMsg"></div>
+</div>
+
 <script>
 const $=s=>document.querySelector(s);
 const CORES={Boa:"#2E9E4F",Media:"#E0A02C",Fraca:"#C4452E"};
@@ -2021,7 +2034,10 @@ function renderComprasToros(){
         <div class="tot"><span>Em falta</span><span>${t(card.em_falta_kg)}</span></div>
         ${card.estado === "fechado"
           ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>`
-          : `<button class="btn" type="button" style="margin-top:8px;padding:5px 10px;font-size:12.5px" onclick="abrirFecharCard(${card.id})">Fechar card</button>`}
+          : `<div style="display:flex;gap:6px;margin-top:8px">
+               <button class="btn" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirFecharCard(${card.id})">Fechar card</button>
+               <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirMoverCard(${card.id})">Mover</button>
+             </div>`}
       </div>`;
     }).join("");
 
@@ -2142,6 +2158,29 @@ $("#bFecharGuardar").onclick = async () => {
     else{ fecharSheets(); carregarComprasToros(); }
   } catch(e){ $("#fecharMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bFecharGuardar").disabled = false;
+};
+
+let moverCardId = null;
+function abrirMoverCard(cardId){
+  const atual = dadosComprasToros.colunas.find(c => c.cards.some(cd => cd.id === cardId));
+  const opcoes = dadosComprasToros.colunas.filter(c => c.estado !== "arquivada" && c.id !== atual.id);
+  if(!opcoes.length){ alert("Não há outro levantamento em aberto para mover este card."); return; }
+  moverCardId = cardId;
+  $("#moverMsg").innerHTML = "";
+  $("#cMoverColuna").innerHTML = opcoes.map(c => `<option value="${c.id}">${dataPt(c.data_levantamento)}</option>`).join("");
+  abrirSheet("#sheetMoverCard");
+}
+$("#bMoverGuardar").onclick = async () => {
+  const novaColunaId = parseInt($("#cMoverColuna").value, 10);
+  $("#bMoverGuardar").disabled = true;
+  try{
+    const r = await fetch(`/park-in/compras-toros/card/${moverCardId}/mover`, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({nova_coluna_id: novaColunaId})});
+    const j = await r.json();
+    if(j.erro){ $("#moverMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregarComprasToros(); }
+  } catch(e){ $("#moverMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bMoverGuardar").disabled = false;
 };
 
 carregar();

@@ -3044,6 +3044,27 @@ def card_compras_toros(card_id: int) -> dict:
             )
             return cur.fetchone()
 
+def obter_coluna_compras_toros(coluna_id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, data_levantamento, estado FROM compras_toros_colunas WHERE id = %s",
+                (coluna_id,)
+            )
+            return cur.fetchone()
+
+def mover_card_compras_toros(card_id: int, nova_coluna_id: int):
+    """Move um card (e as suas linhas, por arrastamento da FK) para outro
+    levantamento — ver tools/compras_toros.mover_card. Nunca mexe nas
+    linhas/abates/entregue em si, só a que coluna o card pertence."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE compras_toros_cards SET coluna_id = %s WHERE id = %s",
+                (nova_coluna_id, card_id)
+            )
+        conn.commit()
+
 def linhas_compras_toros_do_card(card_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:

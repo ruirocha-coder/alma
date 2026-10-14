@@ -143,6 +143,28 @@ def arquivar_coluna(coluna_id: int, arquivada_por: str = None) -> dict:
     return {"ok": True}
 
 
+def mover_card(card_id: int, nova_coluna_id: int) -> dict:
+    """Move um card (criado no levantamento errado) para outro
+    levantamento ainda aberto — nunca mexe nas linhas/entregue/abates do
+    card, só a que coluna pertence. Reavalia o arquivo automático da
+    coluna de onde saiu (pode ter ficado com todos os cards fechados e a
+    necessidade coberta)."""
+    card = db.card_compras_toros(card_id)
+    if not card:
+        return {"erro": "card não encontrado"}
+    if card["coluna_id"] == nova_coluna_id:
+        return {"erro": "o card já está nesse levantamento"}
+    nova_coluna = db.obter_coluna_compras_toros(nova_coluna_id)
+    if not nova_coluna:
+        return {"erro": "levantamento de destino não encontrado"}
+    if nova_coluna["estado"] != "aberta":
+        return {"erro": "não é possível mover um card para um levantamento já arquivado"}
+    coluna_antiga_id = card["coluna_id"]
+    db.mover_card_compras_toros(card_id, nova_coluna_id)
+    _tentar_arquivar_coluna_automatica(coluna_antiga_id)
+    return {"ok": True}
+
+
 def _tentar_fechar_card_automatico(card_id: int):
     """Fecha sozinho quando entregue >= encomendado, somado por todas as
     linhas do card (pedido explícito do Rui)."""
