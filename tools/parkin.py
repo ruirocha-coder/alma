@@ -1364,6 +1364,16 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <ul class="rank" id="listaExcessos"></ul>
     </div>
     <div class="kanban" id="kanban"></div>
+
+    <!-- Pedido explícito do Rui (2026-10-14): uma coluna arquivada não
+         pode continuar visível misturada com as abertas (fica confuso) —
+         fica à parte, escondida por omissão, mas sempre consultável. -->
+    <div class="board" style="margin-top:16px">
+      <h2 id="colunasArquivadasToggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">
+        <span id="colunasArquivadasSeta">▸</span> Levantamentos arquivados <span class="nota" id="colunasArquivadasNota"></span>
+      </h2>
+      <div class="kanban" id="kanbanArquivadas" style="display:none;margin-top:10px"></div>
+    </div>
   </div>
 </div>
 
@@ -1966,6 +1976,13 @@ function dataPt(iso){
   return `${d}/${m}/${a}`;
 }
 
+let colunasArquivadasAbertas = false;
+$("#colunasArquivadasToggle").onclick = () => {
+  colunasArquivadasAbertas = !colunasArquivadasAbertas;
+  $("#kanbanArquivadas").style.display = colunasArquivadasAbertas ? "" : "none";
+  $("#colunasArquivadasSeta").textContent = colunasArquivadasAbertas ? "▾" : "▸";
+};
+
 function renderComprasToros(){
   const { colunas, excessos } = dadosComprasToros;
 
@@ -1978,12 +1995,10 @@ function renderComprasToros(){
     $("#boardExcessos").style.display = "none";
   }
 
-  if(!colunas.length){
-    $("#kanban").innerHTML = '<div class="vazio-kanban">Ainda não há nenhum levantamento de necessidade — cria o primeiro com "+ Levantamento".</div>';
-    return;
-  }
+  const abertas = colunas.filter(c => c.estado !== "arquivada");
+  const arquivadas = colunas.filter(c => c.estado === "arquivada");
 
-  $("#kanban").innerHTML = colunas.map(c => {
+  function renderColuna(c){
     const arquivada = c.estado === "arquivada";
     const necessidadesHtml = c.necessidades.map(n => `
       <div class="knec-row">
@@ -2022,7 +2037,13 @@ function renderComprasToros(){
       <details class="knec"><summary>Necessidade por artigo (${c.necessidades.length})</summary>${necessidadesHtml}</details>
       ${cardsHtml || '<div class="sub" style="padding:8px 0">Sem cards ainda.</div>'}
     </div>`;
-  }).join("");
+  }
+
+  $("#kanban").innerHTML = abertas.length ? abertas.map(renderColuna).join("")
+    : '<div class="vazio-kanban">Ainda não há nenhum levantamento em aberto — cria um com "+ Levantamento".</div>';
+
+  $("#colunasArquivadasNota").textContent = `(${arquivadas.length})`;
+  $("#kanbanArquivadas").innerHTML = arquivadas.map(renderColuna).join("");
 
   document.querySelectorAll(".ned").forEach(inp => {
     inp.addEventListener("change", async () => {
