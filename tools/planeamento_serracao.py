@@ -271,17 +271,23 @@ def estado_planeamento_serracao() -> dict:
                 # Rui, 2026-09-25).
                 db.marcar_inicio_a_tempo(card_id)
     # pedido explícito do Rui, 2026-10-14: a fila deve ficar sempre
-    # organizada por cliente (extraído do título "Cliente — Peça", ver
-    # criar_encomenda) e, dentro de cada cliente, manter a ordem que já
-    # tinha — mais recentes primeiro (regra anterior, pedido de 2026-09,
-    # para uma encomenda nova não ficar escondida ao fundo da fila). Dois
-    # sorts estáveis seguidos: o 2º (por cliente) preserva a ordem
-    # relativa que o 1º já deixou dentro de cada grupo. Cards sem o
-    # separador "Cliente — Peça" no título (raros, criados direto no
-    # Basecamp) ficam agrupados à parte, no fim.
+    # organizada por cliente e, dentro de cada cliente, manter a ordem que
+    # já tinha — mais recentes primeiro (regra anterior, pedido de
+    # 2026-09, para uma encomenda nova não ficar escondida ao fundo da
+    # fila). Dois sorts estáveis seguidos: o 2º (por cliente) preserva a
+    # ordem relativa que o 1º já deixou dentro de cada grupo.
+    #
+    # Não há um campo "cliente" guardado à parte — só o título do card
+    # (ver criar_encomenda, "Cliente — Peça"), e os títulos reais no
+    # Basecamp são inconsistentes (criados à mão por pessoas diferentes:
+    # "Interpall OF.615 — ...", "Palcax of 576-... — Tabuas", mas também
+    # "Palcax of 585-...-Barrotes" sem separador nenhum). A 1ª palavra do
+    # título, em minúsculas, é o que mais fielmente agrupa estes casos
+    # reais pelo mesmo cliente, verificado contra a fila em produção em
+    # 2026-10-14 — ao contrário de cortar no "—", que partia o cliente ao
+    # meio sempre que o número da OF vem colado ao nome antes do dash.
     bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
-    bolsa.sort(key=lambda c: (1, "") if " — " not in (c["titulo"] or "")
-               else (0, c["titulo"].split(" — ", 1)[0].strip().lower()))
+    bolsa.sort(key=lambda c: (c["titulo"] or "").split()[0].lower() if (c["titulo"] or "").strip() else "")
     capacidades = db.capacidades_linhas_producao_ecos_largos()
 
     logistica = []
