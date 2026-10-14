@@ -1065,6 +1065,101 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
     return {"ok": True, "fase": fase, "novo_estado": "aguarda", "url": resultado["url"]}
 
 
+def substituir_documento_portal(card_id: int, documento: str, download_url: str) -> dict:
+    """Substitui um documento já publicado num portal existente — pedido
+    real (Mary, 2026-10-14, ver card "Sofia Pinto"): quando a fase já
+    está "validada" (ou "aguarda"), abrir_fase_portal recusa-se a mexer
+    nela (só funciona em fases "prevista"), mas a designer pode na mesma
+    precisar de trocar o PDF por uma versão atualizada sem reabrir nem
+    revalidar nada. Usa isto para isso — nunca mexe no estado de
+    nenhuma fase, no cliente, nos honorários, no valor do produto/
+    transporte, nem em mais nenhum campo do portal; só troca o
+    documento indicado (e a imagem/capa derivada dele, quando aplicável).
+
+    `documento`:
+    - "apresentacao": troca o PDF de Apresentação do projeto e recalcula
+      a imagem de capa da fase "projeto" a partir dele.
+    - "conceito": troca o PDF "Conceito Psicoestético" e recalcula a
+      imagem da fase "conceito", reassociando as imagens de ambiente
+      pelo nome (mesma lógica de gerar_portal_projeto).
+    - "orcamento" ou "honorarios": só troca o PDF, não têm imagem
+      derivada nenhuma.
+
+    `download_url`: o "download_url" do PDF novo, tal como veio de
+    listar_pdfs_anexados_por_data (nunca um url obtido de outro lado,
+    ex: de um preview_url ou de um link dentro do HTML de um
+    comentário)."""
+    if documento not in ("apresentacao", "conceito", "orcamento", "honorarios"):
+        return {"erro": f"documento inválido: {documento!r} — tem de ser apresentacao, conceito, orcamento ou honorarios"}
+    if not download_url:
+        return {"erro": "falta o download_url do PDF novo"}
+
+    registo = db.obter_documento_gerado_por_card_id(card_id)
+    if not registo or registo["formato"] != "html":
+        return {"erro": f"não há nenhum portal gerado para o card {card_id}"}
+
+    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
+    honorarios_linhas = [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
+                         for l in projeto["honorarios"]["linhas"]]
+    fases_estado = {f["id"]: ({"estado": f["estado"], "data": f["data"]} if f.get("data")
+                              else {"estado": f["estado"]}) for f in projeto["fases"]}
+    contacto_cliente = projeto.get("clienteContacto") or {}
+
+    conceito_imagem = projeto["conceito"].get("imagem")
+    conceito_materiais = projeto["conceito"].get("materiais")
+    conceito_leitura = projeto["conceito"].get("leitura")
+    documento_conceito = projeto["documentos"].get("conceito")
+    documento_apresentacao = projeto["documentos"].get("apresentacao")
+    documento_orcamento = projeto["documentos"].get("orcamento")
+    documento_honorarios = projeto["documentos"].get("honorarios")
+    projeto_imagem = projeto.get("projetoImagem")
+    ambientes = projeto["ambientes"]
+
+    if documento == "apresentacao":
+        resultado = _extrair_imagem_apresentacao_pdf(download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de apresentação: {resultado['erro']}"}
+        documento_apresentacao = resultado["pdf_base64"]
+        projeto_imagem = resultado["imagem_base64"]
+    elif documento == "conceito":
+        resultado_imagens = _extrair_imagens_conceito_pdf(download_url)
+        if "erro" in resultado_imagens:
+            return {"erro": f"não consegui extrair a imagem do conceito: {resultado_imagens['erro']}"}
+        paginas = resultado_imagens["paginas"]
+        conceito_imagem = paginas[0]["imagem_base64"]
+        documento_conceito = resultado_imagens["pdf_base64"]
+        imagens_por_ambiente = {_normalizar_texto(p["titulo"]): p["imagem_base64"]
+                                for p in paginas if p["titulo"]}
+
+        def _imagem_ambiente(nome):
+            nome_norm = _normalizar_texto(nome)
+            for titulo_norm, imagem in imagens_por_ambiente.items():
+                if titulo_norm in nome_norm or nome_norm in titulo_norm:
+                    return imagem
+            return None
+        ambientes = [{"nome": a["nome"], "nota": a["nota"],
+                     "imagem": _imagem_ambiente(a["nome"]) or a.get("imagem")} for a in ambientes]
+    elif documento == "orcamento":
+        resultado = _baixar_pdf_base64(download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de orçamento: {resultado['erro']}"}
+        documento_orcamento = resultado["pdf_base64"]
+    else:  # honorarios
+        resultado = _baixar_pdf_base64(download_url)
+        if "erro" in resultado:
+            return {"erro": f"não consegui obter o documento de honorários: {resultado['erro']}"}
+        documento_honorarios = resultado["pdf_base64"]
+
+    resultado = _construir_e_gravar(
+        "Alma (substituição de documento)", card_id, projeto["cliente"], projeto["validade"],
+        projeto["honorarios"]["total"], honorarios_linhas, ambientes, fases_estado,
+        projeto.get("valorProduto"), conceito_imagem, conceito_materiais, conceito_leitura,
+        documento_apresentacao, documento_orcamento, documento_conceito, projeto_imagem,
+        documento_honorarios, contacto_cliente.get("telefone"), contacto_cliente.get("email"),
+        projeto.get("valorTransporte"))
+    return {"ok": True, "documento": documento, "url": resultado["url"]}
+
+
 _COLUNA_RECOMENDACOES = "Triagem"
 _PROJETO_RECOMENDACOES = "@ Interior Guider"
 _RESPONSAVEL_RECOMENDACOES = "Beatriz Barbosa"
@@ -1313,6 +1408,31 @@ TOOLS_PORTAL_PROJETO = [
                                      "description": "só para fase \"orcamento\", obrigatório: o valor da linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento (texto fixo \"Transporte, montagem e instalação de todo o equipamento acima mencionado...\"), já com IVA — o crédito de 10% nunca se aplica a este valor"}
             },
             "required": ["card_id", "fase", "download_url"]
+        }
+    },
+    {
+        "name": "substituir_documento_portal",
+        "description": (
+            "Substitui um documento já publicado num portal existente, SEM mexer no estado de "
+            "nenhuma fase (cliente, honorários, valor do produto/transporte, outras fases — tudo "
+            "fica exatamente como já estava). Usa isto quando alguém pede para atualizar um PDF "
+            "(Apresentação, Conceito, Orçamento ou Honorários) de um projeto cuja fase correspondente "
+            "JÁ está \"aguarda\" ou \"validada\" — nesse caso abrir_fase_portal recusa-se (só funciona "
+            "em fases ainda \"prevista\"), e esta é a ferramenta certa em vez disso. Para "
+            "\"apresentacao\" e \"conceito\", a imagem de capa da respetiva fase (e, no caso do "
+            "conceito, as imagens de cada ambiente) é recalculada automaticamente a partir do PDF "
+            "novo — nunca precisas de extrair nada tu mesma."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "card_id": {"type": "integer", "description": "id numérico do card do Basecamp"},
+                "documento": {"type": "string", "enum": ["apresentacao", "conceito", "orcamento", "honorarios"],
+                             "description": "qual documento substituir"},
+                "download_url": {"type": "string",
+                                 "description": "download_url do PDF novo, tal como veio de listar_pdfs_anexados_por_data — nunca um url obtido de outro lado"}
+            },
+            "required": ["card_id", "documento", "download_url"]
         }
     }
 ]
