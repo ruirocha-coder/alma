@@ -1368,7 +1368,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <!-- Pedido explícito do Rui (2026-10-14): uma coluna arquivada não
          pode continuar visível misturada com as abertas (fica confuso) —
          fica à parte, escondida por omissão, mas sempre consultável. -->
-    <div class="board" style="margin-top:16px">
+    <div class="board" style="margin-top:80px">
       <h2 id="colunasArquivadasToggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">
         <span id="colunasArquivadasSeta">▸</span> Levantamentos arquivados <span class="nota" id="colunasArquivadasNota"></span>
       </h2>
