@@ -862,7 +862,14 @@ def stock_por_artigo() -> list[dict]:
     artigo" do dashboard, ordenadas da maior para a menor quantidade. Um
     artigo com saldo negativo (défice de uma correção, pedido explícito
     do Rui, 2026-10-09) continua a aparecer, nunca é escondido — só se
-    ignora um artigo cujo total fique mesmo a zero."""
+    ignora um artigo sem nenhuma entrada/correção E sem registo nenhum
+    em `registar_artigo` (ver abaixo).
+
+    Pedido explícito do Rui (2026-10-14): um artigo recém-registado por
+    `registar_artigo` (nenhuma entrada ainda) continua a aparecer aqui
+    com saldo 0 — nunca escondido só porque ainda não chegou stock
+    nenhum desse tamanho — para já ganhar lugar em Limites e, assim que
+    tiver um Lmax definido, também na necessidade do Compras de Toro."""
     artigos = {}
 
     def _bucket(chave, tipo, comprimento, espessura):
@@ -891,10 +898,19 @@ def stock_por_artigo() -> list[dict]:
             a["por_categoria_kg"][c["categoria_qualidade"]] += float(c["quantidade_kg"])
 
     limites = db.limites_parkin()
+    for chave in limites:
+        if chave == "total" or chave in artigos or chave == _ARTIGO_DESCONHECIDO:
+            continue
+        try:
+            tipo, comprimento_txt, espessura = chave.split("|")
+        except ValueError:
+            continue
+        _bucket(chave, tipo, float(comprimento_txt), espessura)
+
     resultado = []
     for chave, a in artigos.items():
         total = sum(a["por_categoria_kg"].values()) + a["sem_categoria_kg"]
-        if abs(total) <= 1e-6:
+        if abs(total) <= 1e-6 and chave not in limites:
             continue
         lim = limites.get(chave) or {}
         resultado.append({
@@ -906,6 +922,26 @@ def stock_por_artigo() -> list[dict]:
         })
     resultado.sort(key=lambda x: _chave_ordenacao_artigo(x["tipo"], x["comprimento"], x["espessura"]))
     return resultado
+
+
+def registar_artigo(tipo: str, comprimento: float, espessura: str) -> dict:
+    """Regista um artigo (tipo+comprimento+espessura) no Park In mesmo
+    sem nenhuma entrada ainda — pedido explícito do Rui (2026-10-14): um
+    tamanho novo de toro deve poder aparecer já em "Stock por artigo"
+    (saldo 0) e ganhar lugar em Limites, antes de chegar a primeira
+    entrada. Só marca a existência (via parkin_limites, sem alterar
+    nenhum limite já definido); idempotente — registar outra vez um
+    artigo já existente não faz nada de diferente."""
+    if tipo not in TIPOS_VALIDOS:
+        return {"erro": f"tipo inválido: {tipo!r} — tem de ser um de {TIPOS_VALIDOS}"}
+    if espessura not in ESPESSURAS_VALIDAS:
+        return {"erro": f"espessura inválida: {espessura!r} — tem de ser uma de {ESPESSURAS_VALIDAS}"}
+    if not comprimento or comprimento <= 0:
+        return {"erro": "o comprimento é obrigatório e tem de ser maior que zero"}
+    chave = _chave_artigo(tipo, comprimento, espessura)
+    atual = db.limites_parkin().get(chave) or {}
+    db.definir_limite_parkin(chave, atual.get("minimo_kg"), atual.get("maximo_kg"))
+    return {"ok": True, "artigo": chave}
 
 
 _RE_CODIGO_FORNECEDOR = re.compile(r"^\s*\d+\s*[-–]\s*")
@@ -1281,6 +1317,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div id="correcaoMsg"></div>
 </div>
 
+<div class="sheet" id="sheetArtigo">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Registar artigo novo</h3>
+  <p class="sub" style="margin:0 0 12px">Para um tamanho de toro que ainda não teve nenhuma entrada — fica já visível em "Stock por artigo" com saldo 0, para poderes definir logo os Limites.</p>
+  <div class="frow"><label>Tipo</label>
+    <select id="aTipo"><option value="IN">IN</option><option value="MT">MT</option></select>
+  </div>
+  <div class="frow"><label>Comprimento (m)</label>
+    <input type="text" inputmode="decimal" id="aComprimento" placeholder="ex: 2,35">
+  </div>
+  <div class="frow"><label>Espessura</label>
+    <select id="aEspessura"><option value="normal">Normal</option><option value="fina">Fina</option></select>
+  </div>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bArtigoGuardar">Registar</button>
+  </div>
+  <div id="artigoMsg"></div>
+</div>
+
 <div class="sheet" id="sheetLimites" style="width:min(560px,calc(100vw - 32px))">
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Limites de stock</h3>
@@ -1302,6 +1358,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <button class="btn primary" id="bAbrirEntrada">+ Entrada</button>
     <button class="btn primary" id="bAbrirSaida">+ Saída</button>
     <button class="btn" id="bAbrirCorrecao">Correção</button>
+    <button class="btn" id="bAbrirArtigo">+ Artigo</button>
     <button class="btn ghost" id="bAbrirLimites" style="margin-left:auto">Limites</button>
   </div>
 
@@ -1749,6 +1806,24 @@ $("#bAbrirSaida").onclick = () => {
 };
 $("#bAbrirCorrecao").onclick = () => { $("#correcaoMsg").innerHTML=""; abrirSheet("#sheetCorrecao"); };
 $("#bAbrirLimites").onclick = () => { renderLimites(); abrirSheet("#sheetLimites"); };
+$("#bAbrirArtigo").onclick = () => {
+  $("#artigoMsg").innerHTML = ""; $("#aComprimento").value = "";
+  abrirSheet("#sheetArtigo");
+};
+$("#bArtigoGuardar").onclick = async () => {
+  const tipo = $("#aTipo").value, espessura = $("#aEspessura").value;
+  const comprimento = parseFloat($("#aComprimento").value.replace(",", "."));
+  if(!comprimento || comprimento <= 0){ $("#artigoMsg").innerHTML = '<div class="err">Indica um comprimento válido.</div>'; return; }
+  $("#bArtigoGuardar").disabled = true;
+  try{
+    const r = await fetch("/park-in/artigo", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({tipo, comprimento, espessura})});
+    const j = await r.json();
+    if(j.erro){ $("#artigoMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregar(); }
+  } catch(e){ $("#artigoMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bArtigoGuardar").disabled = false;
+};
 
 function atualizarSubCategoria(){
   const v = parseFloat($("#cQuantidade").value.replace(",","."));

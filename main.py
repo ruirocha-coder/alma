@@ -1067,6 +1067,19 @@ def park_in_limites(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
 
+@app.post("/park-in/artigo")
+def park_in_registar_artigo(corpo: dict = Body(...)):
+    """Regista um artigo novo (tipo+comprimento+espessura) mesmo sem
+    nenhuma entrada ainda — ver tools/parkin.registar_artigo."""
+    try:
+        comprimento = float(corpo.get("comprimento"))
+    except (TypeError, ValueError):
+        return JSONResponse({"erro": "comprimento tem de ser um número"}, status_code=400)
+    resultado = parkin.registar_artigo(corpo.get("tipo"), comprimento, corpo.get("espessura"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.get("/park-in/compras-toros/dados")
 def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
