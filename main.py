@@ -1122,7 +1122,7 @@ def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
     except (KeyError, TypeError, ValueError):
         return JSONResponse({"erro": "falta coluna_id"}, status_code=400)
     resultado = compras_toros.criar_card(coluna_id, corpo.get("fornecedor"), corpo.get("linhas") or [],
-                                         corpo.get("utilizador"))
+                                         corpo.get("utilizador"), corpo.get("notas"))
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)

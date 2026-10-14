@@ -1454,6 +1454,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="frow"><label>Fornecedor</label>
     <input type="text" id="cCardFornecedor" placeholder="nome do fornecedor">
   </div>
+  <div class="frow"><label>Notas</label>
+    <input type="text" id="cCardNotas" placeholder="opcional — fica visível também quando o card fechar">
+  </div>
   <p class="sub" style="margin:2px 0 8px">Artigo(s) e toneladas encomendadas:</p>
   <div id="cardLinhas" style="overflow-y:auto;flex:1"></div>
   <button class="btn" type="button" id="bCardAddLinha" style="margin-top:8px;align-self:flex-start">+ artigo</button>
@@ -2108,7 +2111,8 @@ function renderComprasToros(){
         <div class="kbar"><div class="f" style="width:${pct}%"></div></div>
         <div class="tot"><span>Em falta</span><span>${t(card.em_falta_kg)}</span></div>
         ${card.estado === "fechado"
-          ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>`
+          ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>
+             ${card.notas ? `<div class="nota-fecho" style="margin-top:4px">Notas: ${card.notas}</div>` : ''}`
           : `<div style="display:flex;gap:6px;margin-top:8px">
                <button class="btn" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirFecharCard(${card.id})">Fechar card</button>
                <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirMoverCard(${card.id})">Mover</button>
@@ -2186,7 +2190,7 @@ function linhaCardHtml(){
 }
 function abrirNovoCard(colunaId){
   novoCardColunaId = colunaId;
-  $("#cardMsg").innerHTML = ""; $("#cCardFornecedor").value = "";
+  $("#cardMsg").innerHTML = ""; $("#cCardFornecedor").value = ""; $("#cCardNotas").value = "";
   $("#cardLinhas").innerHTML = linhaCardHtml();
   abrirSheet("#sheetNovoCard");
 }
@@ -2196,6 +2200,7 @@ $("#cardLinhas").addEventListener("click", e => {
 });
 $("#bCardGuardar").onclick = async () => {
   const fornecedor = $("#cCardFornecedor").value.trim();
+  const notas = $("#cCardNotas").value.trim();
   if(!fornecedor){ $("#cardMsg").innerHTML = '<div class="err">O fornecedor é obrigatório.</div>'; return; }
   const linhas = [];
   for(const row of $("#cardLinhas").querySelectorAll(".klinha-row")){
@@ -2207,7 +2212,7 @@ $("#bCardGuardar").onclick = async () => {
   $("#bCardGuardar").disabled = true;
   try{
     const r = await fetch("/park-in/compras-toros/card", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({coluna_id: novoCardColunaId, fornecedor, linhas})});
+      body: JSON.stringify({coluna_id: novoCardColunaId, fornecedor, linhas, notas})});
     const j = await r.json();
     if(j.erro){ $("#cardMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
     else{ fecharSheets(); carregarComprasToros(); }
