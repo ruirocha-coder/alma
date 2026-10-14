@@ -1573,18 +1573,23 @@ function renderMarkdownEntrada(raw){
 }
 
 function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escalaForcada){
-  if(totalKg<=0) return "";
+  // pedido explícito do Rui (2026-10-14): a barra tem de aparecer sempre,
+  // mesmo com stock a zero ou negativo (artigo registado sem entradas
+  // ainda, ou saldo negativo por correção) — só o preenchimento fica a
+  // 0% nesses casos; os traços de mín/máx continuam sempre visíveis.
   const escala = escalaForcada || (Math.max(totalKg, maximo||0, 1) * 1.15);
   let segs = "";
-  for(const cat of ["Boa","Media","Fraca"]){
-    const v = porCategoria[cat]||0;
-    if(v<=0) continue;
-    segs += `<div class="seg" style="width:${v/totalKg*100}%;background:${CORES[cat]}" title="${NOMES_CAT[cat]}: ${t(v)}"></div>`;
+  if(totalKg>0){
+    for(const cat of ["Boa","Media","Fraca"]){
+      const v = porCategoria[cat]||0;
+      if(v<=0) continue;
+      segs += `<div class="seg" style="width:${v/totalKg*100}%;background:${CORES[cat]}" title="${NOMES_CAT[cat]}: ${t(v)}"></div>`;
+    }
+    if(semCategoria>0){
+      segs += `<div class="seg" style="width:${semCategoria/totalKg*100}%;background:var(--grey)" title="Sem avaliação: ${t(semCategoria)}"></div>`;
+    }
   }
-  if(semCategoria>0){
-    segs += `<div class="seg" style="width:${semCategoria/totalKg*100}%;background:var(--grey)" title="Sem avaliação: ${t(semCategoria)}"></div>`;
-  }
-  const largura = totalKg/escala*100;
+  const largura = totalKg>0 ? totalKg/escala*100 : 0;
   let linhas = "";
   if(minimo!=null) linhas += `<div class="lim" style="left:${minimo/escala*100}%"><span>mín ${t(minimo)}</span></div>`;
   if(maximo!=null) linhas += `<div class="lim max" style="left:${maximo/escala*100}%"><span>máx ${t(maximo)}</span></div>`;
