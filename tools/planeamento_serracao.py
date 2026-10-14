@@ -18,6 +18,7 @@
 # para lá, sem abrir este quadro, também ver quando a OF deve começar a
 # ser produzida.
 import math
+import re
 import time
 import unicodedata
 from datetime import date, timedelta
@@ -47,6 +48,18 @@ COLUNAS_OF_FLUXO = {"triagem", "programacao", "em producao", "produzido", "secag
 # localmente, por isso são pedidas uma a uma (ver basecamp.obter_cards),
 # nunca a coluna inteira.
 COLUNAS_OF = COLUNAS_OF_FLUXO | {"vendido"}
+
+# dimensões tipo "1140x88x18" (comprimento x largura x espessura, mm) no
+# título da OF — usado para ordenar a fila da mais pequena para a maior
+# (pedido explícito do Rui, 2026-10-14). Aceita também um "o"/"O" a fazer
+# de "0" (erro de escrita real visto em produção: "114ox88x18").
+_RE_DIMENSOES_OF = re.compile(r"(\d[0-9oO]*)\s*[xX]\s*(\d[0-9oO]*)\s*[xX]\s*(\d[0-9oO]*)")
+
+def _tamanho_titulo_of(titulo: str) -> tuple:
+    m = _RE_DIMENSOES_OF.search(titulo or "")
+    if not m:
+        return (math.inf, math.inf, math.inf)  # sem dimensões reconhecíveis, fica no fim
+    return tuple(int(g.replace("o", "0").replace("O", "0")) for g in m.groups())
 
 # linhas de produção reais da serração (mesmos nomes vistos nas colunas de
 # pessoal do Basecamp, confirmado ao vivo) — usadas aqui só como categorias
@@ -271,11 +284,13 @@ def estado_planeamento_serracao() -> dict:
                 # Rui, 2026-09-25).
                 db.marcar_inicio_a_tempo(card_id)
     # pedido explícito do Rui, 2026-10-14: a fila deve ficar sempre
-    # organizada por cliente e, dentro de cada cliente, manter a ordem que
-    # já tinha — mais recentes primeiro (regra anterior, pedido de
-    # 2026-09, para uma encomenda nova não ficar escondida ao fundo da
-    # fila). Dois sorts estáveis seguidos: o 2º (por cliente) preserva a
-    # ordem relativa que o 1º já deixou dentro de cada grupo.
+    # organizada por cliente e, dentro de cada cliente, da OF mais pequena
+    # para a maior (dimensões no título, ver _tamanho_titulo_of) — a
+    # ordem anterior dentro de cada cliente (mais recente primeiro, pedido
+    # de 2026-09) passa a ser só o desempate quando duas OFs têm
+    # exatamente o mesmo tamanho. Três sorts estáveis seguidos, do menos
+    # para o mais importante: cada um preserva a ordem relativa que o
+    # anterior já deixou dentro de cada grupo do critério seguinte.
     #
     # Não há um campo "cliente" guardado à parte — só o título do card
     # (ver criar_encomenda, "Cliente — Peça"), e os títulos reais no
@@ -287,6 +302,7 @@ def estado_planeamento_serracao() -> dict:
     # 2026-10-14 — ao contrário de cortar no "—", que partia o cliente ao
     # meio sempre que o número da OF vem colado ao nome antes do dash.
     bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
+    bolsa.sort(key=lambda c: _tamanho_titulo_of(c["titulo"]))
     bolsa.sort(key=lambda c: (c["titulo"] or "").split()[0].lower() if (c["titulo"] or "").strip() else "")
     capacidades = db.capacidades_linhas_producao_ecos_largos()
 
