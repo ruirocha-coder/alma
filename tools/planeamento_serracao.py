@@ -270,10 +270,18 @@ def estado_planeamento_serracao() -> dict:
                 # consultar o Basecamp para esta OF (pedido explícito do
                 # Rui, 2026-09-25).
                 db.marcar_inicio_a_tempo(card_id)
-    # encomendas mais recentes primeiro (pedido explícito do Rui, 2026-09)
-    # — não por prazo, para uma encomenda nova (normalmente ainda sem
-    # prazo definido) não ficar escondida ao fundo da fila.
+    # pedido explícito do Rui, 2026-10-14: a fila deve ficar sempre
+    # organizada por cliente (extraído do título "Cliente — Peça", ver
+    # criar_encomenda) e, dentro de cada cliente, manter a ordem que já
+    # tinha — mais recentes primeiro (regra anterior, pedido de 2026-09,
+    # para uma encomenda nova não ficar escondida ao fundo da fila). Dois
+    # sorts estáveis seguidos: o 2º (por cliente) preserva a ordem
+    # relativa que o 1º já deixou dentro de cada grupo. Cards sem o
+    # separador "Cliente — Peça" no título (raros, criados direto no
+    # Basecamp) ficam agrupados à parte, no fim.
     bolsa.sort(key=lambda c: c.get("criado_em") or "", reverse=True)
+    bolsa.sort(key=lambda c: (1, "") if " — " not in (c["titulo"] or "")
+               else (0, c["titulo"].split(" — ", 1)[0].strip().lower()))
     capacidades = db.capacidades_linhas_producao_ecos_largos()
 
     logistica = []
