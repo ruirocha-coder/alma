@@ -1058,6 +1058,24 @@ def park_in_correcao(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.get("/_debug-pdfs-card")
+def _debug_pdfs_card(card_id: int):
+    """Temporário: lista os PDFs anexados a um card do Basecamp (mais
+    recente primeiro) — para investigar/corrigir um portal de projeto."""
+    card = basecamp.obter_card(card_id, "@ Interior Guider")
+    if not card:
+        return JSONResponse({"erro": "card não encontrado"}, status_code=404)
+    pdfs = basecamp.listar_pdfs_anexados_por_data(card["comments_url"])
+    return {"card": card["titulo"], "pdfs": pdfs}
+
+@app.post("/_debug-substituir-documento-portal")
+def _debug_substituir_documento_portal(corpo: dict = Body(...)):
+    """Temporário: testa/corre substituir_documento_portal diretamente,
+    fora do chat — para investigar um erro reportado."""
+    resultado = portal_projeto.substituir_documento_portal(
+        int(corpo["card_id"]), corpo["documento"], corpo["download_url"])
+    return resultado
+
 @app.post("/park-in/limites")
 def park_in_limites(corpo: dict = Body(...)):
     """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
