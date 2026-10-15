@@ -1136,6 +1136,24 @@ def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/park-in/compras-toros/card/{card_id}/editar")
+def park_in_compras_toros_editar_card(card_id: int, corpo: dict = Body(...)):
+    """Edita fornecedor/data da encomenda/notas de um card já existente —
+    ver tools/compras_toros.editar_card."""
+    resultado = compras_toros.editar_card(card_id, corpo.get("fornecedor"), corpo.get("data_encomenda"),
+                                          corpo.get("notas"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/card/{card_id}/reabrir")
+def park_in_compras_toros_reabrir_card(card_id: int):
+    """Reabre um card fechado — ver tools/compras_toros.reabrir_card."""
+    resultado = compras_toros.reabrir_card(card_id)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/compras-toros/card/{card_id}/mover")
 def park_in_compras_toros_mover_card(card_id: int, corpo: dict = Body(...)):
     """Move um card para outro levantamento ainda aberto — ver

@@ -147,6 +147,38 @@ def fechar_card(card_id: int, fechado_por: str, nota_fecho: str = None) -> dict:
     return {"ok": True}
 
 
+def editar_card(card_id: int, fornecedor: str, data_encomenda: str, notas: str = None) -> dict:
+    """Edita fornecedor/data da encomenda/notas de um card já existente
+    (aberto ou fechado) — pedido explícito do Rui, 2026-10-15: poder
+    corrigir um card depois de criado. Não mexe nas linhas (artigo/
+    toneladas encomendadas) nem no estado — já pode haver talões abatidos
+    contra elas."""
+    card = db.card_compras_toros(card_id)
+    if not card:
+        return {"erro": "card não encontrado"}
+    fornecedor = (fornecedor or "").strip()
+    if not fornecedor:
+        return {"erro": "o fornecedor é obrigatório"}
+    if not data_encomenda:
+        return {"erro": "a data da encomenda é obrigatória"}
+    db.atualizar_card_compras_toros(card_id, fornecedor, data_encomenda, (notas or "").strip() or None)
+    return {"ok": True}
+
+
+def reabrir_card(card_id: int) -> dict:
+    """Reabre um card fechado (à mão ou automaticamente) — pedido
+    explícito do Rui, 2026-10-15. Limpa fechado_por/fechado_em/nota_fecho
+    (fica como se nunca tivesse sido fechado); se fechar outra vez,
+    fica tudo registado de novo."""
+    card = db.card_compras_toros(card_id)
+    if not card:
+        return {"erro": "card não encontrado"}
+    if card["estado"] != "fechado":
+        return {"erro": "este card já está aberto"}
+    db.reabrir_card_compras_toros(card_id)
+    return {"ok": True}
+
+
 def arquivar_coluna(coluna_id: int, arquivada_por: str = None) -> dict:
     db.arquivar_coluna_compras_toros(coluna_id, arquivada_por)
     return {"ok": True}

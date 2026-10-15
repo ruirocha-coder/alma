@@ -3117,6 +3117,25 @@ def fechar_card_compras_toros(card_id: int, fechado_por: str, nota_fecho: str = 
             )
         conn.commit()
 
+def atualizar_card_compras_toros(card_id: int, fornecedor: str, data_encomenda: str, notas: str = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE compras_toros_cards SET fornecedor = %s, data_encomenda = %s, notas = %s WHERE id = %s",
+                (fornecedor, data_encomenda, notas, card_id)
+            )
+        conn.commit()
+
+def reabrir_card_compras_toros(card_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE compras_toros_cards SET estado = 'aberto', fechado_por = NULL, fechado_em = NULL,
+                   nota_fecho = NULL WHERE id = %s""",
+                (card_id,)
+            )
+        conn.commit()
+
 def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
                                                        espessura: str) -> list[dict]:
     """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo

@@ -1497,6 +1497,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div id="moverMsg"></div>
 </div>
 
+<div class="sheet" id="sheetEditarCard">
+  <button class="close" data-close aria-label="Fechar">×</button>
+  <h3>Editar encomenda</h3>
+  <p class="sub" style="margin:0 0 12px">Não mexe nos artigos/toneladas encomendadas — já pode haver talões abatidos.</p>
+  <div class="frow"><label>Fornecedor</label>
+    <input type="text" id="eCardFornecedor" placeholder="nome do fornecedor">
+  </div>
+  <div class="frow"><label>Data da encomenda</label>
+    <input type="date" id="eCardData">
+  </div>
+  <div class="frow"><label>Notas</label>
+    <input type="text" id="eCardNotas" placeholder="opcional — fica visível também quando o card fechar">
+  </div>
+  <div class="acts">
+    <button class="btn" data-close>Cancelar</button>
+    <button class="btn primary" id="bEditarCardGuardar">Guardar</button>
+  </div>
+  <div id="editarCardMsg"></div>
+</div>
+
 <script>
 const $=s=>document.querySelector(s);
 const CORES={Boa:"#2E9E4F",Media:"#E0A02C",Fraca:"#C4452E"};
@@ -2121,10 +2141,15 @@ function renderComprasToros(){
         <div class="tot"><span>Em falta</span><span>${t(card.em_falta_kg)}</span></div>
         ${card.estado === "fechado"
           ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>
-             ${card.notas ? `<div class="nota-fecho" style="margin-top:4px">Notas: ${card.notas}</div>` : ''}`
+             ${card.notas ? `<div class="nota-fecho" style="margin-top:4px">Notas: ${card.notas}</div>` : ''}
+             <div style="display:flex;gap:6px;margin-top:8px">
+               <button class="btn" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirEditarCard(${card.id})">Editar</button>
+               <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="reabrirCard(${card.id})">Reabrir</button>
+             </div>`
           : `<div style="display:flex;gap:6px;margin-top:8px">
                <button class="btn" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirFecharCard(${card.id})">Fechar card</button>
                <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirMoverCard(${card.id})">Mover</button>
+               <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirEditarCard(${card.id})">Editar</button>
              </div>`}
       </div>`;
     }).join("");
@@ -2274,6 +2299,48 @@ $("#bMoverGuardar").onclick = async () => {
   } catch(e){ $("#moverMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bMoverGuardar").disabled = false;
 };
+
+function _cardPorId(cardId){
+  for(const c of dadosComprasToros.colunas){
+    const card = c.cards.find(cd => cd.id === cardId);
+    if(card) return card;
+  }
+  return null;
+}
+let editarCardId = null;
+function abrirEditarCard(cardId){
+  const card = _cardPorId(cardId);
+  if(!card) return;
+  editarCardId = cardId;
+  $("#editarCardMsg").innerHTML = "";
+  $("#eCardFornecedor").value = card.fornecedor;
+  $("#eCardData").value = card.data_encomenda || "";
+  $("#eCardNotas").value = card.notas || "";
+  abrirSheet("#sheetEditarCard");
+}
+$("#bEditarCardGuardar").onclick = async () => {
+  const fornecedor = $("#eCardFornecedor").value.trim();
+  const dataEncomenda = $("#eCardData").value;
+  const notas = $("#eCardNotas").value.trim();
+  if(!fornecedor){ $("#editarCardMsg").innerHTML = '<div class="err">O fornecedor é obrigatório.</div>'; return; }
+  if(!dataEncomenda){ $("#editarCardMsg").innerHTML = '<div class="err">A data da encomenda é obrigatória.</div>'; return; }
+  $("#bEditarCardGuardar").disabled = true;
+  try{
+    const r = await fetch(`/park-in/compras-toros/card/${editarCardId}/editar`, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({fornecedor, data_encomenda: dataEncomenda, notas})});
+    const j = await r.json();
+    if(j.erro){ $("#editarCardMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
+    else{ fecharSheets(); carregarComprasToros(); }
+  } catch(e){ $("#editarCardMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
+  $("#bEditarCardGuardar").disabled = false;
+};
+async function reabrirCard(cardId){
+  if(!confirm("Reabrir este card? Fica outra vez \"Aberto\" e perde o registo de quem/porque foi fechado.")) return;
+  const r = await fetch(`/park-in/compras-toros/card/${cardId}/reabrir`, {method:"POST"});
+  const j = await r.json();
+  if(j.erro){ alert(j.erro); return; }
+  carregarComprasToros();
+}
 
 carregar();
 setInterval(carregar, 60000);
