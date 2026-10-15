@@ -1127,6 +1127,23 @@ def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/_debug-reprocessar-excesso")
+def _debug_reprocessar_excesso(corpo: dict = Body(...)):
+    import db as _db
+    excesso_id = int(corpo.get("excesso_id"))
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT entrada_id FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse({"erro": "excesso não encontrado"}, status_code=404)
+            entrada_id = row["entrada_id"]
+            cur.execute("DELETE FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            cur.execute("DELETE FROM compras_toros_entradas_processadas WHERE entrada_id = %s", (entrada_id,))
+        conn.commit()
+    compras_toros.processar_abates_pendentes()
+    return JSONResponse({"ok": True, "entrada_id": entrada_id})
+
 @app.post("/park-in/compras-toros/card/{card_id}/fechar")
 def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
     """Fecho à mão de um card (entrega parcial/cancelamento) — ver
