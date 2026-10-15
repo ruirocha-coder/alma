@@ -541,17 +541,31 @@ def obter_cards(card_ids, projeto: str) -> tuple:
     nunca é tratado como "apagado". Só os ids realmente confirmados como
     inexistentes (404/arquivado) vão para o segundo grupo, que é o único
     que tools.planeamento_serracao._cards_of_ativos usa para decidir
-    apagar em definitivo um agendamento local."""
+    apagar em definitivo um agendamento local.
+
+    Bug real (Rui, 2026-10-15): mesmo nunca apagando nada, uma falha
+    transitória ainda fazia a OF desaparecer por completo do quadro
+    naquela leitura (sem nenhum dado perdido — reaparecia sozinha na
+    leitura seguinte, confirmado ao vivo), o que pareceu perda de
+    informação real a quem estava a olhar para o ecrã nesse instante.
+    Mais provável com várias OFs em "Vendido" confirmadas em paralelo de
+    uma vez (ver _cards_of_ativos) — maior hipótese de apanhar o Basecamp
+    a limitar pedidos (429). Uma segunda tentativa, com uma pequena
+    pausa, resolve a esmagadora maioria destas falhas sem esperar pela
+    leitura seguinte."""
     card_ids = list(card_ids)
     if not card_ids:
         return [], set()
     def _buscar(cid):
-        try:
-            return cid, obter_card(cid, projeto)
-        except httpx.HTTPError as e:
-            print(f"[basecamp] falha transitória a confirmar o card {cid} "
-                  f"(não tratado como apagado): {e!r}")
-            return cid, _ERRO_TRANSITORIO
+        for tentativa in (1, 2):
+            try:
+                return cid, obter_card(cid, projeto)
+            except httpx.HTTPError as e:
+                if tentativa == 2:
+                    print(f"[basecamp] falha transitória a confirmar o card {cid} "
+                          f"(não tratado como apagado): {e!r}")
+                    return cid, _ERRO_TRANSITORIO
+                time.sleep(1)
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(card_ids)) as executor:
         resultados = list(executor.map(_buscar, card_ids))
     encontrados = [r for _, r in resultados if r is not None and r is not _ERRO_TRANSITORIO]
