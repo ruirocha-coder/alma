@@ -3164,13 +3164,24 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
     primeiro (FIFO) — ver tools/compras_toros.processar_abates_pendentes.
     `criado_em_data` serve para a regra "só contam talões com data igual
-    ou posterior à criação do card"."""
+    ou posterior à criação do card".
+
+    Bug real (Rui, 2026-10-15): o fornecedor do card é texto livre (ex:
+    "Altri", escrito à mão ao criar o card) e o fornecedor do talão vem
+    tal e qual do Park In, muitas vezes o nome completo da empresa (ex:
+    "ALTRI FORESTAL SL") — a comparação exata nunca batia certo, e o
+    talão ficava sempre registado como excesso (visível, mas nunca
+    abatido ao card certo). Compara agora só a 1ª palavra, sem distinguir
+    maiúsculas/minúsculas — mesma solução já usada para agrupar clientes
+    em tools/planeamento_serracao.py contra o mesmo tipo de inconsistência
+    real nos nomes."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.criado_em::date AS criado_em_data
                    FROM compras_toros_linhas l JOIN compras_toros_cards c ON c.id = l.card_id
-                   WHERE c.estado = 'aberto' AND c.fornecedor = %s
+                   WHERE c.estado = 'aberto'
+                     AND lower(split_part(c.fornecedor, ' ', 1)) = lower(split_part(%s, ' ', 1))
                      AND l.tipo = %s AND l.comprimento = %s AND l.espessura = %s
                    ORDER BY c.criado_em ASC, l.id ASC""",
                 (fornecedor, tipo, comprimento, espessura)
