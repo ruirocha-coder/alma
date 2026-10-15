@@ -1127,19 +1127,6 @@ def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/_debug-del-card")
-def _debug_del_card(corpo: dict = Body(...)):
-    import db as _db
-    card_id = int(corpo.get("card_id"))
-    with _db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM compras_toros_abates WHERE linha_id IN "
-                        "(SELECT id FROM compras_toros_linhas WHERE card_id = %s)", (card_id,))
-            cur.execute("DELETE FROM compras_toros_linhas WHERE card_id = %s", (card_id,))
-            cur.execute("DELETE FROM compras_toros_cards WHERE id = %s", (card_id,))
-        conn.commit()
-    return JSONResponse({"ok": True})
-
 @app.post("/park-in/compras-toros/card/{card_id}/fechar")
 def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
     """Fecho à mão de um card (entrega parcial/cancelamento) — ver
