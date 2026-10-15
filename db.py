@@ -3174,13 +3174,24 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     abatido ao card certo). Compara agora só a 1ª palavra, sem distinguir
     maiúsculas/minúsculas — mesma solução já usada para agrupar clientes
     em tools/planeamento_serracao.py contra o mesmo tipo de inconsistência
-    real nos nomes."""
+    real nos nomes.
+
+    Bug real #2 (Rui, 2026-10-15): um card fica com estado 'aberto' para
+    sempre a menos que seja fechado à mão ou sozinho (ver fechar_card/
+    _tentar_fechar_card_automatico) — arquivar a COLUNA (levantamento)
+    nunca mexe no estado dos cards lá dentro. Um card de teste nunca
+    fechado, só deixado para trás num levantamento já arquivado, continuava
+    a competir pelo FIFO com os cards realmente ativos de levantamentos
+    em aberto — passa agora a exigir também que a coluna do card esteja
+    'aberta'."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.criado_em::date AS criado_em_data
-                   FROM compras_toros_linhas l JOIN compras_toros_cards c ON c.id = l.card_id
-                   WHERE c.estado = 'aberto'
+                   FROM compras_toros_linhas l
+                   JOIN compras_toros_cards c ON c.id = l.card_id
+                   JOIN compras_toros_colunas col ON col.id = c.coluna_id
+                   WHERE c.estado = 'aberto' AND col.estado = 'aberta'
                      AND lower(split_part(c.fornecedor, ' ', 1)) = lower(split_part(%s, ' ', 1))
                      AND l.tipo = %s AND l.comprimento = %s AND l.espessura = %s
                    ORDER BY c.criado_em ASC, l.id ASC""",
