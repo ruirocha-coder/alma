@@ -1497,10 +1497,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div id="moverMsg"></div>
 </div>
 
-<div class="sheet" id="sheetEditarCard">
+<div class="sheet" id="sheetEditarCard" style="width:min(560px,calc(100vw - 32px));max-height:min(680px,calc(100vh - 32px));display:flex;flex-direction:column">
   <button class="close" data-close aria-label="Fechar">×</button>
   <h3>Editar encomenda</h3>
-  <p class="sub" style="margin:0 0 12px">Não mexe nos artigos/toneladas encomendadas — já pode haver talões abatidos.</p>
   <div class="frow"><label>Fornecedor</label>
     <input type="text" id="eCardFornecedor" placeholder="nome do fornecedor">
   </div>
@@ -1510,6 +1509,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="frow"><label>Notas</label>
     <input type="text" id="eCardNotas" placeholder="opcional — fica visível também quando o card fechar">
   </div>
+  <p class="sub" style="margin:2px 0 8px">Artigo(s) e toneladas encomendadas:</p>
+  <div id="editarCardLinhas" style="overflow-y:auto;flex:1"></div>
+  <button class="btn" type="button" id="bEditarCardAddLinha" style="margin-top:8px;align-self:flex-start">+ artigo</button>
   <div class="acts">
     <button class="btn" data-close>Cancelar</button>
     <button class="btn primary" id="bEditarCardGuardar">Guardar</button>
@@ -2308,29 +2310,93 @@ function _cardPorId(cardId){
   return null;
 }
 let editarCardId = null;
+let editarCardColunaId = null;
+function linhaEditarExistenteHtml(l){
+  return `
+    <div class="klinha-row" data-linha-id="${l.id}">
+      <span style="flex:1;font-size:13px">${l.artigo}</span>
+      <input type="text" inputmode="decimal" class="qtd" style="width:84px"
+        value="${(l.encomendado_kg/1000).toLocaleString('pt-PT',{minimumFractionDigits:1,maximumFractionDigits:1})}">
+      ${l.entregue_kg>0
+        ? `<span style="font-size:11px;color:var(--dim)" title="Já entregue ${t(l.entregue_kg)} — não pode ser removida">entregue</span>`
+        : `<button type="button" class="rm" title="Remover">✕</button>`}
+    </div>`;
+}
+function linhaEditarNovaHtml(){
+  const coluna = dadosComprasToros.colunas.find(c => c.id === editarCardColunaId);
+  const opcoes = coluna.necessidades.map(n =>
+    `<option value="${n.tipo}|${n.comprimento}|${n.espessura}">${n.artigo}</option>`).join("");
+  return `
+    <div class="klinha-row">
+      <select class="art-sel">${opcoes}</select>
+      <input type="text" inputmode="decimal" class="qtd" placeholder="toneladas">
+      <button type="button" class="rm" title="Remover">✕</button>
+    </div>`;
+}
 function abrirEditarCard(cardId){
   const card = _cardPorId(cardId);
   if(!card) return;
+  const coluna = dadosComprasToros.colunas.find(c => c.cards.some(cd => cd.id === cardId));
   editarCardId = cardId;
+  editarCardColunaId = coluna.id;
   $("#editarCardMsg").innerHTML = "";
   $("#eCardFornecedor").value = card.fornecedor;
   $("#eCardData").value = card.data_encomenda || "";
   $("#eCardNotas").value = card.notas || "";
+  $("#editarCardLinhas").innerHTML = card.linhas.map(linhaEditarExistenteHtml).join("");
   abrirSheet("#sheetEditarCard");
 }
+$("#bEditarCardAddLinha").onclick = () => { $("#editarCardLinhas").insertAdjacentHTML("beforeend", linhaEditarNovaHtml()); };
+$("#editarCardLinhas").addEventListener("click", async e => {
+  if(!e.target.classList.contains("rm")) return;
+  const row = e.target.closest(".klinha-row");
+  const linhaId = row.dataset.linhaId;
+  if(!linhaId){ row.remove(); return; }  // linha nova ainda não guardada, só sai da vista
+  if($("#editarCardLinhas").children.length <= 1){ alert("O card tem de ter pelo menos uma linha."); return; }
+  if(!confirm("Remover este artigo do card?")) return;
+  const r = await fetch(`/park-in/compras-toros/linha/${linhaId}/remover`, {method:"POST"});
+  const j = await r.json();
+  if(j.erro){ alert(j.erro); return; }
+  row.remove();
+});
 $("#bEditarCardGuardar").onclick = async () => {
   const fornecedor = $("#eCardFornecedor").value.trim();
   const dataEncomenda = $("#eCardData").value;
   const notas = $("#eCardNotas").value.trim();
   if(!fornecedor){ $("#editarCardMsg").innerHTML = '<div class="err">O fornecedor é obrigatório.</div>'; return; }
   if(!dataEncomenda){ $("#editarCardMsg").innerHTML = '<div class="err">A data da encomenda é obrigatória.</div>'; return; }
+  const rows = [...$("#editarCardLinhas").querySelectorAll(".klinha-row")];
+  for(const row of rows){
+    const qtd = parseFloat(row.querySelector(".qtd").value.replace(",", "."));
+    if(!qtd || qtd <= 0){ $("#editarCardMsg").innerHTML = '<div class="err">Indica as toneladas em todas as linhas.</div>'; return; }
+  }
   $("#bEditarCardGuardar").disabled = true;
   try{
-    const r = await fetch(`/park-in/compras-toros/card/${editarCardId}/editar`, {method:"POST", headers:{"Content-Type":"application/json"},
+    let r = await fetch(`/park-in/compras-toros/card/${editarCardId}/editar`, {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({fornecedor, data_encomenda: dataEncomenda, notas})});
-    const j = await r.json();
-    if(j.erro){ $("#editarCardMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
-    else{ fecharSheets(); carregarComprasToros(); }
+    let j = await r.json();
+    if(j.erro){ $("#editarCardMsg").innerHTML = `<div class="err">${j.erro}</div>`; $("#bEditarCardGuardar").disabled = false; return; }
+
+    for(const row of rows){
+      const qtd = parseFloat(row.querySelector(".qtd").value.replace(",", "."));
+      const linhaId = row.dataset.linhaId;
+      if(linhaId){
+        r = await fetch(`/park-in/compras-toros/linha/${linhaId}/atualizar`, {method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({encomendado_kg: qtd*1000})});
+      } else {
+        const [tipo, comprimento, espessura] = row.querySelector(".art-sel").value.split("|");
+        r = await fetch(`/park-in/compras-toros/card/${editarCardId}/linha`, {method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({tipo, comprimento: parseFloat(comprimento), espessura, encomendado_kg: qtd*1000})});
+      }
+      j = await r.json();
+      if(j.erro){
+        $("#editarCardMsg").innerHTML = `<div class="err">${j.erro}</div>`;
+        $("#bEditarCardGuardar").disabled = false;
+        carregarComprasToros();
+        return;
+      }
+    }
+    fecharSheets(); carregarComprasToros();
   } catch(e){ $("#editarCardMsg").innerHTML = `<div class="err">Falhou: ${e}</div>`; }
   $("#bEditarCardGuardar").disabled = false;
 };

@@ -3039,6 +3039,29 @@ def criar_linha_compras_toros(card_id: int, tipo: str, comprimento: float, espes
         conn.commit()
     return id_gerado
 
+def linha_compras_toros(linha_id: int) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, card_id, tipo, comprimento, espessura, encomendado_kg, entregue_kg
+                   FROM compras_toros_linhas WHERE id = %s""",
+                (linha_id,)
+            )
+            return cur.fetchone()
+
+def atualizar_linha_compras_toros(linha_id: int, encomendado_kg: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE compras_toros_linhas SET encomendado_kg = %s WHERE id = %s", (encomendado_kg, linha_id))
+        conn.commit()
+
+def remover_linha_compras_toros(linha_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM compras_toros_abates WHERE linha_id = %s", (linha_id,))
+            cur.execute("DELETE FROM compras_toros_linhas WHERE id = %s", (linha_id,))
+        conn.commit()
+
 def cards_compras_toros(coluna_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:

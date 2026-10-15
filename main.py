@@ -1154,6 +1154,34 @@ def park_in_compras_toros_reabrir_card(card_id: int):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/park-in/compras-toros/linha/{linha_id}/atualizar")
+def park_in_compras_toros_atualizar_linha(linha_id: int, corpo: dict = Body(...)):
+    """Corrige as toneladas encomendadas de uma linha já existente — ver
+    tools/compras_toros.atualizar_linha."""
+    resultado = compras_toros.atualizar_linha(linha_id, corpo.get("encomendado_kg"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/card/{card_id}/linha")
+def park_in_compras_toros_adicionar_linha(card_id: int, corpo: dict = Body(...)):
+    """Acrescenta um artigo a um card já existente — ver
+    tools/compras_toros.adicionar_linha."""
+    resultado = compras_toros.adicionar_linha(card_id, corpo.get("tipo"), corpo.get("comprimento"),
+                                              corpo.get("espessura"), corpo.get("encomendado_kg"))
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
+@app.post("/park-in/compras-toros/linha/{linha_id}/remover")
+def park_in_compras_toros_remover_linha(linha_id: int):
+    """Remove uma linha de um card (só se ainda sem entregas) — ver
+    tools/compras_toros.remover_linha."""
+    resultado = compras_toros.remover_linha(linha_id)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/compras-toros/card/{card_id}/mover")
 def park_in_compras_toros_mover_card(card_id: int, corpo: dict = Body(...)):
     """Move um card para outro levantamento ainda aberto — ver

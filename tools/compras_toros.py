@@ -150,9 +150,9 @@ def fechar_card(card_id: int, fechado_por: str, nota_fecho: str = None) -> dict:
 def editar_card(card_id: int, fornecedor: str, data_encomenda: str, notas: str = None) -> dict:
     """Edita fornecedor/data da encomenda/notas de um card já existente
     (aberto ou fechado) — pedido explícito do Rui, 2026-10-15: poder
-    corrigir um card depois de criado. Não mexe nas linhas (artigo/
-    toneladas encomendadas) nem no estado — já pode haver talões abatidos
-    contra elas."""
+    corrigir um card depois de criado. Não mexe no estado nem nas linhas
+    (ver atualizar_linha/adicionar_linha/remover_linha, abaixo, para
+    editar artigos/toneladas)."""
     card = db.card_compras_toros(card_id)
     if not card:
         return {"erro": "card não encontrado"}
@@ -176,6 +176,56 @@ def reabrir_card(card_id: int) -> dict:
     if card["estado"] != "fechado":
         return {"erro": "este card já está aberto"}
     db.reabrir_card_compras_toros(card_id)
+    return {"ok": True}
+
+
+def atualizar_linha(linha_id: int, encomendado_kg: float) -> dict:
+    """Corrige as toneladas encomendadas de uma linha já existente —
+    pedido explícito do Rui, 2026-10-15. Não pode ficar abaixo do que já
+    foi entregue (perderia o sentido do "em falta" e do "excesso")."""
+    linha = db.linha_compras_toros(linha_id)
+    if not linha:
+        return {"erro": "linha não encontrada"}
+    if not encomendado_kg or float(encomendado_kg) <= 0:
+        return {"erro": "as toneladas encomendadas têm de ser maiores que zero"}
+    encomendado_kg = float(encomendado_kg)
+    if encomendado_kg < float(linha["entregue_kg"]):
+        return {"erro": f"não pode ficar abaixo do que já foi entregue ({round(float(linha['entregue_kg'])/1000, 1)} t)"}
+    db.atualizar_linha_compras_toros(linha_id, encomendado_kg)
+    _tentar_fechar_card_automatico(linha["card_id"])
+    return {"ok": True}
+
+
+def adicionar_linha(card_id: int, tipo: str, comprimento: float, espessura: str, encomendado_kg: float) -> dict:
+    """Acrescenta um artigo novo a um card já existente — pedido
+    explícito do Rui, 2026-10-15."""
+    card = db.card_compras_toros(card_id)
+    if not card:
+        return {"erro": "card não encontrado"}
+    if tipo not in parkin.TIPOS_VALIDOS:
+        return {"erro": f"tipo inválido: {tipo!r} — tem de ser um de {parkin.TIPOS_VALIDOS}"}
+    if espessura not in parkin.ESPESSURAS_VALIDAS:
+        return {"erro": f"espessura inválida: {espessura!r} — tem de ser uma de {parkin.ESPESSURAS_VALIDAS}"}
+    if not comprimento or float(comprimento) <= 0:
+        return {"erro": "o comprimento é obrigatório e tem de ser maior que zero"}
+    if not encomendado_kg or float(encomendado_kg) <= 0:
+        return {"erro": "as toneladas encomendadas têm de ser maiores que zero"}
+    linha_id = db.criar_linha_compras_toros(card_id, tipo, float(comprimento), espessura, float(encomendado_kg))
+    return {"ok": True, "linha_id": linha_id}
+
+
+def remover_linha(linha_id: int) -> dict:
+    """Remove uma linha de um card — só se ainda não tiver nada entregue
+    (já teria talões abatidos a perder o rasto). O card tem de ficar
+    sempre com pelo menos uma linha. Pedido explícito do Rui, 2026-10-15."""
+    linha = db.linha_compras_toros(linha_id)
+    if not linha:
+        return {"erro": "linha não encontrada"}
+    if float(linha["entregue_kg"]) > 0:
+        return {"erro": "não é possível remover — já há talões abatidos a esta linha"}
+    if len(db.linhas_compras_toros_do_card(linha["card_id"])) <= 1:
+        return {"erro": "o card tem de ter pelo menos uma linha"}
+    db.remover_linha_compras_toros(linha_id)
     return {"ok": True}
 
 
