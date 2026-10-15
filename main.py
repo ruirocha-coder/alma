@@ -1127,23 +1127,6 @@ def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/_debug-desfazer-abate")
-def _debug_desfazer_abate(corpo: dict = Body(...)):
-    import db as _db
-    entrada_id = int(corpo.get("entrada_id"))
-    with _db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT linha_id, quantidade_kg FROM compras_toros_abates WHERE entrada_id = %s", (entrada_id,))
-            abates = cur.fetchall()
-            for a in abates:
-                cur.execute("UPDATE compras_toros_linhas SET entregue_kg = entregue_kg - %s WHERE id = %s",
-                           (a["quantidade_kg"], a["linha_id"]))
-            cur.execute("DELETE FROM compras_toros_abates WHERE entrada_id = %s", (entrada_id,))
-            cur.execute("DELETE FROM compras_toros_entradas_processadas WHERE entrada_id = %s", (entrada_id,))
-        conn.commit()
-    compras_toros.processar_abates_pendentes()
-    return JSONResponse({"ok": True, "abates_desfeitos": len(abates)})
-
 @app.post("/park-in/compras-toros/card/{card_id}/fechar")
 def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
     """Fecho à mão de um card (entrega parcial/cancelamento) — ver
