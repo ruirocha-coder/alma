@@ -97,17 +97,21 @@ def atualizar_necessidade(necessidade_id: int, necessidade_kg: float) -> dict:
     return {"ok": True}
 
 
-def criar_card(coluna_id: int, fornecedor: str, linhas: list, criado_por: str = None, notas: str = None) -> dict:
+def criar_card(coluna_id: int, fornecedor: str, data_encomenda: str, linhas: list, criado_por: str = None,
+               notas: str = None) -> dict:
     """Cria um card (encomenda a um fornecedor) com uma ou mais linhas
     (artigo + toneladas encomendadas). `linhas`: lista de
-    {"tipo","comprimento","espessura","encomendado_kg"}. `notas` é um
-    campo livre que fica visível no card e, em especial, quando o card
-    fecha (pedido explícito do Rui, 2026-10-14) — ao contrário de
-    nota_fecho, pode ser escrito logo na criação, antes de o card
-    fechar."""
+    {"tipo","comprimento","espessura","encomendado_kg"}. `data_encomenda`
+    (data em que a encomenda foi feita ao fornecedor) é obrigatória
+    (pedido explícito do Rui, 2026-10-15). `notas` é um campo livre que
+    fica visível no card e, em especial, quando o card fecha (pedido
+    explícito do Rui, 2026-10-14) — ao contrário de nota_fecho, pode ser
+    escrito logo na criação, antes de o card fechar."""
     fornecedor = (fornecedor or "").strip()
     if not fornecedor:
         return {"erro": "o fornecedor é obrigatório"}
+    if not data_encomenda:
+        return {"erro": "a data da encomenda é obrigatória"}
     if not linhas:
         return {"erro": "o card tem de ter pelo menos uma linha (artigo + toneladas)"}
     for l in linhas:
@@ -121,7 +125,7 @@ def criar_card(coluna_id: int, fornecedor: str, linhas: list, criado_por: str = 
             return {"erro": "as toneladas encomendadas têm de ser maiores que zero"}
 
     notas = (notas or "").strip() or None
-    card_id = db.criar_card_compras_toros(coluna_id, fornecedor, criado_por, notas)
+    card_id = db.criar_card_compras_toros(coluna_id, fornecedor, data_encomenda, criado_por, notas)
     for l in linhas:
         db.criar_linha_compras_toros(card_id, l["tipo"], float(l["comprimento"]), l["espessura"],
                                      float(l["encomendado_kg"]))
@@ -280,7 +284,9 @@ def dados_quadro() -> dict:
             encomendado = sum(float(l["encomendado_kg"]) for l in linhas_card)
             entregue = sum(float(l["entregue_kg"]) for l in linhas_card)
             cards_resultado.append({
-                "id": card["id"], "fornecedor": card["fornecedor"], "estado": card["estado"],
+                "id": card["id"], "fornecedor": card["fornecedor"],
+                "data_encomenda": card["data_encomenda"].isoformat() if card["data_encomenda"] else None,
+                "estado": card["estado"],
                 "nota_fecho": card["nota_fecho"], "notas": card["notas"], "criado_por": card["criado_por"],
                 "criado_em": card["criado_em"].isoformat() if card["criado_em"] else None,
                 "fechado_por": card["fechado_por"],

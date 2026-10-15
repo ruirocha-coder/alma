@@ -403,6 +403,7 @@ CREATE TABLE IF NOT EXISTS compras_toros_cards (
     id SERIAL PRIMARY KEY,
     coluna_id INTEGER NOT NULL REFERENCES compras_toros_colunas(id),
     fornecedor TEXT NOT NULL,
+    data_encomenda DATE,
     estado TEXT NOT NULL DEFAULT 'aberto',   -- 'aberto' | 'fechado'
     nota_fecho TEXT,
     notas TEXT,
@@ -802,6 +803,12 @@ ALTER TABLE parkin_correcoes ADD COLUMN IF NOT EXISTS entrada_id INTEGER REFEREN
 -- ficar escrito deve aparecer também quando o card fecha, incluindo um
 -- fecho automático (que nunca tem nota_fecho própria).
 ALTER TABLE compras_toros_cards ADD COLUMN IF NOT EXISTS notas TEXT;
+
+-- pedido explícito do Rui (2026-10-15): data da encomenda ao fornecedor
+-- no card — obrigatória à criação (validado em
+-- tools/compras_toros.criar_card, não aqui, para não partir cards já
+-- existentes sem essa data).
+ALTER TABLE compras_toros_cards ADD COLUMN IF NOT EXISTS data_encomenda DATE;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -3006,12 +3013,14 @@ def arquivar_coluna_compras_toros(coluna_id: int, arquivada_por: str = None):
             )
         conn.commit()
 
-def criar_card_compras_toros(coluna_id: int, fornecedor: str, criado_por: str = None, notas: str = None) -> int:
+def criar_card_compras_toros(coluna_id: int, fornecedor: str, data_encomenda: str, criado_por: str = None,
+                             notas: str = None) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO compras_toros_cards (coluna_id, fornecedor, criado_por, notas) VALUES (%s,%s,%s,%s) RETURNING id",
-                (coluna_id, fornecedor, criado_por, notas)
+                """INSERT INTO compras_toros_cards (coluna_id, fornecedor, data_encomenda, criado_por, notas)
+                   VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+                (coluna_id, fornecedor, data_encomenda, criado_por, notas)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()
@@ -3034,7 +3043,8 @@ def cards_compras_toros(coluna_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, fornecedor, estado, nota_fecho, notas, criado_por, criado_em, fechado_por, fechado_em
+                """SELECT id, fornecedor, data_encomenda, estado, nota_fecho, notas, criado_por, criado_em,
+                          fechado_por, fechado_em
                    FROM compras_toros_cards WHERE coluna_id = %s ORDER BY criado_em ASC, id ASC""",
                 (coluna_id,)
             )
@@ -3044,8 +3054,8 @@ def card_compras_toros(card_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, coluna_id, fornecedor, estado, nota_fecho, notas, criado_por, criado_em,
-                          fechado_por, fechado_em
+                """SELECT id, coluna_id, fornecedor, data_encomenda, estado, nota_fecho, notas, criado_por,
+                          criado_em, fechado_por, fechado_em
                    FROM compras_toros_cards WHERE id = %s""",
                 (card_id,)
             )

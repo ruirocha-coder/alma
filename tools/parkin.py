@@ -1454,6 +1454,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="frow"><label>Fornecedor</label>
     <input type="text" id="cCardFornecedor" placeholder="nome do fornecedor">
   </div>
+  <div class="frow"><label>Data da encomenda</label>
+    <input type="date" id="cCardData">
+  </div>
   <div class="frow"><label>Notas</label>
     <input type="text" id="cCardNotas" placeholder="opcional — fica visível também quando o card fechar">
   </div>
@@ -2111,6 +2114,7 @@ function renderComprasToros(){
       <div class="kcard ${card.estado}">
         <div class="forn"><span>${card.fornecedor}</span>
           <span class="kbadge ${card.estado}">${card.estado === "aberto" ? "Aberto" : "Fechado"}</span></div>
+        ${card.data_encomenda ? `<div class="nota-fecho">Encomenda: ${dataPt(card.data_encomenda)}</div>` : ''}
         ${card.linhas.map(l => `
           <div class="linha"><span>${l.artigo}</span><span>${t(l.entregue_kg)} / ${t(l.encomendado_kg)}</span></div>`).join("")}
         <div class="kbar"><div class="f" style="width:${pct}%"></div></div>
@@ -2196,6 +2200,7 @@ function linhaCardHtml(){
 function abrirNovoCard(colunaId){
   novoCardColunaId = colunaId;
   $("#cardMsg").innerHTML = ""; $("#cCardFornecedor").value = ""; $("#cCardNotas").value = "";
+  $("#cCardData").value = new Date().toISOString().slice(0,10);
   $("#cardLinhas").innerHTML = linhaCardHtml();
   abrirSheet("#sheetNovoCard");
 }
@@ -2205,8 +2210,10 @@ $("#cardLinhas").addEventListener("click", e => {
 });
 $("#bCardGuardar").onclick = async () => {
   const fornecedor = $("#cCardFornecedor").value.trim();
+  const dataEncomenda = $("#cCardData").value;
   const notas = $("#cCardNotas").value.trim();
   if(!fornecedor){ $("#cardMsg").innerHTML = '<div class="err">O fornecedor é obrigatório.</div>'; return; }
+  if(!dataEncomenda){ $("#cardMsg").innerHTML = '<div class="err">A data da encomenda é obrigatória.</div>'; return; }
   const linhas = [];
   for(const row of $("#cardLinhas").querySelectorAll(".klinha-row")){
     const [tipo, comprimento, espessura] = row.querySelector(".art-sel").value.split("|");
@@ -2217,7 +2224,7 @@ $("#bCardGuardar").onclick = async () => {
   $("#bCardGuardar").disabled = true;
   try{
     const r = await fetch("/park-in/compras-toros/card", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({coluna_id: novoCardColunaId, fornecedor, linhas, notas})});
+      body: JSON.stringify({coluna_id: novoCardColunaId, fornecedor, data_encomenda: dataEncomenda, linhas, notas})});
     const j = await r.json();
     if(j.erro){ $("#cardMsg").innerHTML = `<div class="err">${j.erro}</div>`; }
     else{ fecharSheets(); carregarComprasToros(); }
