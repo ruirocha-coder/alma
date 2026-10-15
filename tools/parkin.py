@@ -2137,13 +2137,13 @@ function renderComprasToros(){
         <div class="forn"><span>${card.fornecedor}</span>
           <span class="kbadge ${card.estado}">${card.estado === "aberto" ? "Aberto" : "Fechado"}</span></div>
         ${card.data_encomenda ? `<div class="nota-fecho">Encomenda: ${dataPt(card.data_encomenda)}</div>` : ''}
+        ${card.notas ? `<div class="nota-fecho">Notas: ${card.notas}</div>` : ''}
         ${card.linhas.map(l => `
           <div class="linha"><span>${l.artigo}</span><span>${t(l.entregue_kg)} / ${t(l.encomendado_kg)}</span></div>`).join("")}
         <div class="kbar"><div class="f" style="width:${pct}%"></div></div>
         <div class="tot"><span>Em falta</span><span>${t(card.em_falta_kg)}</span></div>
         ${card.estado === "fechado"
           ? `<div class="nota-fecho">Fechado por ${card.fechado_por}${card.nota_fecho ? ' — ' + card.nota_fecho : ''}</div>
-             ${card.notas ? `<div class="nota-fecho" style="margin-top:4px">Notas: ${card.notas}</div>` : ''}
              <div style="display:flex;gap:6px;margin-top:8px">
                <button class="btn" type="button" style="padding:5px 10px;font-size:12.5px" onclick="abrirEditarCard(${card.id})">Editar</button>
                <button class="btn ghost" type="button" style="padding:5px 10px;font-size:12.5px" onclick="reabrirCard(${card.id})">Reabrir</button>
