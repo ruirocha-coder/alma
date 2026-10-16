@@ -129,9 +129,12 @@ def _gerar_mensagem(analise: str) -> str:
     # (thinking) sozinho não chegou, o modelo continuou a escrever a
     # deliberação na resposta visível mesmo com esse canal disponível. Só
     # o que estiver entre <mensagem_final>...</mensagem_final> é publicado.
+    # Folga generosa de tokens (bug real #2, mesma data): com menos
+    # espaço, o pensamento por vezes consumia tudo antes de escrever o
+    # texto final, saindo a resposta vazia.
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=2000,
-        thinking={"type": "enabled", "budget_tokens": 1024},
+        model="claude-sonnet-4-6", max_tokens=4000,
+        thinking={"type": "enabled", "budget_tokens": 1500},
         system=MISSAO_MENSAGEM_DIARIA_ECOS_LARGOS,
         messages=[{"role": "user", "content": entrada}]
     )

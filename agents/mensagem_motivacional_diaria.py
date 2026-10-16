@@ -283,9 +283,16 @@ def _gerar_mensagem(analise_projetos: str, contexto_dia: str, mensagens_recentes
     # que estiver entre essas marcas é publicado, tudo o resto (qualquer
     # texto antes/depois) é descartado, seja o que for que o modelo tenha
     # decidido escrever lá fora.
+    # Bug real #2 (Rui, 2026-10-16): com max_tokens=2000 e budget_tokens=
+    # 1024, o pensamento às vezes consumia TODO o espaço disponível antes
+    # de conseguir escrever o texto final — a resposta saía cortada a meio
+    # do pensamento, sem nenhum bloco de texto (texto final vazio).
+    # budget_tokens é só um alvo mínimo, o modelo pode ultrapassá-lo; só
+    # max_tokens é o limite rígido do total (pensamento + texto). Folga
+    # generosa para nunca mais acontecer.
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=2000,
-        thinking={"type": "enabled", "budget_tokens": 1024},
+        model="claude-sonnet-4-6", max_tokens=4000,
+        thinking={"type": "enabled", "budget_tokens": 1500},
         system=MISSAO_MENSAGEM_DIARIA,
         messages=[{"role": "user", "content": entrada}]
     )
