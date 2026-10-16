@@ -1424,11 +1424,16 @@ def _debug_aplicar_excesso_manual(corpo: dict = Body(...)):
 
 @app.post("/_debug-testar-geracao-mensagem")
 def _debug_testar_geracao_mensagem():
-    analise = mensagem_motivacional_diaria._analisar_projetos()
-    contexto = mensagem_motivacional_diaria._contexto_do_dia()
-    recentes = mensagem_motivacional_diaria._mensagens_recentes()
-    texto = mensagem_motivacional_diaria._gerar_mensagem(analise, contexto, recentes)
-    return JSONResponse({"texto": texto})
+    import traceback
+    try:
+        analise = mensagem_motivacional_diaria._analisar_projetos()
+        contexto = mensagem_motivacional_diaria._contexto_do_dia()
+        recentes = mensagem_motivacional_diaria._mensagens_recentes()
+        texto = mensagem_motivacional_diaria._gerar_mensagem(analise, contexto, recentes)
+        return JSONResponse({"texto": texto})
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                            status_code=500)
 
 @app.post("/_debug-corrigir-mensagem-diaria")
 def _debug_corrigir_mensagem_diaria():
