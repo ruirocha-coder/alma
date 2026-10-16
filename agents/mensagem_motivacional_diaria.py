@@ -291,7 +291,14 @@ def _gerar_mensagem(analise_projetos: str, contexto_dia: str, mensagens_recentes
     )
     texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
     m = re.search(r"<mensagem_final>(.*?)</mensagem_final>", texto, re.DOTALL)
-    return m.group(1).strip() if m else texto
+    if not m:
+        # pedido explícito do Rui (2026-10-16): "isto não pode acontecer" —
+        # sem as marcas, nunca se sabe se o texto é a mensagem final ou
+        # deliberação; falha alto em vez de arriscar publicar o que vier
+        # (correr_mensagem_diaria_motivacional já trata isto como "sem
+        # publicação hoje", nunca como "publica isto na mesma").
+        raise ValueError(f"resposta sem <mensagem_final>...</mensagem_final>: {texto!r}")
+    return m.group(1).strip()
 
 def correr_mensagem_diaria_motivacional():
     """Publica uma mensagem diária motivacional no Mural da Gestão, a partir

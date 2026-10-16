@@ -137,7 +137,10 @@ def _gerar_mensagem(analise: str) -> str:
     )
     texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
     m = re.search(r"<mensagem_final>(.*?)</mensagem_final>", texto, re.DOTALL)
-    return m.group(1).strip() if m else texto
+    if not m:
+        # mesma regra de segurança, ver agents/mensagem_motivacional_diaria.py
+        raise ValueError(f"resposta sem <mensagem_final>...</mensagem_final>: {texto!r}")
+    return m.group(1).strip()
 
 def correr_mensagem_diaria_motivacional_ecos_largos():
     """Publica uma mensagem diária muito curta no Mural da Ecos Largos, a
