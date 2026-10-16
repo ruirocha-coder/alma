@@ -1,5 +1,6 @@
 # db.py — ligação Postgres + schema + memória partilhada
 import os
+import unicodedata
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
@@ -3159,6 +3160,20 @@ def reabrir_card_compras_toros(card_id: int):
             )
         conn.commit()
 
+def _primeira_palavra_fornecedor(nome: str) -> str:
+    """Normaliza um nome de fornecedor para comparação tolerante: 1ª
+    palavra, sem acentos, sem distinguir maiúsculas/minúsculas — ex:
+    "Díaz Y Buceta" e "DIAS Y BUCETA" (como escrito à mão num card) vs
+    "DÍAZ Y BUCETA" (como vem do Park In) têm de contar como o mesmo
+    fornecedor. Bug real (Rui, 2026-10-16): comparar só com lower() no
+    SQL não lidava com o acento ("díaz" != "diaz"), tal como
+    tools/basecamp._normalizar já trata para nomes de pessoas — feito
+    aqui em Python (não há acesso a unaccent() do Postgres sem a
+    extensão) para os dois lados da comparação ficarem sempre iguais."""
+    sem_acentos = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode("ascii")
+    primeira = sem_acentos.strip().split(" ", 1)[0] if sem_acentos.strip() else ""
+    return primeira.lower()
+
 def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
                                                        espessura: str) -> list[dict]:
     """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
@@ -3171,10 +3186,11 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     tal e qual do Park In, muitas vezes o nome completo da empresa (ex:
     "ALTRI FORESTAL SL") — a comparação exata nunca batia certo, e o
     talão ficava sempre registado como excesso (visível, mas nunca
-    abatido ao card certo). Compara agora só a 1ª palavra, sem distinguir
-    maiúsculas/minúsculas — mesma solução já usada para agrupar clientes
-    em tools/planeamento_serracao.py contra o mesmo tipo de inconsistência
-    real nos nomes.
+    abatido ao card certo). Compara agora só a 1ª palavra, de forma
+    tolerante a acentos e maiúsculas/minúsculas (ver
+    _primeira_palavra_fornecedor) — mesma solução já usada para agrupar
+    clientes em tools/planeamento_serracao.py contra o mesmo tipo de
+    inconsistência real nos nomes.
 
     Bug real #2 (Rui, 2026-10-15): um card fica com estado 'aberto' para
     sempre a menos que seja fechado à mão ou sozinho (ver fechar_card/
@@ -3184,20 +3200,21 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     a competir pelo FIFO com os cards realmente ativos de levantamentos
     em aberto — passa agora a exigir também que a coluna do card esteja
     'aberta'."""
+    alvo = _primeira_palavra_fornecedor(fornecedor)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.criado_em::date AS criado_em_data
+                """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.fornecedor,
+                          c.criado_em::date AS criado_em_data
                    FROM compras_toros_linhas l
                    JOIN compras_toros_cards c ON c.id = l.card_id
                    JOIN compras_toros_colunas col ON col.id = c.coluna_id
                    WHERE c.estado = 'aberto' AND col.estado = 'aberta'
-                     AND lower(split_part(c.fornecedor, ' ', 1)) = lower(split_part(%s, ' ', 1))
                      AND l.tipo = %s AND l.comprimento = %s AND l.espessura = %s
                    ORDER BY c.criado_em ASC, l.id ASC""",
-                (fornecedor, tipo, comprimento, espessura)
+                (tipo, comprimento, espessura)
             )
-            return cur.fetchall()
+            return [r for r in cur.fetchall() if _primeira_palavra_fornecedor(r["fornecedor"]) == alvo]
 
 def registar_abate_compras_toros(linha_id: int, entrada_id: int, quantidade_kg: float):
     with get_conn() as conn:
@@ -3240,17 +3257,19 @@ def excessos_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, com
     talão (ver tools/compras_toros._reavaliar_excessos_para_card_novo) —
     usado quando se cria um card novo para apanhar talões que chegaram
     primeiro (ficaram excesso por não haver nenhum card ainda) mas que,
-    pela data, já deviam ter sido para este card."""
+    pela data, já deviam ter sido para este card. Comparação de
+    fornecedor tolerante a acentos/maiúsculas, ver
+    _primeira_palavra_fornecedor."""
+    alvo = _primeira_palavra_fornecedor(fornecedor)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT e.id, e.entrada_id, p.data AS data_entrada
+                """SELECT e.id, e.entrada_id, e.fornecedor, p.data AS data_entrada
                    FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
-                   WHERE lower(split_part(e.fornecedor, ' ', 1)) = lower(split_part(%s, ' ', 1))
-                     AND e.tipo = %s AND e.comprimento = %s AND e.espessura = %s""",
-                (fornecedor, tipo, comprimento, espessura)
+                   WHERE e.tipo = %s AND e.comprimento = %s AND e.espessura = %s""",
+                (tipo, comprimento, espessura)
             )
-            return cur.fetchall()
+            return [r for r in cur.fetchall() if _primeira_palavra_fornecedor(r["fornecedor"]) == alvo]
 
 def desfazer_excesso_compras_toros(excesso_id: int, entrada_id: int):
     """Remove um excesso e a marca de "já processada" da sua entrada, para
