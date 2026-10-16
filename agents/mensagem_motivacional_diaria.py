@@ -3,6 +3,7 @@
 # trabalho. Pedido explícito do Rui e da Beatriz (2026-08-05): a Alma
 # posicionada como a abelha-mãe da colmeia que é a equipa, numa perspetiva
 # estoica, taoista e de gestão lean — nunca um relatório, nunca números.
+import re
 import threading
 from datetime import date
 
@@ -121,7 +122,16 @@ Regras de escrita, além do tom de voz geral acima:
   Se quiseres referir uma obra, escreve o nome sem itálico.
 - Assina sempre como "— Alma", numa linha à parte depois da citação (sem
   negrito, só a citação em si é a negrito).
-"""
+
+Formato da resposta (regra separada de tudo o resto, aplica-se sempre):
+qualquer verificação, dúvida, alternativa considerada ou nota sobre como
+chegaste ao texto fica só no teu pensamento interno — a tua resposta
+visível não pode conter nada disso, só o resultado. Escreve a mensagem
+final (o teu texto + linha em branco + citação + assinatura, tudo junto)
+entre as marcas <mensagem_final> e </mensagem_final>, sem mais nada
+dentro delas — nem título, nem comentário a seguir. Tudo o que escreveres
+fora destas marcas é descartado e nunca chega a ser publicado, por isso
+não vale a pena escrever lá nada."""
 
 def _analisar_projeto(projeto: str, hoje: date) -> str:
     """Lê o estado atual do projeto e compara com a última leitura guardada
@@ -262,21 +272,26 @@ def _gerar_mensagem(analise_projetos: str, contexto_dia: str, mensagens_recentes
     )
     # Bug real (Rui, 2026-10-16): o prompt pede muita auto-verificação
     # (não repetir palavras/imagens das últimas mensagens, confirmar a
-    # citação de cor, rever a ênclise palavra a palavra) — sem um canal
-    # separado para isso, o modelo às vezes "pensava em voz alta" dentro
-    # da própria resposta de texto (ex: "Laozi já usado há 2 dias — evito
-    # hoje", "a citação do Drucker não tenho a certeza... escolho outra"),
-    # e esse rascunho/deliberação saía publicado no Mural tal como estava,
-    # em vez da mensagem final. Pensamento alargado dá-lhe esse canal
-    # próprio (bloco "thinking", nunca incluído no texto publicado — o
-    # filtro `b.type == "text"` abaixo já o exclui sozinho).
+    # citação de cor, rever a ênclise palavra a palavra) e o modelo
+    # "pensava em voz alta" dentro da própria resposta de texto (ex: "Laozi
+    # já usado há 2 dias — evito hoje", "a citação do Drucker não tenho a
+    # certeza... escolho outra"), publicando esse rascunho tal como estava.
+    # O pensamento alargado (thinking, abaixo) não chegou para resolver
+    # sozinho — confirmado ao vivo que o modelo continuava a escrever essa
+    # deliberação na resposta visível mesmo com um canal de pensamento
+    # disponível. A rede de segurança real é a marca <mensagem_final>: só o
+    # que estiver entre essas marcas é publicado, tudo o resto (qualquer
+    # texto antes/depois) é descartado, seja o que for que o modelo tenha
+    # decidido escrever lá fora.
     resposta = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=2000,
         thinking={"type": "enabled", "budget_tokens": 1024},
         system=MISSAO_MENSAGEM_DIARIA,
         messages=[{"role": "user", "content": entrada}]
     )
-    return "".join(b.text for b in resposta.content if b.type == "text").strip()
+    texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    m = re.search(r"<mensagem_final>(.*?)</mensagem_final>", texto, re.DOTALL)
+    return m.group(1).strip() if m else texto
 
 def correr_mensagem_diaria_motivacional():
     """Publica uma mensagem diária motivacional no Mural da Gestão, a partir

@@ -6,6 +6,7 @@
 # desta equipa (produção/serração): LEAN, Teoria das Restrições, e
 # estoicismo (Marco Aurélio, Séneca), sem a imagem da colmeia (é específica
 # da equipa da Interior Guider/Gestão, não faz sentido repetir aqui).
+import re
 import threading
 from datetime import date
 
@@ -82,7 +83,16 @@ Regras de escrita, além do tom de voz geral acima:
   suporta negrito e itálico misturados na mesma linha.
 - Assina sempre como "— Alma", numa linha à parte depois da citação (sem
   negrito, só a citação em si é a negrito).
-"""
+
+Formato da resposta (regra separada de tudo o resto, aplica-se sempre):
+qualquer verificação, dúvida, alternativa considerada ou nota sobre como
+chegaste ao texto fica só no teu pensamento interno — a tua resposta
+visível não pode conter nada disso, só o resultado. Escreve a mensagem
+final (o teu texto + linha em branco + citação + assinatura, tudo junto)
+entre as marcas <mensagem_final> e </mensagem_final>, sem mais nada
+dentro delas — nem título, nem comentário a seguir. Tudo o que escreveres
+fora destas marcas é descartado e nunca chega a ser publicado, por isso
+não vale a pena escrever lá nada."""
 
 def _analisar_projeto() -> str:
     """Lê o estado atual do projeto Ecos Largos e compara com a última
@@ -114,18 +124,20 @@ def _analisar_projeto() -> str:
 
 def _gerar_mensagem(analise: str) -> str:
     entrada = f"Estado geral do trabalho hoje (só para teu conhecimento, nunca para citar em concreto):\n{analise}"
-    # Pensamento alargado (ver o mesmo bug real, Rui, 2026-10-16, em
-    # agents/mensagem_motivacional_diaria.py) — a mesma auto-verificação
-    # pesada do prompt (nunca repetitiva, citação exata, ênclise correta)
-    # corre o mesmo risco aqui; dar-lhe um canal "thinking" próprio evita
-    # que esse rascunho/deliberação saia publicado no Mural.
+    # Rede de segurança real contra o mesmo bug (Rui, 2026-10-16, ver
+    # agents/mensagem_motivacional_diaria.py) — o pensamento alargado
+    # (thinking) sozinho não chegou, o modelo continuou a escrever a
+    # deliberação na resposta visível mesmo com esse canal disponível. Só
+    # o que estiver entre <mensagem_final>...</mensagem_final> é publicado.
     resposta = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=2000,
         thinking={"type": "enabled", "budget_tokens": 1024},
         system=MISSAO_MENSAGEM_DIARIA_ECOS_LARGOS,
         messages=[{"role": "user", "content": entrada}]
     )
-    return "".join(b.text for b in resposta.content if b.type == "text").strip()
+    texto = "".join(b.text for b in resposta.content if b.type == "text").strip()
+    m = re.search(r"<mensagem_final>(.*?)</mensagem_final>", texto, re.DOTALL)
+    return m.group(1).strip() if m else texto
 
 def correr_mensagem_diaria_motivacional_ecos_largos():
     """Publica uma mensagem diária muito curta no Mural da Ecos Largos, a
