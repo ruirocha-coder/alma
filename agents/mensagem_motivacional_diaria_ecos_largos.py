@@ -133,8 +133,8 @@ def _gerar_mensagem(analise: str) -> str:
     # espaço, o pensamento por vezes consumia tudo antes de escrever o
     # texto final, saindo a resposta vazia.
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=4000,
-        thinking={"type": "enabled", "budget_tokens": 1500},
+        model="claude-sonnet-4-6", max_tokens=8000,
+        thinking={"type": "enabled", "budget_tokens": 3000},
         system=MISSAO_MENSAGEM_DIARIA_ECOS_LARGOS,
         messages=[{"role": "user", "content": entrada}]
     )
