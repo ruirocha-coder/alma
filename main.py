@@ -1409,6 +1409,15 @@ def _debug_corrigir_mensagem_diaria():
     basecamp.editar_mensagem_mural(alvo["url"], mensagem=texto, projeto="Gestão")
     return JSONResponse({"ok": True, "texto": texto, "url": alvo.get("app_url")})
 
+@app.post("/_debug-definir-mensagem-diaria")
+def _debug_definir_mensagem_diaria(corpo: dict = Body(...)):
+    mensagens = basecamp.listar_mural(projeto="Gestão", limite=5)
+    alvo = next((m for m in mensagens if m["assunto"] == "Antes de começar o dia"), None)
+    if not alvo:
+        return JSONResponse({"erro": "não encontrei a mensagem de hoje"}, status_code=404)
+    basecamp.editar_mensagem_mural(alvo["url"], mensagem=corpo.get("texto"), projeto="Gestão")
+    return JSONResponse({"ok": True})
+
 @app.post("/gestao/mensagem-diaria")
 def mensagem_diaria_motivacional_agora():
     """Dispara já a mensagem diária motivacional, no Mural da Gestão, em segundo plano — publica de
