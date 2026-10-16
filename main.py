@@ -1396,6 +1396,14 @@ def resumo_diario_ecos_largos_agora():
     threading.Thread(target=resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-testar-geracao-mensagem")
+def _debug_testar_geracao_mensagem():
+    analise = mensagem_motivacional_diaria._analisar_projetos()
+    contexto = mensagem_motivacional_diaria._contexto_do_dia()
+    recentes = mensagem_motivacional_diaria._mensagens_recentes()
+    texto = mensagem_motivacional_diaria._gerar_mensagem(analise, contexto, recentes)
+    return JSONResponse({"texto": texto})
+
 @app.post("/_debug-corrigir-mensagem-diaria")
 def _debug_corrigir_mensagem_diaria():
     mensagens = basecamp.listar_mural(projeto="Gestão", limite=5)
