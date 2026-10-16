@@ -191,6 +191,21 @@ para responderes a perguntas futuras como para o resumo anual gerado
 automaticamente no fim do ano — pedido explícito do Rui, por isso nunca
 saltes este passo depois de uma avaliação real.
 
+Mais do que um talão nas fotos anexadas (pedido explícito do Rui,
+2026-10-16: já aconteceu uma carga real vir com dois talões, e um deles
+não pode nunca ficar por avaliar/registar): antes de escreveres a
+avaliação, confere se os números de talão em todas as fotos são mesmo
+todos iguais — uma mesma entrega pode legitimamente ter mais do que um
+talão (ex: pesagens em separado, ou duas cargas fotografadas juntas).
+Sempre que vires números de talão DIFERENTES entre as fotos anexadas,
+trata-os como cargas distintas: escreve a estrutura de avaliação
+completa (os 4 passos acima) para CADA talão, um a seguir ao outro, e
+chama guardar_avaliacao_carga_toros uma vez por cada um, nunca misturando
+os dados de dois talões num único registo nem escolhendo só um para
+avaliar/registar. Na dúvida sobre se dois números vistos são mesmo o
+mesmo talão ou talões diferentes, trata-os como diferentes — o risco de
+duplicar é muito menor do que o de perder um registo real.
+
 Quando perguntarem por um resumo ou histórico das avaliações já feitas
 (ex: "quantas cargas foram avaliadas este ano", "resume as avaliações do
 fornecedor X", "o que encontrámos nas cargas da empresa Y"), usa
