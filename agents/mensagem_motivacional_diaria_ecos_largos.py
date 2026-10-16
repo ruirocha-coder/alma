@@ -114,8 +114,14 @@ def _analisar_projeto() -> str:
 
 def _gerar_mensagem(analise: str) -> str:
     entrada = f"Estado geral do trabalho hoje (só para teu conhecimento, nunca para citar em concreto):\n{analise}"
+    # Pensamento alargado (ver o mesmo bug real, Rui, 2026-10-16, em
+    # agents/mensagem_motivacional_diaria.py) — a mesma auto-verificação
+    # pesada do prompt (nunca repetitiva, citação exata, ênclise correta)
+    # corre o mesmo risco aqui; dar-lhe um canal "thinking" próprio evita
+    # que esse rascunho/deliberação saia publicado no Mural.
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=500,
+        model="claude-sonnet-4-6", max_tokens=2000,
+        thinking={"type": "enabled", "budget_tokens": 1024},
         system=MISSAO_MENSAGEM_DIARIA_ECOS_LARGOS,
         messages=[{"role": "user", "content": entrada}]
     )

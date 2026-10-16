@@ -260,8 +260,19 @@ def _gerar_mensagem(analise_projetos: str, contexto_dia: str, mensagens_recentes
         f"Últimas mensagens já publicadas, mais recente primeiro (ver \"Nunca repetitiva\" — "
         f"não repitas palavras-chave, imagens nem estrutura de frase destas):\n{bloco_recentes}"
     )
+    # Bug real (Rui, 2026-10-16): o prompt pede muita auto-verificação
+    # (não repetir palavras/imagens das últimas mensagens, confirmar a
+    # citação de cor, rever a ênclise palavra a palavra) — sem um canal
+    # separado para isso, o modelo às vezes "pensava em voz alta" dentro
+    # da própria resposta de texto (ex: "Laozi já usado há 2 dias — evito
+    # hoje", "a citação do Drucker não tenho a certeza... escolho outra"),
+    # e esse rascunho/deliberação saía publicado no Mural tal como estava,
+    # em vez da mensagem final. Pensamento alargado dá-lhe esse canal
+    # próprio (bloco "thinking", nunca incluído no texto publicado — o
+    # filtro `b.type == "text"` abaixo já o exclui sozinho).
     resposta = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=500,
+        model="claude-sonnet-4-6", max_tokens=2000,
+        thinking={"type": "enabled", "budget_tokens": 1024},
         system=MISSAO_MENSAGEM_DIARIA,
         messages=[{"role": "user", "content": entrada}]
     )
