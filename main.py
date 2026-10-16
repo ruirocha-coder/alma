@@ -1396,6 +1396,19 @@ def resumo_diario_ecos_largos_agora():
     threading.Thread(target=resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-corrigir-mensagem-diaria")
+def _debug_corrigir_mensagem_diaria():
+    mensagens = basecamp.listar_mural(projeto="Gestão", limite=5)
+    alvo = next((m for m in mensagens if m["assunto"] == "Antes de começar o dia"), None)
+    if not alvo:
+        return JSONResponse({"erro": "não encontrei a mensagem de hoje"}, status_code=404)
+    analise = mensagem_motivacional_diaria._analisar_projetos()
+    contexto = mensagem_motivacional_diaria._contexto_do_dia()
+    recentes = mensagem_motivacional_diaria._mensagens_recentes()
+    texto = mensagem_motivacional_diaria._gerar_mensagem(analise, contexto, recentes)
+    basecamp.editar_mensagem_mural(alvo["url"], mensagem=texto, projeto="Gestão")
+    return JSONResponse({"ok": True, "texto": texto, "url": alvo.get("app_url")})
+
 @app.post("/gestao/mensagem-diaria")
 def mensagem_diaria_motivacional_agora():
     """Dispara já a mensagem diária motivacional, no Mural da Gestão, em segundo plano — publica de
