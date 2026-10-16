@@ -1435,6 +1435,22 @@ def _debug_testar_geracao_mensagem():
         return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
                             status_code=500)
 
+@app.post("/_debug-testar-geracao-mensagem-rapido")
+def _debug_testar_geracao_mensagem_rapido():
+    """Como a de cima, mas sem _contexto_do_dia (pesquisa web lenta) — só
+    para testar a formatação <mensagem_final> depressa."""
+    import traceback
+    try:
+        texto = mensagem_motivacional_diaria._gerar_mensagem(
+            "Gestão: 5 cards ativos, 0 atrasados. Interior Guider: 8 cards ativos, 1 atrasado.",
+            "Outubro, outono em Vila Nova de Gaia, sem nada de notável.",
+            mensagem_motivacional_diaria._mensagens_recentes()
+        )
+        return JSONResponse({"texto": texto})
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                            status_code=500)
+
 @app.post("/_debug-corrigir-mensagem-diaria")
 def _debug_corrigir_mensagem_diaria():
     mensagens = basecamp.listar_mural(projeto="Gestão", limite=5)
