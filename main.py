@@ -1396,6 +1396,32 @@ def resumo_diario_ecos_largos_agora():
     threading.Thread(target=resumo_diario_ecos_largos.correr_resumo_diario_ecos_largos, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-aplicar-excesso-manual")
+def _debug_aplicar_excesso_manual(corpo: dict = Body(...)):
+    import db as _db
+    excesso_id = int(corpo.get("excesso_id"))
+    linha_id = int(corpo.get("linha_id"))
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT entrada_id, quantidade_kg FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse({"erro": "excesso não encontrado"}, status_code=404)
+            cur.execute(
+                "INSERT INTO compras_toros_abates (linha_id, entrada_id, quantidade_kg) VALUES (%s,%s,%s)",
+                (linha_id, row["entrada_id"], row["quantidade_kg"])
+            )
+            cur.execute(
+                "UPDATE compras_toros_linhas SET entregue_kg = entregue_kg + %s WHERE id = %s",
+                (row["quantidade_kg"], linha_id)
+            )
+            cur.execute("DELETE FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            cur.execute("SELECT card_id FROM compras_toros_linhas WHERE id = %s", (linha_id,))
+            card_id = cur.fetchone()["card_id"]
+        conn.commit()
+    compras_toros._tentar_fechar_card_automatico(card_id)
+    return JSONResponse({"ok": True})
+
 @app.post("/_debug-testar-geracao-mensagem")
 def _debug_testar_geracao_mensagem():
     analise = mensagem_motivacional_diaria._analisar_projetos()
