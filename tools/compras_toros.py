@@ -129,7 +129,31 @@ def criar_card(coluna_id: int, fornecedor: str, data_encomenda: str, linhas: lis
     for l in linhas:
         db.criar_linha_compras_toros(card_id, l["tipo"], float(l["comprimento"]), l["espessura"],
                                      float(l["encomendado_kg"]))
+    _reavaliar_excessos_para_card_novo(card_id, fornecedor, linhas)
     return {"ok": True, "card_id": card_id}
+
+
+def _reavaliar_excessos_para_card_novo(card_id: int, fornecedor: str, linhas: list):
+    """Pedido explícito do Rui, 2026-10-16: um talão que chega ANTES de o
+    card para onde devia ir sequer existir fica registado como excesso
+    (não há nada para abater ainda) e, como cada entrada só é processada
+    uma vez, para sempre (ver processar_abates_pendentes), ficava excesso
+    para sempre mesmo depois de aparecer um card certo para ele — caso
+    real: 3 cards criados a meio da tarde (Transgalo, Diaz y Buceta,
+    Cofor) cujos talões já tinham chegado umas horas antes, no mesmo dia.
+    Ao criar um card, reconsidera-se logo qualquer excesso já registado
+    do mesmo fornecedor+artigo cujo talão seja da mesma data do card ou
+    posterior (a mesma regra já usada no motor de abates para um card já
+    existente) — permite ao motor voltar a tentar essa entrada do zero."""
+    card = db.card_compras_toros(card_id)
+    card_criado_data = card["criado_em"].date()
+    for l in linhas:
+        candidatos = db.excessos_compras_toros_por_fornecedor_artigo(
+            fornecedor, l["tipo"], float(l["comprimento"]), l["espessura"])
+        for exc in candidatos:
+            if exc["data_entrada"] >= card_criado_data:
+                db.desfazer_excesso_compras_toros(exc["id"], exc["entrada_id"])
+    processar_abates_pendentes()
 
 
 def fechar_card(card_id: int, fechado_por: str, nota_fecho: str = None) -> dict:

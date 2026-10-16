@@ -3234,6 +3234,34 @@ def excessos_compras_toros() -> list[dict]:
             )
             return cur.fetchall()
 
+def excessos_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
+                                                 espessura: str) -> list[dict]:
+    """Excessos já registados deste fornecedor+artigo, com a data real do
+    talão (ver tools/compras_toros._reavaliar_excessos_para_card_novo) —
+    usado quando se cria um card novo para apanhar talões que chegaram
+    primeiro (ficaram excesso por não haver nenhum card ainda) mas que,
+    pela data, já deviam ter sido para este card."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT e.id, e.entrada_id, p.data AS data_entrada
+                   FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
+                   WHERE lower(split_part(e.fornecedor, ' ', 1)) = lower(split_part(%s, ' ', 1))
+                     AND e.tipo = %s AND e.comprimento = %s AND e.espessura = %s""",
+                (fornecedor, tipo, comprimento, espessura)
+            )
+            return cur.fetchall()
+
+def desfazer_excesso_compras_toros(excesso_id: int, entrada_id: int):
+    """Remove um excesso e a marca de "já processada" da sua entrada, para
+    o motor de abates (ver tools/compras_toros.processar_abates_pendentes)
+    a reconsiderar do zero na próxima leitura."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            cur.execute("DELETE FROM compras_toros_entradas_processadas WHERE entrada_id = %s", (entrada_id,))
+        conn.commit()
+
 def entradas_parkin_nao_processadas_compras_toros() -> list[dict]:
     """Entradas reais do Park In (nunca as sintéticas de uma correção de
     inventário, talão "CORR-<id>" — ver tools/parkin.registar_correcao)
