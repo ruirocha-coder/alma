@@ -1205,6 +1205,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .kcard .forn{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13.5px}
   .kcard .linha{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:5px}
   .kcard .tot{display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;margin-top:8px}
+  .kcol-total{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin:10px 0 2px}
   .kbar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
   .kbar .f{height:100%;background:var(--green);transition:width .3s}
   .kbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.02em}
@@ -2121,6 +2122,9 @@ function renderComprasToros(){
 
   function renderColuna(c){
     const arquivada = c.estado === "arquivada";
+    const previsaoTotal = c.necessidades.reduce((s,n) => s + n.necessidade_kg, 0);
+    const entregueTotal = c.cards.reduce((s,card) => s + card.entregue_kg, 0);
+    const pctTotal = previsaoTotal > 0 ? Math.min(100, Math.round(entregueTotal/previsaoTotal*100)) : 0;
     const necessidadesHtml = c.necessidades.map(n => `
       <div class="knec-row">
         <span class="art">${n.artigo}${n.excesso_encomenda ? ' <span class="kbadge aviso" title="encomendado ultrapassa a necessidade">excesso</span>' : ''}</span>
@@ -2165,6 +2169,8 @@ function renderComprasToros(){
         ${!arquivada ? `<button class="btn primary" type="button" onclick="abrirNovoCard(${c.id})">+ Card</button>
           <button class="btn ghost" type="button" onclick="arquivarColuna(${c.id})">Arquivar</button>` : ''}
       </div>
+      <div class="kcol-total"><span>Total entregue</span><span>${t(entregueTotal)} / ${t(previsaoTotal)}</span></div>
+      <div class="kbar"><div class="f" style="width:${pctTotal}%"></div></div>
       <details class="knec"><summary>Necessidade por artigo (${c.necessidades.length})</summary>${necessidadesHtml}</details>
       ${cardsHtml || '<div class="sub" style="padding:8px 0">Sem cards ainda.</div>'}
     </div>`;
