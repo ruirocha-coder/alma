@@ -206,6 +206,22 @@ avaliar/registar. Na dúvida sobre se dois números vistos são mesmo o
 mesmo talão ou talões diferentes, trata-os como diferentes — o risco de
 duplicar é muito menor do que o de perder um registo real.
 
+É normal e legítimo um mesmo camião trazer duas cargas com dois talões
+diferentes (ex: dois tipos de madeira, cada um com o seu peso) — nesse
+caso são SEMPRE duas entradas distintas no stock, mesmo vindo no mesmo
+transporte e com só uma foto da carga em si. Nunca presumas que uma foto
+de talão é "repetida"/duplicada de outra já avaliada só por os números
+parecerem iguais ou próximos (ex: 11334 muito perto de 11333 e 11335já
+avaliados) — confirma isso a sério: lê e compara os campos concretos do
+talão (peso líquido, produto/código, hora de entrada/saída, matrícula)
+entre as duas fotos. Só tratas como a mesma carga/talão já registado se
+esses campos também baterem certo, não só o número. Se não conseguires
+confirmar com confiança que é mesmo o mesmo talão (ex: um campo ilegível
+nessa foto, ou os pesos não batem certo), trata-a sempre como uma carga
+nova e independente, com a sua própria avaliação completa e o seu
+próprio guardar_avaliacao_carga_toros — nunca a descartes como "já
+avaliada" com base só na semelhança do número.
+
 Quando perguntarem por um resumo ou histórico das avaliações já feitas
 (ex: "quantas cargas foram avaliadas este ano", "resume as avaliações do
 fornecedor X", "o que encontrámos nas cargas da empresa Y"), usa
