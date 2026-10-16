@@ -1127,15 +1127,6 @@ def park_in_compras_toros_criar_card(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/_debug-reavaliar-excessos-card")
-def _debug_reavaliar_excessos_card(corpo: dict = Body(...)):
-    import db as _db
-    card_id = int(corpo.get("card_id"))
-    card = _db.card_compras_toros(card_id)
-    linhas = _db.linhas_compras_toros_do_card(card_id)
-    compras_toros._reavaliar_excessos_para_card_novo(card_id, card["fornecedor"], linhas)
-    return JSONResponse({"ok": True})
-
 @app.post("/park-in/compras-toros/card/{card_id}/fechar")
 def park_in_compras_toros_fechar_card(card_id: int, corpo: dict = Body(...)):
     """Fecho à mão de um card (entrega parcial/cancelamento) — ver
