@@ -1393,9 +1393,14 @@ def sincronizar_calendario_agora():
 @app.get("/_debug-entrada-por-talao")
 def _debug_entrada_por_talao(talao: str):
     import db as _db
+    from decimal import Decimal
     entrada = _db.entrada_parkin_por_talao(talao)
-    if entrada and entrada.get("data"):
-        entrada["data"] = entrada["data"].isoformat()
+    if entrada:
+        for k, v in entrada.items():
+            if hasattr(v, "isoformat"):
+                entrada[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                entrada[k] = float(v)
     return JSONResponse({"entrada": entrada})
 
 @app.post("/ecos-largos/resumo-diario")
