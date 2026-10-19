@@ -1390,6 +1390,14 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-entrada-por-talao")
+def _debug_entrada_por_talao(talao: str):
+    import db as _db
+    entrada = _db.entrada_parkin_por_talao(talao)
+    if entrada and entrada.get("data"):
+        entrada["data"] = entrada["data"].isoformat()
+    return JSONResponse({"entrada": entrada})
+
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
