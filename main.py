@@ -1390,6 +1390,12 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-desfazer-excesso")
+def _debug_desfazer_excesso(corpo: dict = Body(...)):
+    import db as _db
+    _db.desfazer_excesso_compras_toros(corpo["excesso_id"], corpo["entrada_id"])
+    return {"ok": True}
+
 @app.get("/_debug-entrada-por-talao")
 def _debug_entrada_por_talao(talao: str):
     import db as _db
