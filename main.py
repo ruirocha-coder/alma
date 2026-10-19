@@ -1396,6 +1396,19 @@ def _debug_desfazer_excesso(corpo: dict = Body(...)):
     _db.desfazer_excesso_compras_toros(corpo["excesso_id"], corpo["entrada_id"])
     return {"ok": True}
 
+@app.post("/_debug-aplicar-abate-manual")
+def _debug_aplicar_abate_manual(corpo: dict = Body(...)):
+    import db as _db
+    from tools import compras_toros as _ct
+    linha_id = corpo["linha_id"]
+    entrada_id = corpo["entrada_id"]
+    quantidade_kg = corpo["quantidade_kg"]
+    card_id = corpo["card_id"]
+    _db.registar_abate_compras_toros(linha_id, entrada_id, quantidade_kg)
+    _db.marcar_entrada_processada_compras_toros(entrada_id)
+    _ct._tentar_fechar_card_automatico(card_id)
+    return {"ok": True}
+
 @app.get("/_debug-entrada-por-talao")
 def _debug_entrada_por_talao(talao: str):
     import db as _db
