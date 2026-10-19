@@ -1390,38 +1390,6 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.post("/_debug-desfazer-excesso")
-def _debug_desfazer_excesso(corpo: dict = Body(...)):
-    import db as _db
-    _db.desfazer_excesso_compras_toros(corpo["excesso_id"], corpo["entrada_id"])
-    return {"ok": True}
-
-@app.post("/_debug-aplicar-abate-manual")
-def _debug_aplicar_abate_manual(corpo: dict = Body(...)):
-    import db as _db
-    from tools import compras_toros as _ct
-    linha_id = corpo["linha_id"]
-    entrada_id = corpo["entrada_id"]
-    quantidade_kg = corpo["quantidade_kg"]
-    card_id = corpo["card_id"]
-    _db.registar_abate_compras_toros(linha_id, entrada_id, quantidade_kg)
-    _db.marcar_entrada_processada_compras_toros(entrada_id)
-    _ct._tentar_fechar_card_automatico(card_id)
-    return {"ok": True}
-
-@app.get("/_debug-entrada-por-talao")
-def _debug_entrada_por_talao(talao: str):
-    import db as _db
-    from decimal import Decimal
-    entrada = _db.entrada_parkin_por_talao(talao)
-    if entrada:
-        for k, v in entrada.items():
-            if hasattr(v, "isoformat"):
-                entrada[k] = v.isoformat()
-            elif isinstance(v, Decimal):
-                entrada[k] = float(v)
-    return JSONResponse({"entrada": entrada})
-
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
