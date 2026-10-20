@@ -483,7 +483,7 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
                                   comprimento: float = None, espessura: str = None,
                                   peso_liquido_kg: float = None, matricula: str = None,
                                   guia_req: str = None, peso_bruto_kg: float = None,
-                                  tara_kg: float = None) -> dict:
+                                  tara_kg: float = None, obs: str = None) -> dict:
     """Guarda o registo de uma avaliação de qualidade de uma carga de
     toros, associado ao ano corrente — fica disponível para perguntas
     futuras (em qualquer conversa) sobre o histórico de avaliações, e
@@ -517,7 +517,16 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
     toda avaliação feita a partir dali (ou do chat normal, ou do
     WhatsApp) tem de alimentar o stock sozinha, sem nenhum passo manual
     extra. Nunca duplica (ver tools/parkin.registar_entrada_a_partir_de_
-    avaliacao) — se o talão já tiver uma entrada registada, não faz nada."""
+    avaliacao) — se o talão já tiver uma entrada registada, não faz nada.
+
+    `obs` é o conteúdo da linha "OBS" do talão (ex: "MADEIRA 30 ACIMA") —
+    pedido explícito do Rui (2026-10-20): é um campo PRÓPRIO do talão,
+    normalmente por baixo do peso líquido, separado do campo "Produto"
+    (que só tem o código/comprimento) — nunca confundir os dois nem
+    inventar um valor aqui. Deixa de fora se o talão não tiver nenhuma
+    linha "OBS". Usado para um card de Compras de Toro poder pedir
+    especificamente madeira "X acima" (um certo diâmetro), ver
+    tools/compras_toros._obs_bate_com_notas_card."""
     ano = date.today().year
     # coerção defensiva: o schema da tool já pede strings, mas o modelo por
     # vezes devolve um número (ex: quantidade=11850) — psycopg não converte
@@ -553,13 +562,16 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
         tara_kg = None
     fornecedor = str(fornecedor) if fornecedor else "(fornecedor não identificado)"
     talao = str(talao) if talao is not None else None
+    obs = str(obs).strip() or None if obs is not None else None
     db.guardar_avaliacao_carga_toros(
         fornecedor, str(avaliacao), ano,
         quantidade=str(quantidade) if quantidade is not None else None,
         data_carga=str(data_carga) if data_carga is not None else None,
-        talao=talao, indice_igqc=indice_igqc, tipo=tipo, comprimento=comprimento, espessura=espessura)
+        talao=talao, indice_igqc=indice_igqc, tipo=tipo, comprimento=comprimento, espessura=espessura,
+        obs=obs)
     print(f"[ecos_largos] avaliação guardada: fornecedor={fornecedor!r} talao={talao!r} ano={ano} "
-         f"indice_igqc={indice_igqc!r} tipo={tipo!r} comprimento={comprimento!r} espessura={espessura!r}")
+         f"indice_igqc={indice_igqc!r} tipo={tipo!r} comprimento={comprimento!r} espessura={espessura!r} "
+         f"obs={obs!r}")
 
     if talao and fornecedor and tipo and comprimento is not None and espessura and peso_liquido_kg:
         from tools import parkin
@@ -570,7 +582,7 @@ def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, quantidade: s
                 peso_liquido_kg=peso_liquido_kg, matricula=str(matricula) if matricula else None,
                 guia_req=str(guia_req) if guia_req else None,
                 peso_bruto_kg=peso_bruto_kg, tara_kg=tara_kg, indice_igqc=indice_igqc,
-                registado_por=f"avaliação de qualidade ({fornecedor})")
+                registado_por=f"avaliação de qualidade ({fornecedor})", obs=obs)
             print(f"[ecos_largos] Park In: {resultado_parkin}")
         except Exception as e:
             print(f"[ecos_largos] falhou o registo automático no Park In: {e!r}")
@@ -616,7 +628,8 @@ TOOLS_AVALIACOES_CARGAS_TOROS = [
                 "matricula": {"type": "string", "description": "a matrícula do veículo no talão, se estiver legível"},
                 "guia_req": {"type": "string", "description": "o número da guia/requisição no talão, se estiver legível"},
                 "peso_bruto_kg": {"type": "number", "description": "o peso bruto do talão, em kg, se estiver legível"},
-                "tara_kg": {"type": "number", "description": "a tara do talão, em kg, se estiver legível"}
+                "tara_kg": {"type": "number", "description": "a tara do talão, em kg, se estiver legível"},
+                "obs": {"type": "string", "description": "o conteúdo da linha \"OBS\" do talão (ex: \"MADEIRA 30 ACIMA\") — é um campo PRÓPRIO do talão, normalmente por baixo do peso líquido, SEPARADO do campo \"Produto\" (nunca confundir os dois: o sufixo \"ACIMA\" dentro de \"Produto\" é sobre espessura, esta linha \"OBS\" é outra coisa, sobre diâmetro da madeira). Passa sempre que o talão tiver essa linha, tal como está escrita; deixa de fora se não houver nenhuma OBS"}
             },
             "required": ["fornecedor", "avaliacao"]
         }

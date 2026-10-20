@@ -183,6 +183,14 @@ o texto que a pessoa escreveu:
   isso uma avaliação feita a partir dali só fica completa quando estes
   campos lá chegam todos; sem o peso_liquido_kg, por exemplo, a entrada
   não chega a ficar registada, mesmo com a avaliação em si correta.
+- obs: o conteúdo da linha "OBS" do talão (ex: "MADEIRA 30 ACIMA"),
+  normalmente por baixo do peso líquido — pedido explícito do Rui
+  (2026-10-20). É um campo PRÓPRIO do talão, SEPARADO do campo "Produto":
+  nunca confundir com o sufixo "ACIMA" de dentro do "Produto" (isso é
+  sobre espessura, ver acima) — esta linha "OBS" é outra coisa, sobre o
+  diâmetro da madeira, e pode não existir em todos os talões. Passa
+  sempre que o talão tiver esta linha, tal como está escrita; não
+  inventes nem deduzas um valor se não houver nenhuma OBS visível.
 Só deixes um campo de fora se o tiveres mesmo procurado (na mensagem E em
 todas as fotos/transcrições) e não estiver em lado nenhum — não inventes
 valores, mas também não desistas cedo demais só porque a pessoa não os

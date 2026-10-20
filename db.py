@@ -566,6 +566,15 @@ ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS indice_igqc NUMERIC
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS tipo TEXT;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS comprimento NUMERIC;
 ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS espessura TEXT;
+-- campo "OBS" do talão (ex: "MADEIRA 30 ACIMA") — texto livre, separado do
+-- campo "Produto" (que só tem tipo/comprimento, ver tipo/comprimento/
+-- espessura acima); pedido explícito do Rui (2026-10-20): um card de
+-- Compras de Toro pode ter uma nota tipo "30 acima" nas suas notas, e só
+-- deve abater talões cujo OBS tenha exatamente esse mesmo número "acima"
+-- (ver tools/compras_toros._obs_bate_com_notas_card). NULL quando o talão
+-- não tem nenhuma linha de OBS.
+ALTER TABLE avaliacoes_cargas_toros ADD COLUMN IF NOT EXISTS obs TEXT;
+ALTER TABLE parkin_entradas ADD COLUMN IF NOT EXISTS obs TEXT;
 -- importação do histórico anterior ao Park In (ver
 -- tools/parkin.importar_historico_avaliacoes, pedido explícito do Rui,
 -- 2026-10-02): a maioria das avaliações antigas não preservou o código
@@ -1254,16 +1263,16 @@ def contexto_global() -> str:
 def guardar_avaliacao_carga_toros(fornecedor: str, avaliacao: str, ano: int,
                                   quantidade: str = None, data_carga: str = None, talao: str = None,
                                   indice_igqc: float = None, tipo: str = None, comprimento: float = None,
-                                  espessura: str = None):
+                                  espessura: str = None, obs: str = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO avaliacoes_cargas_toros
                    (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc,
-                    tipo, comprimento, espessura)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    tipo, comprimento, espessura, obs)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (fornecedor, quantidade, data_carga, talao, avaliacao, ano, indice_igqc,
-                 tipo, comprimento, espessura)
+                 tipo, comprimento, espessura, obs)
             )
         conn.commit()
 
@@ -2656,20 +2665,22 @@ def guardar_entrada_parkin(talao: str, fornecedor: str, data, tipo: str, comprim
                            espessura: str, peso_liquido_kg: float, matricula: str = None,
                            guia_req: str = None, peso_bruto_kg: float = None, tara_kg: float = None,
                            indice_igqc: float = None, categoria_qualidade: str = None,
-                           registado_por: str = None) -> int:
+                           registado_por: str = None, obs: str = None) -> int:
     """`saldo_kg` começa sempre igual a `peso_liquido_kg` — só é descontado
-    depois por saídas/correções (ver descontar_saldo_entrada_parkin)."""
+    depois por saídas/correções (ver descontar_saldo_entrada_parkin).
+    `obs` é a linha "OBS" do talão (ex: "MADEIRA 30 ACIMA"), separada do
+    campo "Produto" — ver tools/compras_toros._obs_bate_com_notas_card."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO parkin_entradas
                    (talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
                     peso_bruto_kg, tara_kg, peso_liquido_kg, saldo_kg, indice_igqc, categoria_qualidade,
-                    registado_por)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    registado_por, obs)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (talao, fornecedor, data, matricula, guia_req, tipo, comprimento, espessura,
                  peso_bruto_kg, tara_kg, peso_liquido_kg, peso_liquido_kg, indice_igqc,
-                 categoria_qualidade, registado_por)
+                 categoria_qualidade, registado_por, obs)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()
@@ -3242,12 +3253,18 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     fechado, só deixado para trás num levantamento já arquivado, continuava
     a competir pelo FIFO com os cards realmente ativos de levantamentos
     em aberto — passa agora a exigir também que a coluna do card esteja
-    'aberta'."""
+    'aberta'.
+
+    `notas` (do card) vem incluída para a regra "X acima" (pedido
+    explícito do Rui, 2026-10-20, ver
+    tools/compras_toros._obs_bate_com_notas_card): um card com uma nota
+    tipo "30 acima" só pode abater talões cujo OBS tenha exatamente esse
+    mesmo número "acima" — comparação feita em Python, não aqui."""
     alvo = _primeira_palavra_fornecedor(fornecedor)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.fornecedor,
+                """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.fornecedor, c.notas,
                           c.criado_em::date AS criado_em_data
                    FROM compras_toros_linhas l
                    JOIN compras_toros_cards c ON c.id = l.card_id
@@ -3302,12 +3319,14 @@ def excessos_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, com
     primeiro (ficaram excesso por não haver nenhum card ainda) mas que,
     pela data, já deviam ter sido para este card. Comparação de
     fornecedor tolerante a acentos/maiúsculas, ver
-    _primeira_palavra_fornecedor."""
+    _primeira_palavra_fornecedor. `obs` (do talão) vem incluída para a
+    regra "X acima" (pedido explícito do Rui, 2026-10-20, ver
+    tools/compras_toros._obs_bate_com_notas_card)."""
     alvo = _primeira_palavra_fornecedor(fornecedor)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT e.id, e.entrada_id, e.fornecedor, p.data AS data_entrada
+                """SELECT e.id, e.entrada_id, e.fornecedor, p.data AS data_entrada, p.obs
                    FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
                    WHERE e.tipo = %s AND e.comprimento = %s AND e.espessura = %s""",
                 (tipo, comprimento, espessura)
@@ -3329,11 +3348,13 @@ def entradas_parkin_nao_processadas_compras_toros() -> list[dict]:
     inventário, talão "CORR-<id>" — ver tools/parkin.registar_correcao)
     ainda não vistas pelo motor de abates — mais antigas primeiro, para o
     FIFO fazer sentido mesmo quando várias entradas da mesma
-    fornecedor+artigo chegam de uma vez."""
+    fornecedor+artigo chegam de uma vez. `obs` vem incluída para a regra
+    "X acima" (pedido explícito do Rui, 2026-10-20, ver
+    tools/compras_toros._obs_bate_com_notas_card)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg
+                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg, obs
                    FROM parkin_entradas
                    WHERE talao NOT LIKE 'CORR-%%'
                      AND tipo IS NOT NULL AND comprimento IS NOT NULL AND espessura IS NOT NULL

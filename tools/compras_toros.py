@@ -17,11 +17,38 @@
 #   fornecedor+artigo por FIFO (a linha do card mais antigo primeiro);
 #   o que sobra sem card para abater fica registado como "excesso",
 #   nunca descartado (ver db.compras_toros_excessos).
+import re
 import threading
 import db
 from tools import parkin
 
 _lock_abates = threading.Lock()
+
+_RE_NUMERO_ACIMA = re.compile(r"(\d+)\s*acima", re.IGNORECASE)
+
+def _numero_acima(texto):
+    """Extrai o número de uma nota/OBS tipo "30 acima" ou "MADEIRA 30
+    ACIMA" — None se não encontrar nada parecido. Ver
+    _obs_bate_com_notas_card."""
+    if not texto:
+        return None
+    m = _RE_NUMERO_ACIMA.search(texto)
+    return int(m.group(1)) if m else None
+
+def _obs_bate_com_notas_card(notas_card, obs_entrada) -> bool:
+    """Pedido explícito do Rui (2026-10-20): um card de Compras de Toro
+    pode ter uma nota tipo "30 acima" (madeira de diâmetro 30cm e acima),
+    e nesse caso só pode abater talões cujo campo OBS (ex: "MADEIRA 30
+    ACIMA" — linha própria do talão, separada do campo "Produto") tenha
+    EXATAMENTE esse mesmo número, nunca um maior nem menor (ex: "30 acima"
+    não aceita uma carga "35 ACIMA"). Um card SEM essa nota continua a
+    aceitar qualquer talão do mesmo fornecedor+artigo, com ou sem OBS,
+    exatamente como antes desta regra — só os cards COM a nota ficam mais
+    restritos."""
+    numero_card = _numero_acima(notas_card)
+    if numero_card is None:
+        return True
+    return _numero_acima(obs_entrada) == numero_card
 
 
 def _artigos_com_limite() -> list[dict]:
@@ -151,7 +178,7 @@ def _reavaliar_excessos_para_card_novo(card_id: int, fornecedor: str, linhas: li
         candidatos = db.excessos_compras_toros_por_fornecedor_artigo(
             fornecedor, l["tipo"], float(l["comprimento"]), l["espessura"])
         for exc in candidatos:
-            if exc["data_entrada"] >= card_criado_data:
+            if exc["data_entrada"] >= card_criado_data and _obs_bate_com_notas_card(card["notas"], exc["obs"]):
                 db.desfazer_excesso_compras_toros(exc["id"], exc["entrada_id"])
     processar_abates_pendentes()
 
@@ -328,6 +355,8 @@ def processar_abates_pendentes():
                 if restante <= 1e-6:
                     break
                 if linha["criado_em_data"] > entrada["data"]:
+                    continue
+                if not _obs_bate_com_notas_card(linha["notas"], entrada["obs"]):
                     continue
                 falta = float(linha["encomendado_kg"]) - float(linha["entregue_kg"])
                 if falta <= 1e-6:

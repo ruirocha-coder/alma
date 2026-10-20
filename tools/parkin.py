@@ -292,7 +292,7 @@ def registar_entrada_a_partir_de_avaliacao(talao: str, fornecedor: str, data_car
                                            peso_liquido_kg: float, matricula: str = None,
                                            guia_req: str = None, peso_bruto_kg: float = None,
                                            tara_kg: float = None, indice_igqc: float = None,
-                                           registado_por: str = None) -> dict:
+                                           registado_por: str = None, obs: str = None) -> dict:
     """Regista uma entrada no Park In diretamente a partir dos campos já
     extraídos por uma avaliação de qualidade concluída (ver
     tools/ecos_largos.guardar_avaliacao_carga_toros, chamada
@@ -310,7 +310,7 @@ def registar_entrada_a_partir_de_avaliacao(talao: str, fornecedor: str, data_car
         tipo=tipo, comprimento=comprimento, espessura=espessura,
         peso_liquido_kg=float(peso_liquido_kg), matricula=matricula, guia_req=guia_req,
         peso_bruto_kg=peso_bruto_kg, tara_kg=tara_kg,
-        indice_igqc=indice_igqc, categoria_qualidade=categoria, registado_por=registado_por)
+        indice_igqc=indice_igqc, categoria_qualidade=categoria, registado_por=registado_por, obs=obs)
     return {"ok": True, "id": id_gerado, "talao": talao, "categoria_qualidade": categoria}
 
 
