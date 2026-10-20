@@ -1390,6 +1390,24 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-comentarios-card")
+def _debug_comentarios_card(card_id: int):
+    import re
+    comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
+    comentarios = basecamp.ler_comentarios(comments_url)
+    eventos = basecamp.ler_eventos(card_id)
+    resultado = []
+    for c in basecamp.ordenar_por_data(comentarios, eventos):
+        conteudo = c.get("conteudo")
+        texto_simples = None
+        menciona = None
+        if conteudo is not None:
+            from bs4 import BeautifulSoup
+            texto_simples = BeautifulSoup(conteudo, "html.parser").get_text(" ", strip=True)
+            menciona = re.search(r"\balma\b", texto_simples, re.IGNORECASE) is not None
+        resultado.append({**c, "texto_simples": texto_simples, "menciona_alma": menciona})
+    return JSONResponse({"comentarios": resultado})
+
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
