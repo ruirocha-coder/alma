@@ -1390,6 +1390,21 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-portais-por-card")
+def _debug_portais_por_card(card_id: int):
+    import db as _db
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, titulo, card_id, conteudo_markdown, criado_em
+                   FROM documentos_gerados WHERE card_id = %s ORDER BY id ASC""",
+                (card_id,)
+            )
+            rows = cur.fetchall()
+    return JSONResponse({"documentos": [
+        {**r, "criado_em": r["criado_em"].isoformat() if r["criado_em"] else None} for r in rows
+    ]})
+
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
