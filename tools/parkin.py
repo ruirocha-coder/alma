@@ -2134,7 +2134,13 @@ function renderComprasToros(){
         </span>
       </div>`).join("");
 
-    const cardsHtml = c.cards.map(card => {
+    // cards fechados vão sempre para o fim, pedido explícito do Rui
+    // (2026-10-20) — mais fácil ver de imediato os cards ainda em aberto,
+    // sem ter de passar pelos já fechados primeiro; dentro de cada grupo
+    // mantém a ordem com que já vinham (sort é estável).
+    const cardsOrdenados = [...c.cards].sort((a, b) =>
+      (a.estado === "fechado" ? 1 : 0) - (b.estado === "fechado" ? 1 : 0));
+    const cardsHtml = cardsOrdenados.map(card => {
       const pct = card.encomendado_kg > 0 ? Math.min(100, Math.round(card.entregue_kg/card.encomendado_kg*100)) : 0;
       return `
       <div class="kcard ${card.estado}">
