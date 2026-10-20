@@ -1390,6 +1390,11 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-recording-card")
+def _debug_recording_card(bucket_id: int, card_id: int):
+    rec = basecamp.obter_recording(f"{basecamp._base_url()}/buckets/{bucket_id}/card_tables/cards/{card_id}.json")
+    return JSONResponse(rec)
+
 @app.get("/_debug-comentarios-card")
 def _debug_comentarios_card(card_id: int):
     import re
