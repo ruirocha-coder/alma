@@ -1390,6 +1390,44 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.post("/_debug-corrigir-30-acima-mariano-ramos")
+def _debug_corrigir_30_acima_mariano_ramos():
+    import db as _db
+    from tools import compras_toros as _ct
+
+    talaoes = ["11364", "11365", "11324", "11332", "11349", "11344", "11342", "11341"]
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE parkin_entradas SET obs = '30 ACIMA' WHERE talao = ANY(%s)", (talaoes,)
+            )
+            n_entradas = cur.rowcount
+            cur.execute(
+                "UPDATE avaliacoes_cargas_toros SET obs = '30 ACIMA' WHERE talao = ANY(%s)", (talaoes,)
+            )
+            n_avaliacoes = cur.rowcount
+        conn.commit()
+
+    resultado_linha = _ct.adicionar_linha(14, "MT", 2.55, "normal", 30700)
+
+    abates_para_card14_2_64 = [39, 21, 19, 17, 16]  # 11364(parcial),11349,11344,11342,11341
+    for abate_id in abates_para_card14_2_64:
+        _db.mover_abate_compras_toros(abate_id, 19)
+
+    abates_para_card14_2_55 = [15]  # 11332
+    nova_linha_id = resultado_linha.get("linha_id")
+    for abate_id in abates_para_card14_2_55:
+        _db.mover_abate_compras_toros(abate_id, nova_linha_id)
+
+    _ct._tentar_fechar_card_automatico(12)
+    _ct._tentar_fechar_card_automatico(14)
+
+    return JSONResponse({
+        "obs_atualizado_em_entradas": n_entradas,
+        "obs_atualizado_em_avaliacoes": n_avaliacoes,
+        "nova_linha_2_55_card14": resultado_linha,
+    })
+
 @app.get("/_debug-estado-talao")
 def _debug_estado_talao(talao: str):
     import db as _db

@@ -3289,6 +3289,31 @@ def registar_abate_compras_toros(linha_id: int, entrada_id: int, quantidade_kg: 
             )
         conn.commit()
 
+def mover_abate_compras_toros(abate_id: int, nova_linha_id: int):
+    """Move um abate já registado para outra linha (ex: corrigir um talão
+    que afinal pertencia a outro card) — desconta o entregue_kg da linha
+    de origem e soma-o à de destino, mantendo o mesmo registo de abate
+    (só muda o linha_id), nunca duplicando nem perdendo a quantidade."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT linha_id, quantidade_kg FROM compras_toros_abates WHERE id = %s", (abate_id,)
+            )
+            abate = cur.fetchone()
+            cur.execute(
+                "UPDATE compras_toros_linhas SET entregue_kg = entregue_kg - %s WHERE id = %s",
+                (abate["quantidade_kg"], abate["linha_id"])
+            )
+            cur.execute(
+                "UPDATE compras_toros_abates SET linha_id = %s WHERE id = %s",
+                (nova_linha_id, abate_id)
+            )
+            cur.execute(
+                "UPDATE compras_toros_linhas SET entregue_kg = entregue_kg + %s WHERE id = %s",
+                (abate["quantidade_kg"], nova_linha_id)
+            )
+        conn.commit()
+
 def registar_excesso_compras_toros(entrada_id: int, fornecedor: str, tipo: str, comprimento: float,
                                    espessura: str, quantidade_kg: float):
     with get_conn() as conn:
