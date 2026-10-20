@@ -2423,14 +2423,57 @@ def evento_ja_processado(comment_id: int) -> bool:
             cur.execute("SELECT 1 FROM basecamp_eventos_processados WHERE comment_id = %s", (comment_id,))
             return cur.fetchone() is not None
 
-def registar_evento_processado(comment_id: int, resposta: str):
+def reclamar_evento_basecamp(comment_id: int) -> bool:
+    """Reserva este evento para processamento de forma atómica, devolvendo
+    True só para quem conseguir mesmo a reserva. Bug real (Rui, 2026-10-20,
+    card "Sofia Pinto"): uma menção de 2026-10-14 só teve resposta 6 dias
+    depois e, nessa altura, foi processada até 10 VEZES em paralelo —
+    cada entrega do webhook gerou a sua própria resposta (e chegou a
+    regenerar o portal do projeto duas vezes, com valores diferentes em
+    cada versão). A causa: evento_ja_processado só verificava ANTES do
+    trabalho lento (o agente + chamadas à API, que demora dezenas de
+    segundos), e registar_evento_processado só gravava DEPOIS de publicar
+    a resposta — várias entregas quase simultâneas do Basecamp (que
+    reenvia o mesmo webhook se a entrega anterior não respondeu a tempo)
+    passavam todas essa verificação antes de a primeira terminar. Agora a
+    reserva é a PRIMEIRA coisa a acontecer, com uma única instrução
+    atómica (INSERT ... ON CONFLICT): só quem inserir mesmo a linha é que
+    avança, qualquer entrega a mais encontra o conflito e desiste logo,
+    sem gastar tempo nenhum a gerar uma resposta que nunca devia existir."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO basecamp_eventos_processados (comment_id, resposta)
-                   VALUES (%s, %s) ON CONFLICT (comment_id) DO NOTHING""",
-                (comment_id, resposta)
+                   VALUES (%s, '') ON CONFLICT (comment_id) DO NOTHING""",
+                (comment_id,)
             )
+            conquistado = cur.rowcount == 1
+        conn.commit()
+    return conquistado
+
+def registar_evento_processado(comment_id: int, resposta: str):
+    """Grava a resposta final na linha já reservada por
+    reclamar_evento_basecamp — nunca cria a linha aqui (isso aconteceria
+    tarde demais para servir de proteção contra reenvios, ver essa
+    função)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE basecamp_eventos_processados SET resposta = %s WHERE comment_id = %s",
+                (resposta, comment_id)
+            )
+        conn.commit()
+
+def libertar_evento_basecamp(comment_id: int):
+    """Desfaz a reserva de reclamar_evento_basecamp quando o processamento
+    falha a meio (antes de publicar qualquer resposta) — sem isto, um erro
+    técnico deixava o evento marcado como "processado" para sempre, e uma
+    menção real nunca mais teria resposta, nem num reenvio genuíno do
+    mesmo webhook pelo Basecamp."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM basecamp_eventos_processados WHERE comment_id = %s AND resposta = ''",
+                       (comment_id,))
         conn.commit()
 
 def portal_documento_ja_processado(comment_id: int) -> bool:

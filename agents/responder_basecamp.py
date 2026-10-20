@@ -332,10 +332,24 @@ def _processar(payload: dict):
     if not alvo_id:
         print(f"[responder_basecamp] ignorado: menção sem alvo claro (kind={kind})")
         return
-    if db.evento_ja_processado(evento_id):
-        print(f"[responder_basecamp] ignorado: evento {evento_id} já processado")
+    # reserva atómica, ANTES de qualquer trabalho lento (ver
+    # db.reclamar_evento_basecamp) — o Basecamp reenvia o mesmo webhook se
+    # a entrega anterior não respondeu a tempo, e o agente demora dezenas
+    # de segundos; só quem conseguir mesmo a reserva é que avança.
+    if not db.reclamar_evento_basecamp(evento_id):
+        print(f"[responder_basecamp] ignorado: evento {evento_id} já processado/reservado")
         return
+    try:
+        _responder_mencao(evento_id, alvo, alvo_id, recording, criador)
+    except Exception:
+        # a reserva feita acima não pode ficar presa para sempre se o
+        # resto falhar antes de publicar nada — liberta-a, para uma menção
+        # real (ou um reenvio genuíno do mesmo webhook) poder ter resposta
+        # mais tarde.
+        db.libertar_evento_basecamp(evento_id)
+        raise
 
+def _responder_mencao(evento_id, alvo: dict, alvo_id, recording: dict, criador: dict):
     # quando a menção vem de um comentário, "alvo" é só a referência resumida
     # ao pai (id/título/tipo/url) — não tem as notas da tarefa/card. Vai
     # sempre buscar o registo completo do alvo antes de escrever o contexto,
