@@ -1390,6 +1390,47 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-estado-talao")
+def _debug_estado_talao(talao: str):
+    import db as _db
+    from decimal import Decimal
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg,
+                          saldo_kg, obs
+                   FROM parkin_entradas WHERE talao = %s ORDER BY id DESC LIMIT 1""",
+                (talao,)
+            )
+            entrada = cur.fetchone()
+            abates, excessos = [], []
+            if entrada:
+                cur.execute(
+                    """SELECT a.id, a.linha_id, a.quantidade_kg, c.fornecedor AS card_fornecedor,
+                              c.id AS card_id, c.notas AS card_notas
+                       FROM compras_toros_abates a
+                       JOIN compras_toros_linhas l ON l.id = a.linha_id
+                       JOIN compras_toros_cards c ON c.id = l.card_id
+                       WHERE a.entrada_id = %s""",
+                    (entrada["id"],)
+                )
+                abates = cur.fetchall()
+                cur.execute(
+                    "SELECT id, quantidade_kg FROM compras_toros_excessos WHERE entrada_id = %s",
+                    (entrada["id"],)
+                )
+                excessos = cur.fetchall()
+    def _limpa(d):
+        if not d:
+            return d
+        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
+               for k, v in d.items()}
+    return JSONResponse({
+        "entrada": _limpa(entrada),
+        "abates": [_limpa(a) for a in abates],
+        "excessos": [_limpa(e) for e in excessos],
+    })
+
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
