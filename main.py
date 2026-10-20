@@ -1390,52 +1390,6 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.post("/_debug-corrigir-portal-468")
-def _debug_corrigir_portal_468():
-    import json, db as _db
-    from tools import portal_projeto as _pp, tempo as _tempo
-    registo = _db.obter_documento_gerado(468)
-    projeto = json.loads(registo["conteudo_markdown"])["projeto"]
-
-    fases_estado = {}
-    for f in projeto["fases"]:
-        if f["id"] == "projeto":
-            fases_estado[f["id"]] = {"estado": "validada", "data": _tempo.data_extenso_hoje()}
-        elif f["id"] == "orcamento":
-            fases_estado[f["id"]] = {"estado": "aguarda"}
-        elif f.get("data"):
-            fases_estado[f["id"]] = {"estado": f["estado"], "data": f["data"]}
-        else:
-            fases_estado[f["id"]] = {"estado": f["estado"]}
-
-    campos = {
-        "cliente": projeto["cliente"],
-        "cliente_telefone": projeto.get("clienteContacto", {}).get("telefone"),
-        "cliente_email": projeto.get("clienteContacto", {}).get("email"),
-        "validade": projeto["validade"],
-        "honorarios_total": projeto["honorarios"]["total"],
-        "honorarios_total_com_iva": True,
-        "honorarios_linhas": [{"titulo": l["t"], "descricao": l["d"], "valor": l["v"]}
-                             for l in projeto["honorarios"]["linhas"]],
-        "ambientes": projeto["ambientes"],
-        "fases_estado": fases_estado,
-        "valor_produto": 53428,
-        "valor_produto_com_iva": True,
-        "valor_transporte": 4024,
-        "conceito": {
-            "imagem": projeto["conceito"].get("imagem"),
-            "materiais": projeto["conceito"].get("materiais"),
-            "leitura": projeto["conceito"].get("leitura"),
-            "documento": projeto["documentos"].get("conceito"),
-        },
-        "documento_apresentacao": projeto["documentos"].get("apresentacao"),
-        "documento_orcamento": projeto["documentos"].get("orcamento"),
-        "documento_honorarios": projeto["documentos"].get("honorarios"),
-        "projeto_imagem": projeto.get("projetoImagem"),
-    }
-    resultado = _pp.atualizar_portal_projeto_edicao(468, "Alma (correção, pedido do Rui, 2026-10-20)", campos)
-    return JSONResponse(resultado)
-
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
