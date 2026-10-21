@@ -1,4 +1,5 @@
 # db.py — ligação Postgres + schema + memória partilhada
+import json
 import os
 import unicodedata
 import psycopg
@@ -2160,6 +2161,56 @@ def eliminar_documento_gerado(id: int) -> bool:
             eliminado = cur.rowcount > 0
         conn.commit()
     return eliminado
+
+def documento_portal_por_ref(ref: str, excluir_card_id: int) -> dict:
+    """O portal (id + card_id) com esta referência exata (ex: "IG-30042026",
+    ver tools/portal_projeto._numero_referencia_card), associado a um
+    card_id DIFERENTE do indicado — usado para detetar quando o card do
+    Basecamp foi recriado/duplicado (ganhou um id interno novo) mas é o
+    mesmo projeto, pela referência estável extraída do título do card,
+    que não muda com o id. Bug real (Rui, 2026-10-20/21, card "Sofia
+    Pinto"): o card mudou de id, o sistema deixou de encontrar o portal
+    já existente (honorários/conceito/projeto/orçamento já todos
+    validados pela cliente) e gerou um segundo portal, pior, a partir do
+    histórico do card — ver retargetar_portal_projeto, chamada sempre
+    que isto encontrar algo, em vez de se gerar um portal novo do zero."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, card_id FROM documentos_gerados
+                   WHERE formato = 'html' AND card_id != %s
+                     AND conteudo_markdown::json -> 'projeto' ->> 'ref' = %s
+                   ORDER BY criado_em DESC LIMIT 1""",
+                (excluir_card_id, ref)
+            )
+            return cur.fetchone()
+
+def retargetar_portal_projeto(doc_id: int, novo_card_id: int) -> bool:
+    """Atualiza um portal já gerado para apontar a outro card_id do
+    Basecamp — usado quando o card foi recriado/duplicado lá e ganhou um
+    id novo, mas o projeto é o mesmo (ver documento_portal_por_ref).
+    Atualiza o card_id na coluna da tabela e também dentro do JSON
+    guardado e do HTML já renderizado (o id antigo fica embutido no JS da
+    própria página — usado pelo botão de validar fase e pelo link
+    "recomendar a um amigo" — nunca só na base de dados). Nunca cria um
+    documento novo nem toca em mais nada do conteúdo já lá existente —
+    só reaponta. Devolve False se o documento não existir."""
+    registo = obter_documento_gerado(doc_id)
+    if not registo:
+        return False
+    card_id_antigo = json.loads(registo["conteudo_markdown"])["card_id"]
+    if card_id_antigo == novo_card_id:
+        return True
+    conteudo_markdown = registo["conteudo_markdown"].replace(str(card_id_antigo), str(novo_card_id))
+    html = registo["pdf"].decode("utf-8").replace(str(card_id_antigo), str(novo_card_id))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE documentos_gerados SET card_id = %s, conteudo_markdown = %s, pdf = %s WHERE id = %s",
+                (novo_card_id, conteudo_markdown, html.encode("utf-8"), doc_id)
+            )
+        conn.commit()
+    return True
 
 def listar_portais_projeto() -> list:
     """Todos os portais de acompanhamento de projeto já gerados (ver

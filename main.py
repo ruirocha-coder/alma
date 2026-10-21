@@ -1420,32 +1420,17 @@ def _debug_comparar_portais_sofia():
 
 @app.post("/_debug-consolidar-portal-sofia")
 def _debug_consolidar_portal_sofia():
-    import json, db as _db
+    import db as _db
     CARD_ID_ATUAL = 10423376110
-    CARD_ID_ANTIGO = 10159157853
 
-    registo = _db.obter_documento_gerado(397)
-    if not registo:
+    ok = _db.retargetar_portal_projeto(397, CARD_ID_ATUAL)
+    if not ok:
         return JSONResponse({"erro": "documento 397 não encontrado"})
-
-    conteudo_markdown = registo["conteudo_markdown"].replace(str(CARD_ID_ANTIGO), str(CARD_ID_ATUAL))
-    html = registo["pdf"].decode("utf-8").replace(str(CARD_ID_ANTIGO), str(CARD_ID_ATUAL))
-    n_substituicoes_json = registo["conteudo_markdown"].count(str(CARD_ID_ANTIGO))
-    n_substituicoes_html = registo["pdf"].decode("utf-8").count(str(CARD_ID_ANTIGO))
-
-    with _db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE documentos_gerados SET card_id = %s, conteudo_markdown = %s, pdf = %s WHERE id = 397",
-                (CARD_ID_ATUAL, conteudo_markdown, html.encode("utf-8"))
-            )
-        conn.commit()
 
     eliminado_468 = _db.eliminar_documento_gerado(468)
 
     return JSONResponse({
-        "substituicoes_json": n_substituicoes_json,
-        "substituicoes_html": n_substituicoes_html,
+        "retargetado": ok,
         "portal_397_card_id_novo": CARD_ID_ATUAL,
         "documento_468_eliminado": eliminado_468,
     })

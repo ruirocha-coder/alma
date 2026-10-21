@@ -593,6 +593,15 @@ def gerar_portal_projeto(utilizador: str, card_id: int, cliente: str, validade: 
     erro = _validar_fases_estado(fases_estado)
     if erro:
         return {"erro": erro}
+    # autocura contra o card ter mudado de id no Basecamp (recriado/
+    # duplicado) sem o projeto ser outro — ver documento_portal_por_ref.
+    # Sem isto, obter_documento_gerado_por_card_id nunca encontrava o
+    # portal já existente (associado ao id antigo) e esta função gerava
+    # um portal novo do zero a duplicar/piorar um já validado pela
+    # cliente (bug real, Rui, 2026-10-20/21, card "Sofia Pinto").
+    outro_card = db.documento_portal_por_ref(f"IG-{_numero_referencia_card(card_id)}", excluir_card_id=card_id)
+    if outro_card:
+        db.retargetar_portal_projeto(outro_card["id"], card_id)
     registo_existente = db.obter_documento_gerado_por_card_id(card_id)
     if registo_existente and registo_existente["formato"] == "html":
         try:
@@ -919,8 +928,22 @@ def obter_portal_atual(card_id: int) -> dict:
     chegou aos 10 milhões de tokens (o máximo é 1 milhão) só para "repetir"
     de volta o que já lá estava. Devolve {"existe": False} se este card
     ainda não tiver nenhum portal gerado — nesse caso, usa
-    gerar_portal_projeto normalmente, a partir do zero."""
+    gerar_portal_projeto normalmente, a partir do zero.
+
+    Autocura contra o card ter mudado de id no Basecamp (recriado/
+    duplicado): antes de desistir, procura um portal já existente com a
+    mesma referência (IG-DDMMAAAA, extraída do título do card, estável
+    mesmo que o id mude) associado a outro card_id — se encontrar,
+    reaponta-o para este card_id em vez de devolver {"existe": False},
+    que levaria a chamar gerar_portal_projeto e duplicar/piorar um portal
+    já validado pela cliente (bug real, Rui, 2026-10-20/21, card "Sofia
+    Pinto"). Ver documento_portal_por_ref/retargetar_portal_projeto."""
     registo = db.obter_documento_gerado_por_card_id(card_id)
+    if (not registo or registo["formato"] != "html"):
+        outro_card = db.documento_portal_por_ref(f"IG-{_numero_referencia_card(card_id)}", excluir_card_id=card_id)
+        if outro_card:
+            db.retargetar_portal_projeto(outro_card["id"], card_id)
+            registo = db.obter_documento_gerado_por_card_id(card_id)
     if not registo or registo["formato"] != "html":
         return {"existe": False}
     projeto = json.loads(registo["conteudo_markdown"])["projeto"]
