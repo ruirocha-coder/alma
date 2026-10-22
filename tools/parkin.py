@@ -1701,7 +1701,10 @@ function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escala
 function renderVariacaoTriangulo(variacaoKg){
   const cls = variacaoKg > 0.05 ? "pos" : variacaoKg < -0.05 ? "neg" : "zero";
   const sinal = variacaoKg > 0 ? "+" : "";
-  const valor = (variacaoKg/1000).toLocaleString("pt-PT", {minimumFractionDigits:1, maximumFractionDigits:1});
+  // arredondado às toneladas inteiras (pedido explícito do Rui,
+  // 2026-10-22) — com 1 casa decimal, números maiores (ex: "+392,7")
+  // não cabiam dentro do triângulo.
+  const valor = Math.round(variacaoKg/1000).toLocaleString("pt-PT");
   return `<div class="var-triangulo ${cls}" data-tip="Variação desde a sexta-feira anterior: ${sinal}${t(variacaoKg)}">
     <div class="forma"></div><div class="val">${sinal}${valor}</div>
   </div>`;
