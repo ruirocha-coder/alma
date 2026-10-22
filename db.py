@@ -2194,7 +2194,16 @@ def retargetar_portal_projeto(doc_id: int, novo_card_id: int) -> bool:
     própria página — usado pelo botão de validar fase e pelo link
     "recomendar a um amigo" — nunca só na base de dados). Nunca cria um
     documento novo nem toca em mais nada do conteúdo já lá existente —
-    só reaponta. Devolve False se o documento não existir."""
+    só reaponta. Devolve False se o documento não existir.
+
+    `card_id` tem um índice único (um card só pode ter um portal) — se já
+    existir outro documento (nunca este) a ocupar `novo_card_id` (caso
+    real: a Sofia Pinto tinha o portal original preso a um card_id
+    antigo, e um segundo portal, pior, gerado entretanto já no card_id
+    atual), esse outro é eliminado primeiro. Faz sentido: se este
+    documento é mesmo o dono legítimo desta referência de projeto (quem
+    chama já confirmou isso, ver documento_portal_por_ref), quem estiver
+    a ocupar o card_id atual só pode ser um duplicado órfão a mais."""
     registo = obter_documento_gerado(doc_id)
     if not registo:
         return False
@@ -2205,6 +2214,12 @@ def retargetar_portal_projeto(doc_id: int, novo_card_id: int) -> bool:
     html = registo["pdf"].decode("utf-8").replace(str(card_id_antigo), str(novo_card_id))
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM documentos_gerados WHERE card_id = %s AND id != %s", (novo_card_id, doc_id)
+            )
+            if cur.rowcount:
+                print(f"[retargetar_portal_projeto] eliminado(s) {cur.rowcount} documento(s) duplicado(s) "
+                     f"que já ocupavam o card_id {novo_card_id}")
             cur.execute(
                 "UPDATE documentos_gerados SET card_id = %s, conteudo_markdown = %s, pdf = %s WHERE id = %s",
                 (novo_card_id, conteudo_markdown, html.encode("utf-8"), doc_id)
