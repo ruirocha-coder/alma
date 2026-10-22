@@ -1390,52 +1390,6 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-comparar-portais-sofia")
-def _debug_comparar_portais_sofia():
-    import json, db as _db
-    def resumo(doc_id):
-        r = _db.obter_documento_gerado(doc_id)
-        if not r:
-            return None
-        p = json.loads(r["conteudo_markdown"])["projeto"]
-        return {
-            "card_id": p.get("cardId"),
-            "cliente": p.get("cliente"),
-            "validade": p.get("validade"),
-            "honorarios_total": p["honorarios"]["total"],
-            "honorarios_linhas": [(l["t"], l["v"]) for l in p["honorarios"]["linhas"]],
-            "ambientes": [(a["nome"], a["nota"], bool(a.get("imagem"))) for a in p["ambientes"]],
-            "conceito_materiais": p["conceito"].get("materiais"),
-            "conceito_tem_imagem": bool(p["conceito"].get("imagem")),
-            "tem_doc_apresentacao": bool(p["documentos"].get("apresentacao")),
-            "tem_doc_orcamento": bool(p["documentos"].get("orcamento")),
-            "tem_doc_conceito": bool(p["documentos"].get("conceito")),
-            "tem_doc_honorarios": bool(p["documentos"].get("honorarios")),
-            "tem_projeto_imagem": bool(p.get("projetoImagem")),
-            "valorProduto": p.get("valorProduto"),
-            "valorTransporte": p.get("valorTransporte"),
-            "fases": [(f["id"], f["estado"], f.get("data")) for f in p["fases"]],
-        }
-    return JSONResponse({"397": resumo(397), "468": resumo(468)})
-
-@app.post("/_debug-consolidar-portal-sofia")
-def _debug_consolidar_portal_sofia():
-    import traceback
-    import db as _db
-    CARD_ID_ATUAL = 10423376110
-    try:
-        ok = _db.retargetar_portal_projeto(397, CARD_ID_ATUAL)
-        if not ok:
-            return JSONResponse({"erro": "documento 397 não encontrado"})
-
-        return JSONResponse({
-            "retargetado": ok,
-            "portal_397_card_id_novo": CARD_ID_ATUAL,
-        })
-    except Exception as e:
-        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
-                           status_code=500)
-
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
