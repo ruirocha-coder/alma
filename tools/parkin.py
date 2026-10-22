@@ -1138,6 +1138,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .gauge .lim.max{background:var(--red)}
   .gauge .lim span{position:absolute;top:-16px;left:50%;transform:translateX(-50%);
     font-size:10px;color:var(--dim);white-space:nowrap}
+  .gauge .seg{cursor:default}
+  .seg-tooltip{position:fixed;z-index:50;background:var(--ink);color:#fff;font-size:11.5px;font-weight:600;
+    padding:4px 9px;border-radius:6px;pointer-events:none;white-space:nowrap;opacity:0;
+    transition:opacity .1s;transform:translate(-50%,calc(-100% - 8px))}
+  .seg-tooltip.show{opacity:1}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
   .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
   .artigo-row{margin-bottom:22px}
@@ -1613,10 +1618,10 @@ function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escala
     for(const cat of ["Boa","Media","Fraca"]){
       const v = porCategoria[cat]||0;
       if(v<=0) continue;
-      segs += `<div class="seg" style="width:${v/totalKg*100}%;background:${CORES[cat]}" title="${NOMES_CAT[cat]}: ${t(v)}"></div>`;
+      segs += `<div class="seg" style="width:${v/totalKg*100}%;background:${CORES[cat]}" data-tip="${NOMES_CAT[cat]}: ${t(v)}"></div>`;
     }
     if(semCategoria>0){
-      segs += `<div class="seg" style="width:${semCategoria/totalKg*100}%;background:var(--grey)" title="Sem avaliação: ${t(semCategoria)}"></div>`;
+      segs += `<div class="seg" style="width:${semCategoria/totalKg*100}%;background:var(--grey)" data-tip="Sem avaliação: ${t(semCategoria)}"></div>`;
     }
   }
   const largura = totalKg>0 ? totalKg/escala*100 : 0;
@@ -1636,6 +1641,28 @@ function legenda(porCategoria, semCategoria, totalKg){
   if(semCategoria>0) html += `<span><span class="dot" style="background:var(--grey)"></span>Sem avaliação ${pct(semCategoria,totalKg)}% · ${t(semCategoria)}</span>`;
   return `<div class="legend">${html}</div>`;
 }
+
+// Tooltip ao passar o rato numa cor da barra de stock, com a quantidade
+// dessa categoria — pedido explícito do Rui (2026-10-22). Um só elemento
+// partilhado (nunca um por segmento) com listeners em delegação no
+// document, porque o conteúdo das barras é sempre reconstruído do zero a
+// cada carregar() — um title nativo já mostrava isto, mas com atraso e
+// sem estilo nenhum, fácil de nem dar por ele.
+const segTooltip = document.createElement("div");
+segTooltip.className = "seg-tooltip";
+document.body.appendChild(segTooltip);
+document.addEventListener("mouseover", e => {
+  const seg = e.target.closest(".seg[data-tip]");
+  if(!seg) return;
+  const r = seg.getBoundingClientRect();
+  segTooltip.textContent = seg.dataset.tip;
+  segTooltip.style.left = `${r.left + r.width/2}px`;
+  segTooltip.style.top = `${r.top}px`;
+  segTooltip.classList.add("show");
+});
+document.addEventListener("mouseout", e => {
+  if(e.target.closest(".seg[data-tip]")) segTooltip.classList.remove("show");
+});
 
 let DADOS = null;
 
