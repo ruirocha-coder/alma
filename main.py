@@ -1407,6 +1407,29 @@ def sincronizar_calendario_agora():
     threading.Thread(target=sincronizacao_calendario.correr_sincronizacao_calendario, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-variacao-stock-detalhe")
+def _debug_variacao_stock_detalhe():
+    import db as _db
+    from tools import parkin as _pk
+    hoje = _pk.date.today()
+    sexta = _pk._sexta_feira_anterior(hoje)
+    stock_hoje = _db.stock_por_artigo_ate_data(hoje)
+    entradas_hoje = _db.entradas_reais_por_artigo_na_data(hoje)
+    stock_sexta = _db.stock_por_artigo_ate_data(sexta)
+    entradas_sexta = _db.entradas_reais_por_artigo_na_data(sexta)
+    total_stock_hoje = sum(stock_hoje.values())
+    total_entradas_hoje = sum(entradas_hoje.values())
+    total_stock_sexta = sum(stock_sexta.values())
+    total_entradas_sexta = sum(entradas_sexta.values())
+    return JSONResponse({
+        "hoje": str(hoje), "sexta_anterior": str(sexta),
+        "stock_ate_hoje": total_stock_hoje, "entradas_hoje": total_entradas_hoje,
+        "inicio_hoje": total_stock_hoje - total_entradas_hoje,
+        "stock_ate_sexta": total_stock_sexta, "entradas_sexta": total_entradas_sexta,
+        "inicio_sexta": total_stock_sexta - total_entradas_sexta,
+        "variacao": (total_stock_hoje - total_entradas_hoje) - (total_stock_sexta - total_entradas_sexta),
+    })
+
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
     """Dispara já a análise diária do dashboard de produção, no Mural da Ecos Largos, em segundo plano."""
