@@ -2996,6 +2996,61 @@ def entradas_parkin_todas() -> list[dict]:
             )
             return cur.fetchall()
 
+def stock_por_artigo_ate_data(data_limite) -> dict:
+    """Reconstrói o stock (por artigo tipo+comprimento+espessura, mais a
+    chave None para o total) tal como estaria no FIM deste dia, somando
+    todos os movimentos reais datados até aqui (inclusive) — pedido
+    explícito do Rui (2026-10-22), para a variação de stock desde a
+    sexta-feira anterior (ver tools/parkin._variacoes_stock).
+
+    Identidade contabilística simples (entradas reais − saídas +
+    correções, todas com sinal), em vez de tentar reconstruir saldo_kg
+    histórico entrada a entrada (que exigiria saber a DATA de cada
+    depleção, não só a da entrada) — dá exatamente o mesmo total que
+    stock_total()/stock_por_artigo() quando `data_limite` é hoje, porque
+    cada "entrada sintética CORR-<id>" de uma correção (ver
+    tools/parkin.registar_correcao) tem sempre o mesmo peso_liquido_kg
+    que a própria correção; por isso as entradas sintéticas são aqui
+    excluídas (nunca contá-las a dobrar com a correção que já está
+    somada na mesma)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, SUM(delta) AS saldo FROM (
+                     SELECT tipo, comprimento, espessura, peso_liquido_kg AS delta
+                       FROM parkin_entradas WHERE talao NOT LIKE 'CORR-%%' AND data <= %s
+                     UNION ALL
+                     SELECT tipo, comprimento, espessura, -quantidade_kg AS delta
+                       FROM parkin_saidas WHERE data <= %s
+                     UNION ALL
+                     SELECT tipo, comprimento, espessura, quantidade_kg AS delta
+                       FROM parkin_correcoes WHERE data <= %s
+                   ) mov
+                   GROUP BY tipo, comprimento, espessura""",
+                (data_limite, data_limite, data_limite)
+            )
+            return {
+                (r["tipo"], float(r["comprimento"]) if r["comprimento"] is not None else None, r["espessura"]):
+                float(r["saldo"]) for r in cur.fetchall()
+            }
+
+def entradas_reais_por_artigo_na_data(data_exata) -> dict:
+    """Só as entradas REAIS (nunca as sintéticas "CORR-<id>" de uma
+    correção) datadas exatamente deste dia, por artigo — ver
+    tools/parkin._variacoes_stock."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT tipo, comprimento, espessura, SUM(peso_liquido_kg) AS total
+                   FROM parkin_entradas WHERE talao NOT LIKE 'CORR-%%' AND data = %s
+                   GROUP BY tipo, comprimento, espessura""",
+                (data_exata,)
+            )
+            return {
+                (r["tipo"], float(r["comprimento"]) if r["comprimento"] is not None else None, r["espessura"]):
+                float(r["total"]) for r in cur.fetchall()
+            }
+
 def correcoes_parkin_positivas() -> list[dict]:
     """Correções positivas SEM entrada ligada (ver guardar_correcao_parkin)
     — histórico anterior a 2026-10-08, antes de uma correção positiva

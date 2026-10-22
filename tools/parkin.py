@@ -17,7 +17,7 @@
 # de qualidade exata de onde veio, nunca uma aproximação (ver _aplicar_fifo
 # e a tabela parkin_depletions, partilhada pelas duas, para auditoria).
 import base64, io, re, unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import anthropic
 import db
 from tools import visao
@@ -823,6 +823,52 @@ def registar_correcao(tipo: str, comprimento: float, espessura: str, quantidade_
            "categoria_qualidade": categoria_qualidade, **resultado}
 
 
+def _sexta_feira_anterior(hoje: date) -> date:
+    """A sexta-feira mais recente ANTES de hoje — nunca hoje, mesmo que
+    hoje já seja sexta-feira (ver _variacoes_stock)."""
+    dias_desde_sexta = (hoje.weekday() - 4) % 7  # segunda=0 ... sexta=4, domingo=6
+    if dias_desde_sexta == 0:
+        dias_desde_sexta = 7
+    return hoje - timedelta(days=dias_desde_sexta)
+
+
+def _variacoes_stock() -> dict:
+    """Variação do stock desde a sexta-feira anterior até hoje, por
+    artigo (chave `_chave_artigo`, mais "total" para o stock geral) —
+    pedido explícito do Rui (2026-10-22), para perceber se estamos a
+    receber mais do que a gastar ou o contrário.
+
+    Compara sempre o stock no INÍCIO de cada um dos dois dias (hoje e
+    essa sexta-feira), nunca o stock já com as entradas desse dia
+    somadas: as saídas não são lançadas no próprio dia (só no dia
+    seguinte), por isso o stock "a meio do dia" conta sempre as entradas
+    de hoje mas nunca as saídas de hoje — pareceria sempre a subir, por
+    um motivo que não é real. Subtrai as entradas reais desse dia ao
+    stock acumulado até esse dia (inclusive) para chegar ao início do
+    dia, dos dois lados da comparação, para os dois ficarem definidos
+    exatamente da mesma forma."""
+    hoje = date.today()
+    sexta = _sexta_feira_anterior(hoje)
+
+    stock_hoje = db.stock_por_artigo_ate_data(hoje)
+    entradas_hoje = db.entradas_reais_por_artigo_na_data(hoje)
+    stock_sexta = db.stock_por_artigo_ate_data(sexta)
+    entradas_sexta = db.entradas_reais_por_artigo_na_data(sexta)
+
+    chaves_brutas = set(stock_hoje) | set(stock_sexta)
+    variacoes = {}
+    total = 0.0
+    for chave_bruta in chaves_brutas:
+        tipo, comprimento, espessura = chave_bruta
+        inicio_hoje = stock_hoje.get(chave_bruta, 0.0) - entradas_hoje.get(chave_bruta, 0.0)
+        inicio_sexta = stock_sexta.get(chave_bruta, 0.0) - entradas_sexta.get(chave_bruta, 0.0)
+        v = inicio_hoje - inicio_sexta
+        variacoes[_chave_artigo(tipo, comprimento, espessura)] = round(v, 1)
+        total += v
+    variacoes["total"] = round(total, 1)
+    return variacoes
+
+
 def stock_total() -> dict:
     """Stock total atual, por categoria de qualidade — para a barra
     empilhada principal do dashboard. Inclui o saldo das entradas e as
@@ -1002,9 +1048,18 @@ def top_entradas(dias: int = 30, limite: int = 5) -> list[dict]:
 
 
 def dados_dashboard(dias_top_entradas: int = 30, dias_movimentos: int = 14) -> dict:
+    # variação do stock desde a sexta-feira anterior (ver _variacoes_stock)
+    # — anexada a cada barra (total + por artigo), pedido explícito do
+    # Rui, 2026-10-22.
+    variacoes = _variacoes_stock()
+    total = stock_total()
+    total["variacao_kg"] = variacoes.get("total", 0.0)
+    por_artigo = stock_por_artigo()
+    for a in por_artigo:
+        a["variacao_kg"] = variacoes.get(a["artigo"], 0.0)
     return {
-        "stock_total": stock_total(),
-        "stock_por_artigo": stock_por_artigo(),
+        "stock_total": total,
+        "stock_por_artigo": por_artigo,
         "top_qualidade": top_qualidade(3),
         "top_entradas": top_entradas(dias_top_entradas, 5),
         # pedido explícito do Rui (2026-10-12): a própria página do Park In
@@ -1143,6 +1198,15 @@ _TEMPLATE = r"""<!DOCTYPE html>
     padding:4px 9px;border-radius:6px;pointer-events:none;white-space:nowrap;opacity:0;
     transition:opacity .1s;transform:translate(-50%,calc(-100% - 8px))}
   .seg-tooltip.show{opacity:1}
+  .gauge-row{display:flex;align-items:center;gap:10px;margin:22px 0 6px}
+  .gauge-row .gauge{flex:1;margin-top:0;margin-bottom:0}
+  .var-triangulo{position:relative;width:42px;height:36px;flex:none;cursor:default}
+  .var-triangulo .forma{position:absolute;inset:0;clip-path:polygon(50% 4%,4% 96%,96% 96%)}
+  .var-triangulo.pos .forma{background:var(--green)}
+  .var-triangulo.neg .forma{background:var(--red)}
+  .var-triangulo.zero .forma{background:var(--grey)}
+  .var-triangulo .val{position:absolute;left:0;right:0;bottom:4px;text-align:center;color:#fff;
+    font-size:9.5px;font-weight:700;line-height:1}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
   .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
   .artigo-row{margin-bottom:22px}
@@ -1631,6 +1695,18 @@ function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escala
   return `<div class="gauge"><div class="fill" style="width:${largura}%">${segs}</div>${linhas}</div>`;
 }
 
+// Triângulo com a variação do stock desde a sexta-feira anterior, à
+// frente de cada barra — pedido explícito do Rui, 2026-10-22. Vermelho
+// se estivermos a gastar mais do que a receber, verde no contrário.
+function renderVariacaoTriangulo(variacaoKg){
+  const cls = variacaoKg > 0.05 ? "pos" : variacaoKg < -0.05 ? "neg" : "zero";
+  const sinal = variacaoKg > 0 ? "+" : "";
+  const valor = (variacaoKg/1000).toLocaleString("pt-PT", {minimumFractionDigits:1, maximumFractionDigits:1});
+  return `<div class="var-triangulo ${cls}" data-tip="Variação desde a sexta-feira anterior: ${sinal}${t(variacaoKg)}">
+    <div class="forma"></div><div class="val">${sinal}${valor}</div>
+  </div>`;
+}
+
 function legenda(porCategoria, semCategoria, totalKg){
   let html = "";
   for(const cat of ["Boa","Media","Fraca"]){
@@ -1652,7 +1728,7 @@ const segTooltip = document.createElement("div");
 segTooltip.className = "seg-tooltip";
 document.body.appendChild(segTooltip);
 document.addEventListener("mouseover", e => {
-  const seg = e.target.closest(".seg[data-tip]");
+  const seg = e.target.closest("[data-tip]");
   if(!seg) return;
   const r = seg.getBoundingClientRect();
   segTooltip.textContent = seg.dataset.tip;
@@ -1661,7 +1737,7 @@ document.addEventListener("mouseover", e => {
   segTooltip.classList.add("show");
 });
 document.addEventListener("mouseout", e => {
-  if(e.target.closest(".seg[data-tip]")) segTooltip.classList.remove("show");
+  if(e.target.closest("[data-tip]")) segTooltip.classList.remove("show");
 });
 
 let DADOS = null;
@@ -1733,7 +1809,8 @@ function renderStockTotal(){
   const el = $("#stockTotal");
   if(s.total_kg<=0){ el.innerHTML = '<div class="vazio">Ainda sem stock registado.</div>'; return; }
   el.innerHTML = legenda(s.por_categoria_kg, s.sem_categoria_kg, s.total_kg)
-    + renderGauge(s.por_categoria_kg, s.sem_categoria_kg, s.total_kg, s.minimo_kg, s.maximo_kg)
+    + `<div class="gauge-row">${renderVariacaoTriangulo(s.variacao_kg)}
+       ${renderGauge(s.por_categoria_kg, s.sem_categoria_kg, s.total_kg, s.minimo_kg, s.maximo_kg)}</div>`
     + `<div class="sub mono">Total: ${t(s.total_kg)}</div>`;
 }
 
@@ -1754,7 +1831,8 @@ function renderStockArtigo(){
       <div class="titulo"><span>${a.artigo==="desconhecido" ? "Artigo desconhecido (histórico sem essa informação)"
         : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`}</span>
         <span class="tot mono">${t(a.total_kg)}</span></div>
-      ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg, escalaGlobal)}
+      <div class="gauge-row">${renderVariacaoTriangulo(a.variacao_kg)}
+        ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg, escalaGlobal)}</div>
     </div>
   `).join("");
 }
