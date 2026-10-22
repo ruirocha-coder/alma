@@ -1420,20 +1420,24 @@ def _debug_comparar_portais_sofia():
 
 @app.post("/_debug-consolidar-portal-sofia")
 def _debug_consolidar_portal_sofia():
+    import traceback
     import db as _db
     CARD_ID_ATUAL = 10423376110
+    try:
+        ok = _db.retargetar_portal_projeto(397, CARD_ID_ATUAL)
+        if not ok:
+            return JSONResponse({"erro": "documento 397 não encontrado"})
 
-    ok = _db.retargetar_portal_projeto(397, CARD_ID_ATUAL)
-    if not ok:
-        return JSONResponse({"erro": "documento 397 não encontrado"})
+        eliminado_468 = _db.eliminar_documento_gerado(468)
 
-    eliminado_468 = _db.eliminar_documento_gerado(468)
-
-    return JSONResponse({
-        "retargetado": ok,
-        "portal_397_card_id_novo": CARD_ID_ATUAL,
-        "documento_468_eliminado": eliminado_468,
-    })
+        return JSONResponse({
+            "retargetado": ok,
+            "portal_397_card_id_novo": CARD_ID_ATUAL,
+            "documento_468_eliminado": eliminado_468,
+        })
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                           status_code=500)
 
 @app.post("/ecos-largos/resumo-diario")
 def resumo_diario_ecos_largos_agora():
