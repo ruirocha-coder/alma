@@ -1202,6 +1202,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
     border-radius:5px;text-align:right}
   .kcard{background:var(--canvas);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
   .kcard.fechado{opacity:.65}
+  .kcard[draggable="true"]{cursor:grab}
+  .kcard.arrastando{opacity:.35}
+  .kcol-cards{min-height:12px}
+  .kcol-cards.arrasto-por-cima{outline:2px dashed var(--blue);outline-offset:-2px;border-radius:10px}
   .kcard .forn{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13.5px}
   .kcard .linha{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:5px}
   .kcard .tot{display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;margin-top:8px}
@@ -2142,8 +2146,9 @@ function renderComprasToros(){
       (a.estado === "fechado" ? 1 : 0) - (b.estado === "fechado" ? 1 : 0));
     const cardsHtml = cardsOrdenados.map(card => {
       const pct = card.encomendado_kg > 0 ? Math.min(100, Math.round(card.entregue_kg/card.encomendado_kg*100)) : 0;
+      const arrastavel = !arquivada && card.estado === "aberto";
       return `
-      <div class="kcard ${card.estado}">
+      <div class="kcard ${card.estado}" ${arrastavel ? 'draggable="true"' : ''} data-card-id="${card.id}">
         <div class="forn"><span>${card.fornecedor}</span>
           <span class="kbadge ${card.estado}">${card.estado === "aberto" ? "Aberto" : "Fechado"}</span></div>
         ${card.data_encomenda ? `<div class="nota-fecho">Encomenda: ${dataPt(card.data_encomenda)}</div>` : ''}
@@ -2178,7 +2183,9 @@ function renderComprasToros(){
       <div class="kcol-total"><span>Total entregue</span><span>${t(entregueTotal)} / ${t(previsaoTotal)}</span></div>
       <div class="kbar"><div class="f" style="width:${pctTotal}%"></div></div>
       <details class="knec"><summary>Necessidade por artigo (${c.necessidades.length})</summary>${necessidadesHtml}</details>
-      ${cardsHtml || '<div class="sub" style="padding:8px 0">Sem cards ainda.</div>'}
+      <div class="kcol-cards" data-coluna-id="${c.id}" data-arquivada="${arquivada}">
+        ${cardsHtml || '<div class="sub" style="padding:8px 0">Sem cards ainda.</div>'}
+      </div>
     </div>`;
   }
 
@@ -2198,6 +2205,56 @@ function renderComprasToros(){
     });
   });
 }
+
+// Arrastar cards à mão (para cima/para baixo dentro do mesmo levantamento,
+// ou entre levantamentos) — pedido explícito do Rui, 2026-10-22, como no
+// Basecamp. Listeners em delegação no #kanban (persiste entre renders, só
+// o innerHTML muda) — nunca duplicados a cada render. Puramente visual:
+// a reordenação em si (POST /reordenar-cards) nunca mexe no FIFO.
+let _cardArrastado = null;
+$("#kanban").addEventListener("dragstart", e => {
+  const card = e.target.closest(".kcard[draggable='true']");
+  if(!card) return;
+  _cardArrastado = card;
+  card.classList.add("arrastando");
+  e.dataTransfer.effectAllowed = "move";
+});
+$("#kanban").addEventListener("dragend", () => {
+  if(_cardArrastado) _cardArrastado.classList.remove("arrastando");
+  _cardArrastado = null;
+  document.querySelectorAll(".kcol-cards.arrasto-por-cima").forEach(el => el.classList.remove("arrasto-por-cima"));
+});
+$("#kanban").addEventListener("dragover", e => {
+  const zona = e.target.closest(".kcol-cards");
+  if(!zona || zona.dataset.arquivada === "true" || !_cardArrastado) return;
+  e.preventDefault();
+  document.querySelectorAll(".kcol-cards.arrasto-por-cima").forEach(el => {
+    if(el !== zona) el.classList.remove("arrasto-por-cima");
+  });
+  zona.classList.add("arrasto-por-cima");
+  const seguinte = [...zona.querySelectorAll(".kcard[draggable='true']")].find(card => {
+    if(card === _cardArrastado) return false;
+    const r = card.getBoundingClientRect();
+    return e.clientY < r.top + r.height / 2;
+  });
+  if(seguinte) zona.insertBefore(_cardArrastado, seguinte);
+  else zona.appendChild(_cardArrastado);
+});
+$("#kanban").addEventListener("drop", async e => {
+  const zona = e.target.closest(".kcol-cards");
+  if(!zona || zona.dataset.arquivada === "true" || !_cardArrastado) return;
+  e.preventDefault();
+  zona.classList.remove("arrasto-por-cima");
+  const colunaId = parseInt(zona.dataset.colunaId, 10);
+  const ordemCards = [...zona.querySelectorAll(".kcard[draggable='true']")].map(card => parseInt(card.dataset.cardId, 10));
+  try{
+    const r = await fetch(`/park-in/compras-toros/coluna/${colunaId}/reordenar-cards`, {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ordem_cards: ordemCards})});
+    const j = await r.json();
+    if(j.erro) alert(j.erro);
+  } catch(e){ alert(`Falhou: ${e}`); }
+  carregarComprasToros();
+});
 
 $("#bAbrirNovaColuna").onclick = () => {
   $("#colunaMsg").innerHTML = "";

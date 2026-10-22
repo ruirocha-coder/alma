@@ -1195,6 +1195,23 @@ def park_in_compras_toros_mover_card(card_id: int, corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/park-in/compras-toros/coluna/{coluna_id}/reordenar-cards")
+def park_in_compras_toros_reordenar_cards(coluna_id: int, corpo: dict = Body(...)):
+    """Grava a ordem dos cards depois de arrastados à mão (dentro do
+    mesmo levantamento ou entre levantamentos) — ver
+    tools/compras_toros.reordenar_cards."""
+    ordem_cards = corpo.get("ordem_cards")
+    if not isinstance(ordem_cards, list) or not ordem_cards:
+        return JSONResponse({"erro": "falta ordem_cards (lista de ids de card)"}, status_code=400)
+    try:
+        ordem_cards = [int(c) for c in ordem_cards]
+    except (TypeError, ValueError):
+        return JSONResponse({"erro": "ordem_cards tem de ser uma lista de ids"}, status_code=400)
+    resultado = compras_toros.reordenar_cards(coluna_id, ordem_cards)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/importar-historico")
 def park_in_importar_historico():
     """Importa para o Park In todas as avaliações de qualidade já

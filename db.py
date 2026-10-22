@@ -820,6 +820,21 @@ ALTER TABLE compras_toros_cards ADD COLUMN IF NOT EXISTS notas TEXT;
 -- tools/compras_toros.criar_card, não aqui, para não partir cards já
 -- existentes sem essa data).
 ALTER TABLE compras_toros_cards ADD COLUMN IF NOT EXISTS data_encomenda DATE;
+
+-- pedido explícito do Rui (2026-10-22): arrastar cards à mão (para cima/
+-- para baixo dentro do mesmo levantamento, ou entre levantamentos),
+-- como no Basecamp — só a ordem/posição VISUAL, nunca a prioridade do
+-- FIFO (que continua sempre por criado_em, ver
+-- db.linhas_abertas_compras_toros_por_fornecedor_artigo). Backfill dos
+-- cards já existentes pela ordem com que já apareciam (criado_em); cards
+-- novos recebem logo o seu lugar no fim (ver criar_card_compras_toros).
+ALTER TABLE compras_toros_cards ADD COLUMN IF NOT EXISTS ordem INTEGER;
+UPDATE compras_toros_cards c SET ordem = sub.rn
+FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY coluna_id ORDER BY criado_em ASC, id ASC) AS rn
+    FROM compras_toros_cards WHERE ordem IS NULL
+) sub
+WHERE c.id = sub.id AND c.ordem IS NULL;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -3138,10 +3153,17 @@ def criar_card_compras_toros(coluna_id: int, fornecedor: str, data_encomenda: st
                              notas: str = None) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # começa sempre no fim da lista visual deste levantamento (ver
+            # ordem, arrastar cards à mão) — nunca afeta o FIFO.
             cur.execute(
-                """INSERT INTO compras_toros_cards (coluna_id, fornecedor, data_encomenda, criado_por, notas)
-                   VALUES (%s,%s,%s,%s,%s) RETURNING id""",
-                (coluna_id, fornecedor, data_encomenda, criado_por, notas)
+                "SELECT COALESCE(MAX(ordem), 0) + 1 AS seguinte FROM compras_toros_cards WHERE coluna_id = %s",
+                (coluna_id,)
+            )
+            ordem = cur.fetchone()["seguinte"]
+            cur.execute(
+                """INSERT INTO compras_toros_cards (coluna_id, fornecedor, data_encomenda, criado_por, notas, ordem)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (coluna_id, fornecedor, data_encomenda, criado_por, notas, ordem)
             )
             id_gerado = cur.fetchone()["id"]
         conn.commit()
@@ -3184,12 +3206,15 @@ def remover_linha_compras_toros(linha_id: int):
         conn.commit()
 
 def cards_compras_toros(coluna_id: int) -> list[dict]:
+    """Ordem VISUAL (arrastar cards à mão, ver ordem) — nunca a ordem do
+    FIFO, que usa sempre criado_em (ver
+    linhas_abertas_compras_toros_por_fornecedor_artigo)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, fornecedor, data_encomenda, estado, nota_fecho, notas, criado_por, criado_em,
                           fechado_por, fechado_em
-                   FROM compras_toros_cards WHERE coluna_id = %s ORDER BY criado_em ASC, id ASC""",
+                   FROM compras_toros_cards WHERE coluna_id = %s ORDER BY ordem ASC NULLS LAST, criado_em ASC, id ASC""",
                 (coluna_id,)
             )
             return cur.fetchall()
@@ -3217,13 +3242,37 @@ def obter_coluna_compras_toros(coluna_id: int) -> dict:
 def mover_card_compras_toros(card_id: int, nova_coluna_id: int):
     """Move um card (e as suas linhas, por arrastamento da FK) para outro
     levantamento — ver tools/compras_toros.mover_card. Nunca mexe nas
-    linhas/abates/entregue em si, só a que coluna o card pertence."""
+    linhas/abates/entregue em si, só a que coluna o card pertence. Fica
+    sempre no fim da lista visual do levantamento de destino (ver ordem,
+    arrastar cards à mão) — nunca afeta o FIFO."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE compras_toros_cards SET coluna_id = %s WHERE id = %s",
-                (nova_coluna_id, card_id)
+                "SELECT COALESCE(MAX(ordem), 0) + 1 AS seguinte FROM compras_toros_cards WHERE coluna_id = %s",
+                (nova_coluna_id,)
             )
+            ordem = cur.fetchone()["seguinte"]
+            cur.execute(
+                "UPDATE compras_toros_cards SET coluna_id = %s, ordem = %s WHERE id = %s",
+                (nova_coluna_id, ordem, card_id)
+            )
+        conn.commit()
+
+def reordenar_cards_compras_toros(coluna_id: int, ordem_cards: list[int]):
+    """Grava a ordem VISUAL (arrastar cards à mão) dos cards indicados
+    dentro deste levantamento — `ordem_cards` é a lista completa e já
+    ordenada dos ids de card que devem ficar nesta coluna (um card que
+    ainda não estivesse aqui muda também de coluna_id, exatamente como
+    arrastar entre levantamentos no Basecamp). Nunca mexe no FIFO (ver
+    linhas_abertas_compras_toros_por_fornecedor_artigo, que usa sempre
+    criado_em, nunca esta ordem)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for posicao, card_id in enumerate(ordem_cards):
+                cur.execute(
+                    "UPDATE compras_toros_cards SET coluna_id = %s, ordem = %s WHERE id = %s",
+                    (coluna_id, posicao, card_id)
+                )
         conn.commit()
 
 def linhas_compras_toros_do_card(card_id: int) -> list[dict]:

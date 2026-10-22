@@ -307,6 +307,30 @@ def mover_card(card_id: int, nova_coluna_id: int) -> dict:
     return {"ok": True}
 
 
+def reordenar_cards(coluna_id: int, ordem_cards: list) -> dict:
+    """Grava a ordem com que os cards ficaram depois de arrastados à mão
+    (para cima/para baixo dentro do mesmo levantamento, ou entre
+    levantamentos) — pedido explícito do Rui, 2026-10-22, como no
+    Basecamp. `ordem_cards` é a lista completa dos ids de card deste
+    levantamento, já na ordem final (um card vindo de outro levantamento
+    muda também de coluna_id). Puramente visual — nunca mexe no FIFO."""
+    coluna = db.obter_coluna_compras_toros(coluna_id)
+    if not coluna:
+        return {"erro": "levantamento não encontrado"}
+    if coluna["estado"] != "aberta":
+        return {"erro": "não é possível reordenar cards num levantamento já arquivado"}
+    colunas_origem = set()
+    for card_id in ordem_cards:
+        card = db.card_compras_toros(card_id)
+        if not card:
+            return {"erro": f"card {card_id} não encontrado"}
+        colunas_origem.add(card["coluna_id"])
+    db.reordenar_cards_compras_toros(coluna_id, ordem_cards)
+    for origem_id in colunas_origem - {coluna_id}:
+        _tentar_arquivar_coluna_automatica(origem_id)
+    return {"ok": True}
+
+
 def _tentar_fechar_card_automatico(card_id: int):
     """Fecha sozinho quando entregue >= encomendado, somado por todas as
     linhas do card (pedido explícito do Rui)."""
