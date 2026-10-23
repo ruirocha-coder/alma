@@ -1238,15 +1238,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.post("/_debug-limpar-linhas-teste")
-def _debug_limpar_linhas_teste(basecamp_card_id: int):
-    """Limpa as linhas de uma OF (usado para anular o teste feito por
-    /_debug-testar-calcular-linhas num card que ainda não tinha charriot
-    atribuído, para não deixar dados de teste em produção)."""
-    import db as _db
-    _db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, [])
-    return {"ok": True}
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
