@@ -1233,6 +1233,36 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
+@app.get("/_debug-ecos-largos-ai-api-auth")
+def _debug_ecos_largos_ai_api_auth():
+    import httpx as _httpx
+    base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
+    token = "C1RzXi3B9g7LtGoYEHsm"
+    corpo = {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}
+    tentativas = [
+        ("Authorization Bearer", {"Authorization": f"Bearer {token}"}, None),
+        ("X-API-Key header", {"X-API-Key": token}, None),
+        ("api_key no corpo", {}, {"api_key": token}),
+        ("token no corpo", {}, {"token": token}),
+        ("api_key na query", {}, None),
+    ]
+    resultados = []
+    for nome, headers, extra_corpo in tentativas:
+        try:
+            corpo_final = {**corpo, **(extra_corpo or {})}
+            params = {"action": "call"}
+            if nome == "api_key na query":
+                params["api_key"] = token
+            r = _httpx.post(base, params=params, json=corpo_final, headers=headers, timeout=15)
+            try:
+                conteudo = r.json()
+            except ValueError:
+                conteudo = r.text[:500]
+            resultados.append({"tentativa": nome, "status": r.status_code, "resposta": conteudo})
+        except Exception as e:
+            resultados.append({"tentativa": nome, "erro": str(e)})
+    return resultados
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
