@@ -1418,7 +1418,8 @@ def _investigar_excessos_compras_toros_impl():
             cur.execute(
                 """SELECT c.id, c.fornecedor, c.notas, c.criado_em, c.estado,
                           (SELECT json_agg(json_build_object('id', l.id, 'tipo', l.tipo, 'comprimento', l.comprimento,
-                                                              'espessura', l.espessura))
+                                                              'espessura', l.espessura, 'encomendado_kg', l.encomendado_kg,
+                                                              'entregue_kg', l.entregue_kg))
                              FROM compras_toros_linhas l WHERE l.card_id = c.id) AS linhas
                    FROM compras_toros_cards c
                    JOIN compras_toros_colunas col ON col.id = c.coluna_id
