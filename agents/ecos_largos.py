@@ -12,6 +12,7 @@ from tools import documentos_empresa, basecamp, ecos_largos, planeamento_serraca
 TOOLS_ECOS_LARGOS = (documentos_empresa.TOOLS_DOCUMENTOS_EMPRESA
                      + basecamp.TOOLS_ESTADO_PROJETO
                      + ecos_largos.TOOLS_DASHBOARD_PRODUCAO
+                     + ecos_largos.TOOLS_ALERTAS_E_PEDIDOS_ECOS_LARGOS
                      + planeamento_serracao.TOOLS_PLANEAMENTO_PRODUCAO
                      + parkin.TOOLS_PARK_IN
                      + relatorio_aprovisionamento_toros.TOOLS_RELATORIO_APROVISIONAMENTO
@@ -80,6 +81,15 @@ clarificar:
   atual for mencionado) — nunca chames o dashboard dia a dia tentando
   adivinhar as datas sozinho, não sabes a data de hoje com fiabilidade
   nem quantos dias tem cada mês, e vais calcular o período errado.
+- Para alertas/avisos/problemas operacionais (leitor RFID offline,
+  leitura de patela com estado errado, empilhador ou monitor offline, "o
+  que está mal" na produção), usa alertas_producao_ecos_largos — nunca
+  confundir com o dashboard de produção (números de m3/entrada/saída),
+  são fontes diferentes. Se uma pergunta sobre a produção da Ecos Largos
+  precisar de dados que nenhuma destas ferramentas consegue dar, usa
+  pedir_dados_em_falta_ecos_largos para registar o pedido (nunca inventes
+  nem aproximes a informação em falta) e diz à pessoa que ficou
+  registado para o Rui ir implementando.
 - Só uses estado_projeto_basecamp quando a pergunta for especificamente
   sobre TAREFAS ou CARDS do Basecamp — prazos, atrasos, o que está parado,
   gestão do projeto (ex: "que tarefas estão atrasadas", "como está o card

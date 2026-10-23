@@ -9,13 +9,46 @@ import db
 
 # servidor próprio da equipa (fora do Basecamp) — configurável por env var
 # porque corre num endereço DuckDNS, que pode mudar sem precisar de deploy.
-# API oficial de dados (não a página HTML do dashboard): sem parâmetros
-# devolve a entrada mais recente da base de dados; com ?data=YYYY-MM-DD
-# devolve os dados desse dia.
-DASHBOARD_API_URL = os.environ.get(
-    "ECOS_LARGOS_DASHBOARD_API_URL",
-    "http://ecoslargos.duckdns.org:9000/server/data_api.php"
+# Interface nova por tools (pedido explícito do Rui, 2026-10-23), que
+# substitui a antiga API de dados em bruto (data_api.php): cada chamada é
+# um POST a ?action=call com {"name": "<tool>", "arguments": {...}} — a
+# lista de tools disponíveis está em ?action=tools. `register_missing_
+# data_request` exige autenticação (token ainda a ser configurado do lado
+# do servidor, nome exato do header/parâmetro por confirmar — ver
+# AI_API_TOKEN); as tools de leitura (get_kpi_daily_snapshot,
+# get_daily_production, list_alerts) não precisam.
+AI_API_URL = os.environ.get(
+    "ECOS_LARGOS_AI_API_URL",
+    "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
 )
+AI_API_TOKEN = os.environ.get("ECOS_LARGOS_AI_API_TOKEN")
+
+def _chamar_ai_api(nome_tool: str, argumentos: dict) -> dict:
+    """Chama uma tool da nova interface da Ecos Largos — um servidor
+    próprio da equipa (fora do Basecamp), por isso menos fiável do que uma
+    API normal: pode estar offline, sem resposta, ou devolver um erro
+    aplicacional (ex: "database_not_configured", "unauthorized") em vez de
+    rebentar quem chamar isto. Devolve sempre {"erro": ...} nesses casos,
+    nunca deixa a exceção subir."""
+    headers = {"Authorization": f"Bearer {AI_API_TOKEN}"} if AI_API_TOKEN else {}
+    try:
+        r = httpx.post(AI_API_URL, params={"action": "call"},
+                      json={"name": nome_tool, "arguments": argumentos}, headers=headers, timeout=20)
+    except Exception as e:
+        return {"erro": f"não consegui aceder à interface da Ecos Largos: {e}"}
+    try:
+        resposta = r.json()
+    except ValueError:
+        return {"erro": f"a interface da Ecos Largos respondeu com um código {r.status_code}, sem JSON legível"}
+    if not resposta.get("ok"):
+        erro = resposta.get("error") or "erro desconhecido"
+        if erro == "database_not_configured":
+            return {"erro": "a interface da Ecos Largos está sem a base de dados configurada do lado do servidor"}
+        if erro == "unauthorized":
+            return {"erro": "não autorizada — falta configurar o token de acesso desta tool "
+                            "(ECOS_LARGOS_AI_API_TOKEN) do lado do servidor Alma"}
+        return {"erro": f"a interface da Ecos Largos recusou o pedido: {erro}"}
+    return resposta.get("result", {})
 
 _FORMATO_DATA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -220,34 +253,25 @@ def _resolver_data(data: str) -> str:
     return None
 
 def ler_dashboard_producao(data: str = None) -> dict:
-    """Lê os dados de produção da Ecos Largos, da API oficial do dashboard —
-    um servidor próprio da equipa (fora do Basecamp), por isso menos fiável
-    do que uma chamada normal à API: pode estar offline ou inacessível, o
-    que devolve um erro em vez de rebentar quem chamar isto.
+    """Lê os dados de produção da Ecos Largos, via get_kpi_daily_snapshot
+    da nova interface por tools da equipa (um servidor próprio, fora do
+    Basecamp, por isso menos fiável do que uma API normal — pode estar
+    offline ou devolver um erro aplicacional, o que devolve um erro em vez
+    de rebentar quem chamar isto).
 
-    Sem `data`, devolve a entrada mais recente (agora); com `data`
-    ("hoje", "ontem", ou YYYY-MM-DD), devolve os dados desse dia."""
-    params = None
-    if data:
-        data_resolvida = _resolver_data(data)
-        if data_resolvida is None:
-            return {"erro": f"não percebi a data {data!r} — usa \"hoje\", \"ontem\" ou o formato YYYY-MM-DD"}
-        params = {"data": data_resolvida}
+    Sem `data`, usa o dia de hoje; com `data` ("hoje", "ontem", ou
+    YYYY-MM-DD), devolve os dados desse dia."""
+    data_resolvida = _resolver_data(data) if data else date.today().isoformat()
+    if data_resolvida is None:
+        return {"erro": f"não percebi a data {data!r} — usa \"hoje\", \"ontem\" ou o formato YYYY-MM-DD"}
 
-    try:
-        r = httpx.get(DASHBOARD_API_URL, params=params, timeout=20)
-        r.raise_for_status()
-    except Exception as e:
-        return {"erro": f"não consegui aceder à API de dados de produção: {e}"}
-
-    try:
-        dados = r.json()
-    except ValueError:
-        # a API não devolveu JSON (ex: página de erro do servidor) — ainda
-        # assim devolve o texto em bruto, para não perder informação
-        return {"conteudo": r.text.strip()} if r.text.strip() else {
-            "erro": "a API de dados de produção respondeu, mas sem conteúdo legível"}
-    return {"conteudo": _com_setor_linha(_com_charriots_resumido(_com_takt_formatado(dados)))}
+    resultado = _chamar_ai_api("get_kpi_daily_snapshot", {"snapshot_date": data_resolvida})
+    if "erro" in resultado:
+        return resultado
+    if not resultado.get("found"):
+        return {"erro": f"não há dados de produção para {data_resolvida}"}
+    snapshot = resultado.get("snapshot") or {}
+    return {"conteudo": _com_setor_linha(_com_charriots_resumido(_com_takt_formatado(snapshot)))}
 
 def _semana_de(referencia: date) -> tuple:
     """Segunda a sexta da semana que contém `referencia`."""
@@ -368,7 +392,7 @@ def ler_dashboard_producao_intervalo(periodo: str = None, data_inicio: str = Non
 TOOLS_DASHBOARD_PRODUCAO = [
     {
         "name": "dashboard_producao_ecos_largos",
-        "description": "Lê os dados de produção da Ecos Largos, da API oficial do dashboard (servida por um servidor próprio da equipa, fora do Basecamp). Sem argumentos devolve os dados mais recentes (agora); passa `data` para consultar um dia específico. Usa isto sempre que perguntarem pelo estado da produção, números de produção, entrada/receção de madeira, m3 (metros cúbicos) de madeira, quantidade recebida ou processada, linhas de produção, charriots (carrinhos/lotes de troncos que percorrem a linha), troncos, ou pedirem uma análise/resumo — de hoje ou de outro dia. Qualquer pergunta sobre estes números, mesmo em linguagem informal (ex: \"quanto entrou hoje\", \"quantos m3 tivemos\", \"quantos charriots hoje\"), refere-se a este dashboard — usa sempre esta ferramenta antes de responder, nunca digas que não tens essa informação sem primeiro tentares. Mesmo que perguntem por algo mais específico que este dashboard não distinga (ex: um produto ou referência em concreto), tenta sempre primeiro consultar os dados gerais disponíveis e partilha-os — nunca respondas que não tens informação nenhuma sem teres consultado o dashboard.",
+        "description": "Lê os dados de produção da Ecos Largos, via a interface por tools da equipa (servida por um servidor próprio, fora do Basecamp). Sem argumentos usa o dia de hoje; passa `data` para consultar um dia específico. Usa isto sempre que perguntarem pelo estado da produção, números de produção, entrada/receção de madeira, m3 (metros cúbicos) de madeira, quantidade recebida ou processada, linhas de produção, charriots (carrinhos/lotes de troncos que percorrem a linha), troncos, ou pedirem uma análise/resumo — de hoje ou de outro dia. Qualquer pergunta sobre estes números, mesmo em linguagem informal (ex: \"quanto entrou hoje\", \"quantos m3 tivemos\", \"quantos charriots hoje\"), refere-se a este dashboard — usa sempre esta ferramenta antes de responder, nunca digas que não tens essa informação sem primeiro tentares. Mesmo que perguntem por algo mais específico que este dashboard não distinga (ex: um produto ou referência em concreto), tenta sempre primeiro consultar os dados gerais disponíveis e partilha-os — nunca respondas que não tens informação nenhuma sem teres consultado o dashboard.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -386,6 +410,98 @@ TOOLS_DASHBOARD_PRODUCAO = [
                 "data_inicio": {"type": "string", "description": "YYYY-MM-DD — só se não usares periodo"},
                 "data_fim": {"type": "string", "description": "YYYY-MM-DD — só se não usares periodo"}
             }
+        }
+    }
+]
+
+def alertas_producao_ecos_largos(status: str = None, device: str = None, notification: str = None,
+                                 data_inicio: str = None, data_fim: str = None, limite: int = None) -> dict:
+    """Consulta os alertas operacionais do sistema RFID da Ecos Largos
+    (ex: leitor offline, leitura de patela com estado errado, empilhador
+    offline) — pedido explícito do Rui, 2026-10-23, nova interface por
+    tools da equipa. Por omissão só os ativos (`status="active"`); passa
+    "resolved" ou "all" para outros estados. `data_inicio`/`data_fim`
+    aceitam "hoje"/"ontem" além de YYYY-MM-DD, tal como o resto deste
+    módulo."""
+    argumentos = {}
+    if status:
+        argumentos["status"] = status
+    if device:
+        argumentos["device"] = device
+    if notification:
+        argumentos["notification"] = notification
+    if data_inicio:
+        resolvida = _resolver_data(data_inicio)
+        if resolvida is None:
+            return {"erro": f"não percebi data_inicio {data_inicio!r} — usa \"hoje\", \"ontem\" ou YYYY-MM-DD"}
+        argumentos["from"] = resolvida
+    if data_fim:
+        resolvida = _resolver_data(data_fim)
+        if resolvida is None:
+            return {"erro": f"não percebi data_fim {data_fim!r} — usa \"hoje\", \"ontem\" ou YYYY-MM-DD"}
+        argumentos["to"] = resolvida
+    if limite:
+        argumentos["limit"] = limite
+    return _chamar_ai_api("list_alerts", argumentos)
+
+def pedir_dados_em_falta_ecos_largos(data_type: str, description: str, reason: str = None,
+                                     expected_fields: list = None, period_start: str = None,
+                                     period_end: str = None, priority: str = None, context: str = None) -> dict:
+    """Regista, do lado do servidor da Ecos Largos, um pedido de dados
+    que ainda não estão disponíveis nesta interface — pedido explícito do
+    Rui, 2026-10-23: "caso o interface não tenha as funcionalidades
+    pretendidas, a Alma pode fazer esse pedido, que fica registado e eu
+    vou implementando". Usa isto sempre que uma pergunta sobre a produção
+    da Ecos Largos precisar de dados que nenhuma ferramenta tua consegue
+    dar — nunca inventes a informação em falta, regista o pedido e diz à
+    pessoa que foi registado."""
+    argumentos = {"data_type": data_type, "description": description}
+    if reason:
+        argumentos["reason"] = reason
+    if expected_fields:
+        argumentos["expected_fields"] = expected_fields
+    if period_start:
+        argumentos["period_start"] = period_start
+    if period_end:
+        argumentos["period_end"] = period_end
+    if priority:
+        argumentos["priority"] = priority
+    if context:
+        argumentos["context"] = context
+    return _chamar_ai_api("register_missing_data_request", argumentos)
+
+TOOLS_ALERTAS_E_PEDIDOS_ECOS_LARGOS = [
+    {
+        "name": "alertas_producao_ecos_largos",
+        "description": "Consulta os alertas operacionais do sistema RFID da Ecos Largos — leitores/dispositivos offline, leituras de patela com estado errado, equipamento sem resposta. Usa isto sempre que perguntarem por alertas, avisos, problemas, equipamento offline, ou \"o que está mal\" na produção — é uma fonte DIFERENTE do dashboard de produção (números de m3/entrada/saída), nunca confundir as duas. Por omissão devolve só os alertas ainda ativos.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["active", "resolved", "all"], "description": "omite para só os ativos (predefinição)"},
+                "device": {"type": "string", "description": "filtra pelo nome exato do dispositivo ou setor, se souberes"},
+                "notification": {"type": "string", "description": "filtra pelo texto exato da notificação, se souberes"},
+                "data_inicio": {"type": "string", "description": "\"hoje\", \"ontem\", ou YYYY-MM-DD — início do período, se pedirem um intervalo"},
+                "data_fim": {"type": "string", "description": "\"hoje\", \"ontem\", ou YYYY-MM-DD — fim do período, se pedirem um intervalo"},
+                "limite": {"type": "integer", "description": "número máximo de alertas a devolver (até 200) — omite para a predefinição"}
+            }
+        }
+    },
+    {
+        "name": "pedir_dados_em_falta_ecos_largos",
+        "description": "Regista um pedido de dados que ainda não estão disponíveis na interface da Ecos Largos, para o Rui ir implementando. Usa isto sempre que uma pergunta sobre a produção da Ecos Largos precisar de informação que nenhuma das tuas ferramentas (dashboard, alertas) consegue dar — nunca inventes nem aproximes essa informação, regista o pedido com o máximo de detalhe e diz à pessoa que ficou registado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "data_type": {"type": "string", "description": "nome curto do tipo de dados em falta"},
+                "description": {"type": "string", "description": "descrição do pedido e da informação que falta"},
+                "reason": {"type": "string", "description": "a pergunta de negócio que estes dados permitiriam responder"},
+                "expected_fields": {"type": "array", "items": {"type": "string"}, "description": "campos ou métricas pretendidos, se souberes nomeá-los"},
+                "period_start": {"type": "string", "description": "YYYY-MM-DD — início do período pretendido, se aplicável"},
+                "period_end": {"type": "string", "description": "YYYY-MM-DD — fim do período pretendido, se aplicável"},
+                "priority": {"type": "string", "enum": ["low", "normal", "high"], "description": "omite para \"normal\""},
+                "context": {"type": "string", "description": "contexto adicional da conversa que originou o pedido"}
+            },
+            "required": ["data_type", "description"]
         }
     }
 ]

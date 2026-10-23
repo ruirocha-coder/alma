@@ -1233,33 +1233,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-ecos-largos-ai-api-retest")
-def _debug_ecos_largos_ai_api_retest():
-    import httpx as _httpx
-    base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
-    token = "C1RzXi3B9g7LtGoYEHsm"
-    chamadas = [
-        ("get_daily_production", {"production_date": "2026-10-23"}, {}),
-        ("list_alerts", {}, {}),
-        ("get_kpi_daily_snapshot", {"snapshot_date": "2026-10-23"}, {}),
-        ("register_missing_data_request",
-         {"data_type": "teste_alma", "description": "chamada de teste da Alma, ignorar"},
-         {"Authorization": f"Bearer {token}"}),
-    ]
-    resultados = []
-    for nome, argumentos, headers in chamadas:
-        try:
-            r = _httpx.post(base, params={"action": "call"},
-                           json={"name": nome, "arguments": argumentos}, headers=headers, timeout=15)
-            try:
-                conteudo = r.json()
-            except ValueError:
-                conteudo = r.text[:500]
-            resultados.append({"tool": nome, "status": r.status_code, "resposta": conteudo})
-        except Exception as e:
-            resultados.append({"tool": nome, "erro": str(e)})
-    return resultados
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
@@ -1268,7 +1241,7 @@ def health_config():
                  "BASECAMP_ACCOUNT_ID", "BASECAMP_CLIENT_ID", "BASECAMP_CLIENT_SECRET",
                  "BASECAMP_REFRESH_TOKEN", "PROCEDIMENTOS_DOC_ID",
                  "ALMA_APP_URL", "BASECAMP_WEBHOOK_SECRET", "OPENAI_API_KEY",
-                 "ECOS_LARGOS_DASHBOARD_API_URL"]
+                 "ECOS_LARGOS_AI_API_URL", "ECOS_LARGOS_AI_API_TOKEN"]
     return {v: bool(os.environ.get(v)) for v in variaveis}
 
 @app.get("/sessoes")
