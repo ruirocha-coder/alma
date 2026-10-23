@@ -1276,7 +1276,10 @@ def _debug_investigar_talaoes_30_acima():
                     entrada["abates"] = abates
                     entrada["excesso_id"] = excesso["id"] if excesso else None
                     resultado.append(entrada)
-        return resultado
+                cur.execute("SELECT talao, obs FROM parkin_entradas WHERE talao = ANY(%s)",
+                           (["11364", "11365", "11324", "11332", "11349", "11344", "11342", "11341"],))
+                historico = [dict(r) for r in cur.fetchall()]
+        return {"novos": resultado, "historico_ja_corrigido": historico}
     except Exception as e:
         return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
                            status_code=500)
