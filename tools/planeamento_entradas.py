@@ -1016,6 +1016,22 @@ function calcularNLotes(qtdWipM3, wipCmpMm, wipEspMm){
   if(qtdWipM3==null || volumeLote==null) return null;
   return Math.round(qtdWipM3/volumeLote);
 }
+/* resumo de Toros/Nº lotes a mostrar na face do card (pedido explícito
+   do Rui, 2026-10-23) — um Buffer continua a ter um único WIP+Toro
+   (e.qtdToros/e.nLotes); uma OF real pode ter várias linhas (uma por
+   artigo/comprimento, "Algoritmo de Comprimentos"), por isso soma-se
+   aqui o QTD Toros/Nº de lotes de todas (null só se nenhuma linha tiver
+   valor nenhum, nunca 0 por omissão). */
+function resumoCardToros(e){
+  if(e.buffer) return {qtdToros:e.qtdToros, nLotes:e.nLotes};
+  const linhas=e.linhas||[];
+  let qtdToros=null, nLotes=null;
+  for(const l of linhas){
+    if(l.qtdToros!=null) qtdToros=(qtdToros||0)+l.qtdToros;
+    if(l.nLotes!=null) nLotes=(nLotes||0)+l.nLotes;
+  }
+  return {qtdToros: qtdToros!=null?Math.round(qtdToros*100)/100:null, nLotes};
+}
 const INDICE_TOROS_DEFAULT=2.85, INDICE_WIP_DEFAULT=1.8;
 /* mesmas cores da página de planeamento de linhas/logística (pedido
    explícito do Rui, 2026-10-01: "as cores laterais devem permanecer de
@@ -1281,9 +1297,10 @@ function renderLanes(){
     // definir_largura_dias); borda de baixo marca mais charriots ao
     // mesmo tempo, a partir desta lane (mesmo resultado das caixas de
     // seleção na ficha, mas mais rápido).
+    const resumo=resumoCardToros(e);
     el.innerHTML=`<div class="tt"><span class="ttText">${e.titulo}</span></div>
-      <div class="of">Toros: ${e.qtdToros!=null?e.qtdToros+" m³":"—"}</div>
-      <div class="of">Nº lotes: ${e.nLotes!=null?e.nLotes:"—"}</div>
+      <div class="of">Toros: ${resumo.qtdToros!=null?resumo.qtdToros+" m³":"—"}</div>
+      <div class="of">Nº lotes: ${resumo.nLotes!=null?resumo.nLotes:"—"}</div>
       <div class="rsz rsz-h" title="arrastar para alargar (dias)"></div>
       <div class="rsz rsz-v" title="arrastar para marcar mais charriots"></div>`;
     bl.appendChild(el);
