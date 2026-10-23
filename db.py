@@ -457,10 +457,11 @@ CREATE TABLE IF NOT EXISTS compras_toros_excessos (
 
 -- marca uma entrada do Park In como já considerada pelo motor de abates
 -- (ver tools/compras_toros.processar_abates_pendentes) — processada
--- exatamente uma vez, para sempre, mesmo que não tenha abatido nada
--- (nesse caso o restante todo vira excesso); nunca reprocessada, porque
--- "só contam talões com data igual ou posterior à criação do card" já
--- garante que um card novo nunca é retroativo sobre entradas antigas.
+-- exatamente uma vez, mesmo que não tenha abatido nada (nesse caso o
+-- restante todo vira excesso); só volta a ser processada se o excesso
+-- for desfeito (ver desfazer_excesso_compras_toros, chamado por
+-- tools/compras_toros._reconciliar_excessos_pendentes sempre que surge
+-- uma linha aberta compatível dentro da janela de datas).
 CREATE TABLE IF NOT EXISTS compras_toros_entradas_processadas (
     entrada_id INTEGER PRIMARY KEY REFERENCES parkin_entradas(id),
     processado_em TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -3402,8 +3403,9 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
                                                        espessura: str) -> list[dict]:
     """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
     primeiro (FIFO) — ver tools/compras_toros.processar_abates_pendentes.
-    `criado_em_data` serve para a regra "só contam talões com data igual
-    ou posterior à criação do card".
+    `criado_em_data` serve para a regra "o card não pode ter sido criado
+    mais de alguns dias depois do talão" (ver
+    tools/compras_toros._card_pode_abater_entrada).
 
     Bug real (Rui, 2026-10-15): o fornecedor do card é texto livre (ex:
     "Altri", escrito à mão ao criar o card) e o fornecedor do talão vem
@@ -3506,27 +3508,22 @@ def excessos_compras_toros() -> list[dict]:
             )
             return cur.fetchall()
 
-def excessos_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
-                                                 espessura: str) -> list[dict]:
-    """Excessos já registados deste fornecedor+artigo, com a data real do
-    talão (ver tools/compras_toros._reavaliar_excessos_para_card_novo) —
-    usado quando se cria um card novo para apanhar talões que chegaram
-    primeiro (ficaram excesso por não haver nenhum card ainda) mas que,
-    pela data, já deviam ter sido para este card. Comparação de
-    fornecedor tolerante a acentos/maiúsculas, ver
-    _primeira_palavra_fornecedor. `obs` (do talão) vem incluída para a
-    regra "X acima" (pedido explícito do Rui, 2026-10-20, ver
-    tools/compras_toros._obs_bate_com_notas_card)."""
-    alvo = _primeira_palavra_fornecedor(fornecedor)
+def todos_excessos_compras_toros() -> list[dict]:
+    """Todos os excessos ainda por reconciliar, com a data real do talão
+    — usado pelo motor de abates para os tentar encaixar sempre que o
+    quadro é lido, sem depender de se criar um card novo (pedido
+    explícito do Rui, 2026-10-23, ver
+    tools/compras_toros._reconciliar_excessos_pendentes). `obs` (do
+    talão) vem incluída para a regra "X acima" (pedido explícito do Rui,
+    2026-10-20, ver tools/compras_toros._obs_bate_com_notas_card)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT e.id, e.entrada_id, e.fornecedor, p.data AS data_entrada, p.obs
-                   FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
-                   WHERE e.tipo = %s AND e.comprimento = %s AND e.espessura = %s""",
-                (tipo, comprimento, espessura)
+                """SELECT e.id, e.entrada_id, e.fornecedor, e.tipo, e.comprimento, e.espessura,
+                          p.data AS data_entrada, p.obs
+                   FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id"""
             )
-            return [r for r in cur.fetchall() if _primeira_palavra_fornecedor(r["fornecedor"]) == alvo]
+            return cur.fetchall()
 
 def desfazer_excesso_compras_toros(excesso_id: int, entrada_id: int):
     """Remove um excesso e a marca de "já processada" da sua entrada, para

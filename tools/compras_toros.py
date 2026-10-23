@@ -19,10 +19,21 @@
 #   nunca descartado (ver db.compras_toros_excessos).
 import re
 import threading
+from datetime import timedelta
 import db
 from tools import parkin
 
 _lock_abates = threading.Lock()
+
+_JANELA_EXCESSO_DIAS = 7
+"""Pedido explícito do Rui, 2026-10-23: um talão chegado até 7 dias ANTES
+de o card para onde devia ir ser criado também conta (ex: talão de
+21/10, card criado a 22/10) — casos reais em que o fornecedor entrega
+mais cedo do que o card chega a ser registado no sistema. Sem limite
+nenhum, um excesso de meses atrás podia aparecer de repente a abater a
+um card completamente novo e sem relação nenhuma com ele; a janela de 7
+dias evita isso. Não há limite nenhum para talões POSTERIORES à criação
+do card (uma encomenda pode demorar semanas a ser entregue)."""
 
 _RE_NUMERO_ACIMA = re.compile(r"(\d+)\s*acima", re.IGNORECASE)
 
@@ -34,6 +45,14 @@ def _numero_acima(texto):
         return None
     m = _RE_NUMERO_ACIMA.search(texto)
     return int(m.group(1)) if m else None
+
+def _card_pode_abater_entrada(linha_criado_em_data, data_entrada) -> bool:
+    """Um card pode abater uma entrada se não foi criado mais de
+    _JANELA_EXCESSO_DIAS depois da data do talão — ver _JANELA_EXCESSO_DIAS
+    acima. Sem limite para o lado contrário (talão bem posterior à criação
+    do card é o caso normal: encomenda feita, entrega chega depois)."""
+    return linha_criado_em_data <= data_entrada + timedelta(days=_JANELA_EXCESSO_DIAS)
+
 
 def _obs_bate_com_notas_card(notas_card, obs_entrada) -> bool:
     """Pedido explícito do Rui (2026-10-20): um card de Compras de Toro
@@ -156,31 +175,8 @@ def criar_card(coluna_id: int, fornecedor: str, data_encomenda: str, linhas: lis
     for l in linhas:
         db.criar_linha_compras_toros(card_id, l["tipo"], float(l["comprimento"]), l["espessura"],
                                      float(l["encomendado_kg"]))
-    _reavaliar_excessos_para_card_novo(card_id, fornecedor, linhas)
-    return {"ok": True, "card_id": card_id}
-
-
-def _reavaliar_excessos_para_card_novo(card_id: int, fornecedor: str, linhas: list):
-    """Pedido explícito do Rui, 2026-10-16: um talão que chega ANTES de o
-    card para onde devia ir sequer existir fica registado como excesso
-    (não há nada para abater ainda) e, como cada entrada só é processada
-    uma vez, para sempre (ver processar_abates_pendentes), ficava excesso
-    para sempre mesmo depois de aparecer um card certo para ele — caso
-    real: 3 cards criados a meio da tarde (Transgalo, Diaz y Buceta,
-    Cofor) cujos talões já tinham chegado umas horas antes, no mesmo dia.
-    Ao criar um card, reconsidera-se logo qualquer excesso já registado
-    do mesmo fornecedor+artigo cujo talão seja da mesma data do card ou
-    posterior (a mesma regra já usada no motor de abates para um card já
-    existente) — permite ao motor voltar a tentar essa entrada do zero."""
-    card = db.card_compras_toros(card_id)
-    card_criado_data = card["criado_em"].date()
-    for l in linhas:
-        candidatos = db.excessos_compras_toros_por_fornecedor_artigo(
-            fornecedor, l["tipo"], float(l["comprimento"]), l["espessura"])
-        for exc in candidatos:
-            if exc["data_entrada"] >= card_criado_data and _obs_bate_com_notas_card(card["notas"], exc["obs"]):
-                db.desfazer_excesso_compras_toros(exc["id"], exc["entrada_id"])
     processar_abates_pendentes()
+    return {"ok": True, "card_id": card_id}
 
 
 def fechar_card(card_id: int, fechado_por: str, nota_fecho: str = None) -> dict:
@@ -361,15 +357,47 @@ def _tentar_arquivar_coluna_automatica(coluna_id: int):
     db.arquivar_coluna_compras_toros(coluna_id, "automático")
 
 
+def _reconciliar_excessos_pendentes():
+    """Pedido explícito do Rui, 2026-10-23: antes só se reavaliava um
+    excesso já registado no momento em que se criava um card novo (ver
+    git history), o que obrigava a pedir sempre para reavaliar à mão
+    quando um excesso ficava para trás e nenhum card novo era criado a
+    seguir. Corre agora sempre que o motor de abates corre (ver
+    processar_abates_pendentes, chamado a cada leitura do quadro): para
+    cada excesso ainda por reconciliar, verifica se alguma linha aberta
+    do mesmo fornecedor+artigo já tem espaço e está dentro da janela de
+    datas (ver _card_pode_abater_entrada) e do "X acima" (ver
+    _obs_bate_com_notas_card) — se sim, desfaz o excesso para a entrada
+    voltar a ser vista como não processada e o motor a abater do zero,
+    já a seguir, na mesma passagem."""
+    for exc in db.todos_excessos_compras_toros():
+        candidatas = db.linhas_abertas_compras_toros_por_fornecedor_artigo(
+            exc["fornecedor"], exc["tipo"], float(exc["comprimento"]), exc["espessura"])
+        for linha in candidatas:
+            if not _card_pode_abater_entrada(linha["criado_em_data"], exc["data_entrada"]):
+                continue
+            if not _obs_bate_com_notas_card(linha["notas"], exc["obs"]):
+                continue
+            falta = float(linha["encomendado_kg"]) - float(linha["entregue_kg"])
+            if falta <= 1e-6:
+                continue
+            db.desfazer_excesso_compras_toros(exc["id"], exc["entrada_id"])
+            break
+
+
 def processar_abates_pendentes():
     """Motor de FIFO: cada entrada real do Park In ainda não vista abate
     às linhas abertas do mesmo fornecedor+artigo, a mais antiga primeiro
-    — só contam linhas de cards criados até à data do talão (pedido
-    explícito do Rui: "só contam talões com data igual ou posterior à
-    criação do card"). O que sobrar sem linha para abater fica registado
-    como excesso. Chamado sempre que o quadro é lido (ver dados_quadro) —
-    cada entrada é processada exatamente uma vez, para sempre."""
+    — só contam linhas de cards cuja criação não seja mais de
+    _JANELA_EXCESSO_DIAS posterior à data do talão (ver
+    _card_pode_abater_entrada). O que sobrar sem linha para abater fica
+    registado como excesso — nunca perdido, reavaliado sozinho sempre
+    que este motor corre (ver _reconciliar_excessos_pendentes). Chamado
+    sempre que o quadro é lido (ver dados_quadro) — cada entrada é
+    processada exatamente uma vez, para sempre (até ficar excesso e ser
+    desfeita por _reconciliar_excessos_pendentes)."""
     with _lock_abates:
+        _reconciliar_excessos_pendentes()
         for entrada in db.entradas_parkin_nao_processadas_compras_toros():
             comprimento = float(entrada["comprimento"])
             candidatas = db.linhas_abertas_compras_toros_por_fornecedor_artigo(
@@ -378,7 +406,7 @@ def processar_abates_pendentes():
             for linha in candidatas:
                 if restante <= 1e-6:
                     break
-                if linha["criado_em_data"] > entrada["data"]:
+                if not _card_pode_abater_entrada(linha["criado_em_data"], entrada["data"]):
                     continue
                 if not _obs_bate_com_notas_card(linha["notas"], entrada["obs"]):
                     continue
