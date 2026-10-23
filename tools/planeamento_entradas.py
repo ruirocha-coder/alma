@@ -1793,9 +1793,11 @@ function openSheet(id){
     const btn=$("#btnProduzido");
     if(btn){ btn.textContent=it.produzido?"Produzido ✓":"Marcar Produzido"; btn.classList.toggle("ativo",it.produzido); }
   };
-  $("#fToroCmp").onchange=()=>{
-    $("#fToroCmpOutroWrap").style.display = $("#fToroCmp").value==="outro" ? "" : "none";
-  };
+  if(it.buffer){
+    $("#fToroCmp").onchange=()=>{
+      $("#fToroCmpOutroWrap").style.display = $("#fToroCmp").value==="outro" ? "" : "none";
+    };
+  }
   // avisar sempre antes de alterar a data de entrada calculada (pedido
   // explícito do Rui, 2026-10-06), tanto aqui como ao desmarcar "Em
   // contínuo" abaixo — mesmo aviso que já existia ao arrastar o card.
