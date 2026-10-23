@@ -1238,24 +1238,16 @@ def _debug_ecos_largos_ai_api_tools():
     import httpx as _httpx
     base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
     tentativas = [
-        ("GET a=call,tool,params no corpo", "get", {"action": "call", "tool": "get_daily_production"},
-         {"production_date": "2026-10-23"}),
-        ("GET com argumentos achatados", "get",
-         {"action": "call", "tool": "get_daily_production", "production_date": "2026-10-23"}, None),
-        ("GET name= em vez de tool=", "get",
-         {"action": "call", "name": "get_daily_production", "production_date": "2026-10-23"}, None),
-        ("POST JSON tool/arguments", "post_json",
-         {"action": "call"}, {"tool": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
-        ("POST JSON name/arguments", "post_json",
-         {"action": "call"}, {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
+        ("get_daily_production hoje", {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
+        ("list_alerts ativos", {"name": "list_alerts", "arguments": {}}),
+        ("get_kpi_daily_snapshot hoje", {"name": "get_kpi_daily_snapshot", "arguments": {"snapshot_date": "2026-10-23"}}),
+        ("register_missing_data_request teste", {"name": "register_missing_data_request",
+         "arguments": {"data_type": "teste_alma", "description": "chamada de teste da Alma, ignorar"}}),
     ]
     resultados = []
-    for nome, metodo, params, corpo in tentativas:
+    for nome, corpo in tentativas:
         try:
-            if metodo == "get":
-                r = _httpx.get(base, params=params, timeout=15)
-            else:
-                r = _httpx.post(base, params=params, json=corpo, timeout=15)
+            r = _httpx.post(base, params={"action": "call"}, json=corpo, timeout=15)
             try:
                 conteudo = r.json()
             except ValueError:
