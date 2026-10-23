@@ -1238,6 +1238,14 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
+@app.get("/_debug-testar-calcular-linhas")
+def _debug_testar_calcular_linhas(basecamp_card_id: int):
+    """Debug temporário: testa calcular_linhas_automaticamente sem
+    precisar de atribuir um charriot (o gatilho real) — útil para
+    confirmar que a leitura do PDF + otimização funcionam antes de
+    confiar no gatilho automático."""
+    return planeamento_entradas.calcular_linhas_automaticamente(basecamp_card_id)
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
