@@ -1241,6 +1241,7 @@ def _debug_adicionar_necessidade_mt_3_05():
     definidos."""
     import traceback
     try:
+        import db
         from tools import compras_toros as _ct
         propostas = _ct.calcular_necessidades_propostas()
         alvo = next((p for p in propostas if p["tipo"] == "MT" and abs(p["comprimento"] - 3.05) < 1e-6
