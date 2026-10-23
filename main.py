@@ -1233,13 +1233,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-ecos-largos-integracao-final")
-def _debug_ecos_largos_integracao_final():
-    from tools import ecos_largos as _el
-    dashboard = _el.ler_dashboard_producao()
-    alertas = _el.alertas_producao_ecos_largos()
-    return {"dashboard": dashboard, "alertas": alertas}
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
