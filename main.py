@@ -1238,13 +1238,14 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-testar-calcular-linhas")
-def _debug_testar_calcular_linhas(basecamp_card_id: int):
-    """Debug temporário: testa calcular_linhas_automaticamente sem
-    precisar de atribuir um charriot (o gatilho real) — útil para
-    confirmar que a leitura do PDF + otimização funcionam antes de
-    confiar no gatilho automático."""
-    return planeamento_entradas.calcular_linhas_automaticamente(basecamp_card_id)
+@app.post("/_debug-limpar-linhas-teste")
+def _debug_limpar_linhas_teste(basecamp_card_id: int):
+    """Limpa as linhas de uma OF (usado para anular o teste feito por
+    /_debug-testar-calcular-linhas num card que ainda não tinha charriot
+    atribuído, para não deixar dados de teste em produção)."""
+    import db as _db
+    _db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, [])
+    return {"ok": True}
 
 @app.get("/health/config")
 def health_config():
