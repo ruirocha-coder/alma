@@ -1233,55 +1233,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.post("/_debug-corrigir-obs-talaoes-30-acima")
-def _debug_corrigir_obs_talaoes_30_acima():
-    """Pedido pontual do Rui, 2026-10-23: talões 11383, 11384, 11385,
-    11386, 11388 (Mariano Ramos, MT 2.64 normal, 23/10) entraram no Park
-    In sem a OBS "30 ACIMA" por esquecimento — corrige a OBS (mesmo
-    formato já usado para os talões antigos corrigidos em 2026-10-20) e
-    deixa o motor de abates reprocessá-los do zero com a OBS certa."""
-    import traceback
-    try:
-        import db as _db
-        from tools import compras_toros as _ct
-        talaoes = ["11383", "11384", "11385", "11386", "11388"]
-        corrigidos = []
-        with _db.get_conn() as conn:
-            with conn.cursor() as cur:
-                for talao in talaoes:
-                    cur.execute(
-                        "SELECT id FROM parkin_entradas WHERE talao = %s ORDER BY id DESC LIMIT 1", (talao,)
-                    )
-                    entrada = cur.fetchone()
-                    if not entrada:
-                        corrigidos.append({"talao": talao, "erro": "não encontrado"})
-                        continue
-                    cur.execute("UPDATE parkin_entradas SET obs = %s WHERE id = %s", ("30 ACIMA", entrada["id"]))
-                    corrigidos.append({"talao": talao, "entrada_id": entrada["id"], "obs": "30 ACIMA"})
-            conn.commit()
-        _ct.processar_abates_pendentes()
-        with _db.get_conn() as conn:
-            with conn.cursor() as cur:
-                for c in corrigidos:
-                    if "entrada_id" not in c:
-                        continue
-                    cur.execute(
-                        """SELECT l.id AS linha_id, l.card_id, cd.fornecedor AS card_fornecedor, cd.notas AS card_notas
-                           FROM compras_toros_abates a
-                           JOIN compras_toros_linhas l ON l.id = a.linha_id
-                           JOIN compras_toros_cards cd ON cd.id = l.card_id
-                           WHERE a.entrada_id = %s""",
-                        (c["entrada_id"],)
-                    )
-                    c["abates"] = [dict(r) for r in cur.fetchall()]
-                    cur.execute("SELECT id FROM compras_toros_excessos WHERE entrada_id = %s", (c["entrada_id"],))
-                    exc = cur.fetchone()
-                    c["excesso_id"] = exc["id"] if exc else None
-        return corrigidos
-    except Exception as e:
-        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
-                           status_code=500)
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
