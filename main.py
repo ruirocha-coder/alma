@@ -1388,12 +1388,6 @@ def calibrar_estimativa_agora():
     threading.Thread(target=estimativa_montagem.correr_calibracao_estimativa, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.get("/_debug-notas-card")
-def _debug_notas_card(bucket_id: int, card_id: int):
-    rec = basecamp.obter_recording(f"{basecamp._base_url()}/buckets/{bucket_id}/card_tables/cards/{card_id}.json")
-    return JSONResponse({"title": rec.get("title"), "content": rec.get("content"),
-                        "description": rec.get("description")})
-
 @app.post("/logistica/avisos-gestao-agendas")
 def avisos_gestao_agendas_agora():
     """Dispara já a verificação dos marcos do documento "GESTÃO DAS

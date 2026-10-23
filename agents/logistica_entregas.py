@@ -26,7 +26,7 @@
 #   isso: quando o FORNECEDOR promete entregar, usada só enquanto a
 #   encomenda ainda está em "Produção" (ver _MISSAO_EXTRACAO abaixo e
 #   tools.logistica.avaliar_condicao, condições B e D).
-import json, threading
+import json, re, threading
 from datetime import date, datetime, timezone
 from agents.base import client
 from tools import basecamp, logistica, documentos_referencia
@@ -216,6 +216,33 @@ def _limpar_bloco_codigo(texto: str) -> str:
             texto = texto[:-3]
     return texto.strip()
 
+_RE_DATA_DMA = re.compile(r"(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})")
+
+def _data_apos_etiqueta(notas: str, etiqueta_regex: str, janela: int = 80):
+    """Procura `etiqueta_regex` nas notas (texto simples) e devolve a
+    primeira data que aparecer logo a seguir (até `janela` caracteres) —
+    rede de segurança determinística contra a extração por LLM falhar
+    mesmo com a etiqueta claramente presente nas notas (bug real, Rui,
+    2026-10-23: card "Cidália Dionisio 24012026", "Data de Entrega do
+    Fornecedor: 13/11/2026" bem destacado nas notas, mas a extração
+    devolveu null na mesma e a Alma pediu a data num comentário).
+    Nunca inventa nada que a etiqueta já não garanta — só recupera uma
+    data que já devia ter sido encontrada."""
+    m = re.search(etiqueta_regex, notas, re.IGNORECASE)
+    if not m:
+        return None
+    trecho = notas[m.end():m.end() + janela]
+    m2 = _RE_DATA_DMA.search(trecho)
+    if not m2:
+        return None
+    dia, mes, ano = m2.groups()
+    if len(ano) == 2:
+        ano = "20" + ano
+    try:
+        return date(int(ano), int(mes), int(dia))
+    except ValueError:
+        return None
+
 def _extrair_dados_encomenda(titulo: str, notas: str, texto_pdf: str = None) -> dict:
     """`texto_pdf`, quando fornecido, é o texto do PDF/orçamento anexado ao
     card (ver agents.estimativa_montagem._texto_pdf_encomenda) — usado só
@@ -236,6 +263,12 @@ def _extrair_dados_encomenda(titulo: str, notas: str, texto_pdf: str = None) -> 
                 dados[campo] = date.fromisoformat(dados[campo])
             except ValueError:
                 dados[campo] = None
+    if not dados.get("data_entrada_armazem"):
+        fallback = _data_apos_etiqueta(notas, r"Data\s+de\s+Entrega\s+do\s+Fornecedor\s*[:\-]?")
+        if fallback:
+            print(f"[logistica_entregas] extração por LLM não encontrou data_entrada_armazem apesar "
+                 f"de a etiqueta estar presente nas notas — usada a data encontrada por regex: {fallback}")
+            dados["data_entrada_armazem"] = fallback
     return dados
 
 def _data_entrega_efetiva(item: dict, dados: dict):
