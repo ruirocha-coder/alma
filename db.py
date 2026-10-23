@@ -461,7 +461,7 @@ CREATE TABLE IF NOT EXISTS compras_toros_excessos (
 -- restante todo vira excesso); só volta a ser processada se o excesso
 -- for desfeito (ver desfazer_excesso_compras_toros, chamado por
 -- tools/compras_toros._reconciliar_excessos_pendentes sempre que surge
--- uma linha aberta compatível dentro da janela de datas).
+-- uma linha aberta compatível criada na data do talão ou antes).
 CREATE TABLE IF NOT EXISTS compras_toros_entradas_processadas (
     entrada_id INTEGER PRIMARY KEY REFERENCES parkin_entradas(id),
     processado_em TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -3404,8 +3404,7 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
     """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
     primeiro (FIFO) — ver tools/compras_toros.processar_abates_pendentes.
     `criado_em_data` serve para a regra "o card não pode ter sido criado
-    mais de alguns dias depois do talão" (ver
-    tools/compras_toros._card_pode_abater_entrada).
+    depois do talão" (ver tools/compras_toros._card_pode_abater_entrada).
 
     Bug real (Rui, 2026-10-15): o fornecedor do card é texto livre (ex:
     "Altri", escrito à mão ao criar o card) e o fornecedor do talão vem
