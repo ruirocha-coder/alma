@@ -1390,6 +1390,14 @@ def calibrar_estimativa_agora():
 
 @app.get("/_debug-investigar-excessos-compras-toros")
 def _debug_investigar_excessos_compras_toros():
+    import traceback
+    try:
+        return _investigar_excessos_compras_toros_impl()
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                           status_code=500)
+
+def _investigar_excessos_compras_toros_impl():
     import db as _db
     from decimal import Decimal
     def limpa(d):
