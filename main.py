@@ -1239,20 +1239,25 @@ def _debug_adicionar_necessidade_mt_3_05():
     ao levantamento 14/10/2026 (coluna id 7), aberto, cuja lista de
     artigos já estava congelada antes de os Limites deste artigo serem
     definidos."""
-    from tools import compras_toros as _ct
-    propostas = _ct.calcular_necessidades_propostas()
-    alvo = next((p for p in propostas if p["tipo"] == "MT" and abs(p["comprimento"] - 3.05) < 1e-6
-                 and p["espessura"] == "normal"), None)
-    if not alvo:
-        return {"erro": "MT 3,05m Normal não encontrado nas propostas calculadas agora"}
-    ja_tem = any(n["tipo"] == "MT" and abs(float(n["comprimento"]) - 3.05) < 1e-6 and n["espessura"] == "normal"
-                 for n in db.necessidades_compras_toros(7))
-    if ja_tem:
-        return {"ok": True, "nota": "já estava lá, nada feito"}
-    db.guardar_necessidade_compras_toros(
-        7, alvo["tipo"], alvo["comprimento"], alvo["espessura"],
-        alvo["lmi_kg"], alvo["lmax_kg"], alvo["s_kg"], alvo["pendente_kg"], alvo["necessidade_kg"])
-    return {"ok": True, "adicionado": alvo}
+    import traceback
+    try:
+        from tools import compras_toros as _ct
+        propostas = _ct.calcular_necessidades_propostas()
+        alvo = next((p for p in propostas if p["tipo"] == "MT" and abs(p["comprimento"] - 3.05) < 1e-6
+                     and p["espessura"] == "normal"), None)
+        if not alvo:
+            return {"erro": "MT 3,05m Normal não encontrado nas propostas calculadas agora", "propostas": propostas}
+        ja_tem = any(n["tipo"] == "MT" and abs(float(n["comprimento"]) - 3.05) < 1e-6 and n["espessura"] == "normal"
+                     for n in db.necessidades_compras_toros(7))
+        if ja_tem:
+            return {"ok": True, "nota": "já estava lá, nada feito"}
+        db.guardar_necessidade_compras_toros(
+            7, alvo["tipo"], alvo["comprimento"], alvo["espessura"],
+            alvo["lmi_kg"], alvo["lmax_kg"], alvo["s_kg"], alvo["pendente_kg"], alvo["necessidade_kg"])
+        return {"ok": True, "adicionado": alvo}
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                           status_code=500)
 
 @app.get("/health/config")
 def health_config():
