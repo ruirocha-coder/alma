@@ -1388,17 +1388,6 @@ def calibrar_estimativa_agora():
     threading.Thread(target=estimativa_montagem.correr_calibracao_estimativa, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
-@app.post("/_debug-apagar-comentario")
-def _debug_apagar_comentario(comment_id: int):
-    basecamp.apagar_card(comment_id, "Entregas")
-    return {"ok": True}
-
-@app.get("/_debug-comentarios-card-logistica")
-def _debug_comentarios_card_logistica(card_id: int):
-    comments_url = f"{basecamp._base_url()}/recordings/{card_id}/comments.json"
-    comentarios = basecamp.ler_comentarios(comments_url)
-    return JSONResponse({"comentarios": comentarios})
-
 @app.post("/logistica/avisos-gestao-agendas")
 def avisos_gestao_agendas_agora():
     """Dispara já a verificação dos marcos do documento "GESTÃO DAS
