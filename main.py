@@ -1233,6 +1233,32 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
+@app.post("/_debug-mover-abates-card12-para-14")
+def _debug_mover_abates_card12_para_14():
+    """Pedido pontual do Rui, 2026-10-23: os talões 11383-11388 são todos
+    madeira 30 acima (só se esqueceram de o escrever nas OBS) — não podem
+    ficar a abater ao card 12 (sem a restrição "30 acima"), têm de ir
+    todos para o card 14 ("30 acima"). Move os abates das entradas 796
+    (11383) e 797 (11384) que caíram na linha 17 (card 12) para a linha
+    19 (card 14, MT 2.64)."""
+    import traceback
+    try:
+        import db as _db
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, entrada_id, linha_id, quantidade_kg FROM compras_toros_abates "
+                    "WHERE entrada_id IN (796, 797) AND linha_id = 17"
+                )
+                alvos = [dict(r) for r in cur.fetchall()]
+        for a in alvos:
+            a["quantidade_kg"] = float(a["quantidade_kg"])
+            _db.mover_abate_compras_toros(a["id"], 19)
+        return {"movidos": alvos}
+    except Exception as e:
+        return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
+                           status_code=500)
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
