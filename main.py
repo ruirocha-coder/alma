@@ -1241,20 +1241,26 @@ def _debug_ecos_largos_ai_api_auth():
     corpo = {"name": "register_missing_data_request",
              "arguments": {"data_type": "teste_alma", "description": "chamada de teste da Alma, ignorar"}}
     tentativas = [
-        ("sem auth (controlo)", {}, None),
-        ("Authorization Bearer", {"Authorization": f"Bearer {token}"}, None),
-        ("X-API-Key header", {"X-API-Key": token}, None),
-        ("api_key no corpo", {}, {"api_key": token}),
-        ("token no corpo", {}, {"token": token}),
-        ("api_key na query", {}, None),
+        ("sem auth (controlo)", {}, None, None),
+        ("Authorization Bearer", {"Authorization": f"Bearer {token}"}, None, None),
+        ("Authorization sem Bearer", {"Authorization": token}, None, None),
+        ("X-API-Key header", {"X-API-Key": token}, None, None),
+        ("X-Api-Token header", {"X-Api-Token": token}, None, None),
+        ("X-Auth-Token header", {"X-Auth-Token": token}, None, None),
+        ("apikey header minusculo", {"apikey": token}, None, None),
+        ("api_key no corpo", {}, {"api_key": token}, None),
+        ("token no corpo", {}, {"token": token}, None),
+        ("api_key na query", {}, None, "api_key"),
+        ("token na query", {}, None, "token"),
+        ("key na query", {}, None, "key"),
     ]
     resultados = []
-    for nome, headers, extra_corpo in tentativas:
+    for nome, headers, extra_corpo, query_key in tentativas:
         try:
             corpo_final = {**corpo, **(extra_corpo or {})}
             params = {"action": "call"}
-            if nome == "api_key na query":
-                params["api_key"] = token
+            if query_key:
+                params[query_key] = token
             r = _httpx.post(base, params=params, json=corpo_final, headers=headers, timeout=15)
             try:
                 conteudo = r.json()
