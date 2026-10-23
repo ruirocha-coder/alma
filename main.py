@@ -1236,15 +1236,34 @@ def health():
 @app.get("/_debug-ecos-largos-ai-api-tools")
 def _debug_ecos_largos_ai_api_tools():
     import httpx as _httpx
-    try:
-        r = _httpx.get("http://ecoslargos.duckdns.org:9000/server/ai_api.php", params={"action": "tools"}, timeout=20)
-        r.raise_for_status()
+    base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
+    tentativas = [
+        ("GET a=call,tool,params no corpo", "get", {"action": "call", "tool": "get_daily_production"},
+         {"production_date": "2026-10-23"}),
+        ("GET com argumentos achatados", "get",
+         {"action": "call", "tool": "get_daily_production", "production_date": "2026-10-23"}, None),
+        ("GET name= em vez de tool=", "get",
+         {"action": "call", "name": "get_daily_production", "production_date": "2026-10-23"}, None),
+        ("POST JSON tool/arguments", "post_json",
+         {"action": "call"}, {"tool": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
+        ("POST JSON name/arguments", "post_json",
+         {"action": "call"}, {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
+    ]
+    resultados = []
+    for nome, metodo, params, corpo in tentativas:
         try:
-            return r.json()
-        except ValueError:
-            return {"conteudo_bruto": r.text}
-    except Exception as e:
-        return JSONResponse({"erro": str(e)}, status_code=500)
+            if metodo == "get":
+                r = _httpx.get(base, params=params, timeout=15)
+            else:
+                r = _httpx.post(base, params=params, json=corpo, timeout=15)
+            try:
+                conteudo = r.json()
+            except ValueError:
+                conteudo = r.text[:500]
+            resultados.append({"tentativa": nome, "status": r.status_code, "resposta": conteudo})
+        except Exception as e:
+            resultados.append({"tentativa": nome, "erro": str(e)})
+    return resultados
 
 @app.get("/health/config")
 def health_config():
