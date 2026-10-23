@@ -1388,6 +1388,38 @@ def calibrar_estimativa_agora():
     threading.Thread(target=estimativa_montagem.correr_calibracao_estimativa, daemon=True).start()
     return {"iniciado": True, "nota": "a correr em segundo plano — acompanha nos logs"}
 
+@app.get("/_debug-investigar-excessos-compras-toros")
+def _debug_investigar_excessos_compras_toros():
+    import db as _db
+    from decimal import Decimal
+    def limpa(d):
+        if not d:
+            return d
+        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
+               for k, v in d.items()}
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT e.id AS excesso_id, e.entrada_id, e.fornecedor AS exc_fornecedor, e.tipo, e.comprimento,
+                          e.espessura, e.quantidade_kg, p.talao, p.data AS data_talao, p.fornecedor AS talao_fornecedor,
+                          p.obs
+                   FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
+                   ORDER BY e.id"""
+            )
+            excessos = [limpa(r) for r in cur.fetchall()]
+            cur.execute(
+                """SELECT id, fornecedor, notas, criado_em, estado,
+                          (SELECT json_agg(json_build_object('id', l.id, 'tipo', l.tipo, 'comprimento', l.comprimento,
+                                                              'espessura', l.espessura))
+                             FROM compras_toros_linhas l WHERE l.card_id = c.id) AS linhas
+                   FROM compras_toros_cards c
+                   JOIN compras_toros_colunas col ON col.id = c.coluna_id
+                   WHERE c.estado = 'aberto' AND col.estado = 'aberta'
+                   ORDER BY c.criado_em"""
+            )
+            cards = [limpa(r) for r in cur.fetchall()]
+    return JSONResponse({"excessos": excessos, "cards": cards})
+
 @app.post("/logistica/avisos-gestao-agendas")
 def avisos_gestao_agendas_agora():
     """Dispara já a verificação dos marcos do documento "GESTÃO DAS
