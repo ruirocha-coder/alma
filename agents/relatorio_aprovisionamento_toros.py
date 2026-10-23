@@ -124,19 +124,42 @@ def necessidades_por_artigo() -> dict:
         # "Produzido" (marcador manual desta página, ver tools/
         # planeamento_entradas.definir_produzido) significa que os toros
         # desta OF já entraram — não conta como necessidade por vir.
-        if e.get("produzido") or e.get("qtd_toros_m3") is None:
+        if e.get("produzido"):
             continue
-        toro_tipo, toro_cmp = e.get("toro_tipo"), e.get("toro_cmp")
-        if not toro_tipo or not toro_cmp:
+        # um Buffer continua a ter um único WIP+Toro; uma OF real pode ter
+        # várias linhas (uma por artigo/comprimento identificado no PDF da
+        # OF — "Algoritmo de Comprimentos", pedido explícito do Rui,
+        # 2026-10-23, ver tools/planeamento_entradas.calcular_linhas_
+        # automaticamente) — soma-se a necessidade de todas.
+        if e.get("buffer"):
+            if e.get("qtd_toros_m3") is None:
+                continue
+            linhas_desta_of = [{"toro_cmp": e.get("toro_cmp"), "toro_tipo": e.get("toro_tipo"),
+                               "qtd_toros_m3": e.get("qtd_toros_m3")}]
+        else:
+            if e.get("volume_m3") is None:
+                continue
+            linhas_desta_of = e.get("linhas") or []
+        if not linhas_desta_of:
             sem_info.append(e["titulo"])
             continue
-        comprimento_m = _comprimento_m_de_toro_cmp(toro_cmp)
-        if comprimento_m is None:
-            suspeitos.append({"titulo": e["titulo"], "toro_cmp": toro_cmp})
-            continue
-        chave = (toro_tipo, comprimento_m)
-        g = grupos.setdefault(chave, {"tipo": toro_tipo, "comprimento_m": comprimento_m, "necessidade_m3": 0.0})
-        g["necessidade_m3"] += e["qtd_toros_m3"]
+        teve_linha_sem_info = False
+        for l in linhas_desta_of:
+            if l.get("qtd_toros_m3") is None:
+                continue
+            toro_tipo, toro_cmp = l.get("toro_tipo"), l.get("toro_cmp")
+            if not toro_tipo or not toro_cmp:
+                teve_linha_sem_info = True
+                continue
+            comprimento_m = _comprimento_m_de_toro_cmp(toro_cmp)
+            if comprimento_m is None:
+                suspeitos.append({"titulo": e["titulo"], "toro_cmp": toro_cmp})
+                continue
+            chave = (toro_tipo, comprimento_m)
+            g = grupos.setdefault(chave, {"tipo": toro_tipo, "comprimento_m": comprimento_m, "necessidade_m3": 0.0})
+            g["necessidade_m3"] += l["qtd_toros_m3"]
+        if teve_linha_sem_info:
+            sem_info.append(e["titulo"])
 
     linhas = []
     for chave, g in grupos.items():

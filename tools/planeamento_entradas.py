@@ -16,9 +16,18 @@
 # aqui sozinha, sempre que se lê o estado (ver estado_planeamento_entradas),
 # exatamente como uma OF com tipo de madeira definido aparece sozinha na
 # logística.
+import json, re, threading
 from datetime import date, timedelta
+import anthropic
 import db
+from tools import basecamp, documentos_empresa
 from tools import planeamento_serracao as ps
+
+# cliente próprio (não agents.base.client): agents/base.py importa
+# agents/relatorio_aprovisionamento_toros.py, que importa este módulo —
+# importar agents.base daqui fecharia um ciclo. Mesmo padrão já usado por
+# tools/parkin.py pela mesma razão.
+_client = anthropic.Anthropic()
 
 CHARRIOTS = ["Charriot 1", "Charriot 2", "Charriot 3", "Multiserra de Toros", "Aproveitamentos"]
 # valores em milímetros (pedido explícito do Rui, 2026-10-04 — antes
@@ -43,14 +52,223 @@ WIP_LOTES_TABELA = [
 ]
 FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
 
-# QTD Toros = volume (m³) × INDICE_TOROS; QTD Wip = volume (m³) × INDICE_WIP
-# — pedido explícito do Rui (2026-10-01). Cada OF pode ter o seu próprio
-# índice (ver guardar_wip/guardar_toro); estes são só os valores por
-# omissão usados enquanto ninguém escolher outro à mão para essa OF em
-# concreto (ver db.entradas_charriot_ecos_largos, colunas indice_toros/
-# indice_wip).
+# QTD Toros = volume da linha (m³) × INDICE_TOROS; QTD Wip = volume da
+# linha (m³) × INDICE_WIP — pedido explícito do Rui (2026-10-01). Cada
+# linha pode ter o seu próprio índice (ver guardar_linhas_entrada); estes
+# são só os valores por omissão usados enquanto ninguém escolher outro à
+# mão para essa linha em concreto.
 INDICE_TOROS_DEFAULT = 2.85
 INDICE_WIP_DEFAULT = 1.8
+
+# "Algoritmo de Comprimentos" (pedido explícito do Rui, 2026-10-23): ao
+# arrastar uma OF de "Por atribuir" para um charriot, lê-se o PDF da OF
+# anexado ao card no Basecamp (nome tipo "OF <número> <cliente>.pdf"),
+# identifica-se o(s) artigo(s) e o comprimento de cada um, e cria-se uma
+# linha de WIP+Toro por artigo — WIP arredondado para cima ao preset mais
+# pequeno que ainda chegue (a peça final tem de caber dentro do WIP, nunca
+# o contrário) e Toro escolhido para encaixar o maior número de peças do
+# artigo com a menor sobra (ver _otimizar_toro). O volume total real da OF
+# (vindo da produção) reparte-se entre as linhas pelo peso relativo do
+# campo "QTD" de cada artigo no PDF (ver _linhas_com_calculo) — nunca um
+# volume em si, só a proporção entre artigos.
+TOLERANCIA_CORTE_MM = 5
+
+def _otimizar_toro(comprimento_artigo_mm: float):
+    """Entre TORO_CMP_PRESETS, o comprimento de toro que encaixa o maior
+    número de peças de `comprimento_artigo_mm` (cada uma a precisar de
+    comprimento_artigo_mm + TOLERANCIA_CORTE_MM de espaço, a folga de
+    corte/serra entre peças — pedido explícito do Rui, 2026-10-23), com a
+    menor sobra possível. Devolve (toro_cmp_texto, peças_por_toro,
+    sobra_mm) do melhor preset, ou (None, None, None) se o artigo for
+    maior do que todos os presets (nenhum chega para uma peça só)."""
+    unidade = float(comprimento_artigo_mm) + TOLERANCIA_CORTE_MM
+    melhor = None
+    for preset in TORO_CMP_PRESETS:
+        try:
+            preset_mm = float(preset)
+        except ValueError:
+            continue  # preset não numérico (ex: com diâmetro) — não entra nesta otimização
+        pecas = int(preset_mm // unidade)
+        if pecas < 1:
+            continue
+        sobra = preset_mm - pecas * unidade
+        aproveitamento = (preset_mm - sobra) / preset_mm
+        candidato = (aproveitamento, preset, pecas, round(sobra, 1))
+        if melhor is None or candidato[0] > melhor[0]:
+            melhor = candidato
+    if melhor is None:
+        return None, None, None
+    return melhor[1], melhor[2], melhor[3]
+
+def _arredondar_wip_cmp(comprimento_artigo_mm: float):
+    """O menor preset de WIP_CMP_PRESETS que ainda seja >= ao comprimento
+    do artigo (a peça final tem de caber dentro do WIP depois de
+    cortada) — None se o artigo for maior do que todos os presets."""
+    candidatos = sorted((float(p) for p in WIP_CMP_PRESETS), key=float)
+    for preset_mm in candidatos:
+        if preset_mm >= float(comprimento_artigo_mm):
+            return str(int(preset_mm)) if preset_mm == int(preset_mm) else str(preset_mm)
+    return None
+
+_MISSAO_EXTRACAO_ARTIGOS_OF = """Extrais, do PDF de uma Ordem de Fabrico
+(OF) de madeira serrada, a lista de artigos/produtos encomendados, cada
+um com o seu comprimento e quantidade. Responde APENAS com um array JSON,
+sem mais nenhum texto antes ou depois, com um objeto por artigo
+distinto encontrado:
+[{"artigo": string, "comprimento_mm": number, "qtd": number ou null}]
+- "artigo": a designação/descrição do artigo tal como está no PDF.
+- "comprimento_mm": o comprimento dessa peça, SEMPRE convertido para
+  milímetros (ex: "2,55 m" ou "255 cm" -> 2550; já em mm, usa tal e qual).
+- "qtd": o valor do campo "QTD" (quantidade) desse artigo no PDF, tal
+  como está escrito (não convertas unidades) — null se não houver esse
+  campo ou não for legível.
+Nunca inventes um artigo ou um comprimento que não estejam mesmo no PDF.
+Se não conseguires identificar nenhum artigo com comprimento, devolve []."""
+
+def _ler_pdf_of(card: dict):
+    """Encontra e lê o PDF da OF anexado ao card do Basecamp (nome tipo
+    "OF <número> <cliente>.pdf" — pedido explícito do Rui, 2026-10-23),
+    primeiro na descrição do card e, se não encontrar lá, nos comentários
+    (mesmo padrão de tools.documentos_empresa.procurar_anexo_em_
+    comentarios: o PDF pode ter sido anexado a um comentário em vez da
+    descrição). Devolve (texto_pdf, nome_ficheiro) ou (None, erro) se não
+    encontrar nenhum PDF que pareça ser o da OF."""
+    try:
+        recording = basecamp.obter_recording(card["url_api"])
+    except Exception as e:
+        return None, f"não consegui aceder ao card desta OF no Basecamp: {e}"
+    anexos = (recording.get("description_attachments") or []) + (recording.get("content_attachments") or [])
+    padrao_of = re.compile(r"\bOF\b", re.IGNORECASE)
+    candidatos = [a for a in anexos
+                 if (a.get("filename") or "").lower().endswith(".pdf") and padrao_of.search(a.get("filename") or "")]
+    if not candidatos and card.get("comments_url"):
+        try:
+            comentarios = basecamp.ler_comentarios(card["comments_url"])
+        except Exception:
+            comentarios = []
+        for c in comentarios:
+            for nome in (c.get("anexos") or []):
+                if nome.lower().endswith(".pdf") and padrao_of.search(nome):
+                    try:
+                        c_completo = basecamp.obter_recording(c["url"])
+                    except Exception:
+                        continue
+                    candidatos.extend(a for a in (c_completo.get("content_attachments") or [])
+                                      if (a.get("filename") or "") == nome)
+    if not candidatos:
+        return None, "não encontrei nenhum PDF com \"OF\" no nome anexado a este card (nem na descrição, nem nos comentários)"
+    anexo = candidatos[0]
+    nome = anexo.get("filename")
+    try:
+        bruto = basecamp._get_bytes(anexo["download_url"])
+        ctype = documentos_empresa._tipo_efetivo(anexo.get("content_type"), nome)
+        texto = documentos_empresa._extrair_por_tipo(bruto, ctype)
+    except Exception as e:
+        return None, f"encontrei o ficheiro {nome!r} mas não consegui lê-lo: {e}"
+    if not texto or not texto.strip():
+        return None, f"o ficheiro {nome!r} não tem texto legível"
+    return texto, nome
+
+def _limpar_bloco_codigo(texto: str) -> str:
+    if texto.startswith("```"):
+        texto = texto.split("\n", 1)[1] if "\n" in texto else texto[3:]
+        if texto.endswith("```"):
+            texto = texto[:-3]
+    return texto.strip()
+
+def _extrair_artigos_of(texto_pdf: str) -> list:
+    """Chama o modelo para identificar os artigos (comprimento + qtd) no
+    texto do PDF da OF — ver _MISSAO_EXTRACAO_ARTIGOS_OF. Devolve sempre
+    uma lista (vazia se a extração falhar ou não devolver JSON válido),
+    nunca inventa dados."""
+    resposta = _client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=2048,
+        system=_MISSAO_EXTRACAO_ARTIGOS_OF,
+        messages=[{"role": "user", "content": texto_pdf[:30000]}]
+    )
+    texto = _limpar_bloco_codigo("".join(b.text for b in resposta.content if b.type == "text").strip())
+    try:
+        artigos = json.loads(texto)
+    except ValueError:
+        print(f"[planeamento_entradas] extração de artigos não devolveu JSON válido: {texto[:200]!r}")
+        return []
+    if not isinstance(artigos, list):
+        return []
+    validos = []
+    for a in artigos:
+        if not isinstance(a, dict) or not a.get("comprimento_mm"):
+            continue
+        try:
+            comprimento = float(a["comprimento_mm"])
+        except (TypeError, ValueError):
+            continue
+        if comprimento <= 0:
+            continue
+        try:
+            qtd = float(a["qtd"]) if a.get("qtd") is not None else None
+        except (TypeError, ValueError):
+            qtd = None
+        validos.append({"artigo": a.get("artigo") or None, "comprimento_mm": comprimento, "qtd": qtd})
+    return validos
+
+def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
+    """"Algoritmo de Comprimentos" (pedido explícito do Rui, 2026-10-23):
+    lê o PDF da OF, identifica os artigos/comprimentos, otimiza o
+    comprimento de toro de cada um, e substitui TODAS as linhas de
+    WIP+Toro desta OF pelo resultado — nunca junta às que já lá estavam
+    (pedido explícito do Rui: "substitui sempre pelo resultado do
+    cálculo"). O "peso" de cada linha (campo QTD do PDF) fica gravado tal
+    como lido; a repartição do volume real da OF entre linhas por esse
+    peso é só calculada ao vivo, nunca aqui (ver
+    estado_planeamento_entradas/_linhas_com_calculo, a única fonte desse
+    cálculo). Índices (WIP/Toro) assumem sempre os valores por omissão
+    (INDICE_WIP_DEFAULT/INDICE_TOROS_DEFAULT) — não há nenhum índice
+    "correto" por artigo a ler de lado nenhum."""
+    card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
+    if not card:
+        return {"erro": "card desta OF não encontrado entre as OFs ativas"}
+
+    texto_pdf, nome_ou_erro = _ler_pdf_of(card)
+    if texto_pdf is None:
+        return {"erro": nome_ou_erro}
+    artigos = _extrair_artigos_of(texto_pdf)
+    if not artigos:
+        return {"erro": f"li o PDF ({nome_ou_erro}) mas não identifiquei nenhum artigo com comprimento"}
+
+    linhas = []
+    for a in artigos:
+        toro_cmp, pecas_por_toro, sobra_mm = _otimizar_toro(a["comprimento_mm"])
+        wip_cmp_texto = _arredondar_wip_cmp(a["comprimento_mm"])
+        linhas.append({
+            "artigo": a["artigo"],
+            "peso": a["qtd"],
+            "wip_cmp": float(wip_cmp_texto) if wip_cmp_texto is not None else None,
+            "wip_esp": None,
+            "indice_wip": INDICE_WIP_DEFAULT,
+            "toro_cmp": toro_cmp,
+            "toro_tipo": None,
+            "indice_toros": INDICE_TOROS_DEFAULT,
+        })
+    db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, linhas)
+    return {"ok": True, "ficheiro": nome_ou_erro, "linhas": linhas}
+
+def _calcular_automaticamente_em_fundo(basecamp_card_id: int):
+    """Corre calcular_linhas_automaticamente numa thread (chamado ao
+    atribuir o primeiro charriot — ver atribuir_charriots) para nunca
+    atrasar o arrastar do card na tabela à espera de ler um PDF e chamar o
+    modelo; qualquer erro fica só nos logs, nunca interrompe quem
+    arrastou o card."""
+    try:
+        resultado = calcular_linhas_automaticamente(basecamp_card_id)
+        if "erro" in resultado:
+            print(f"[planeamento_entradas] cálculo automático de comprimentos falhou para "
+                 f"a OF {basecamp_card_id}: {resultado['erro']}")
+        else:
+            print(f"[planeamento_entradas] cálculo automático de comprimentos para a OF "
+                 f"{basecamp_card_id}: {len(resultado['linhas'])} linha(s) a partir de {resultado['ficheiro']!r}")
+    except Exception as e:
+        print(f"[planeamento_entradas] cálculo automático de comprimentos rebentou para a OF "
+             f"{basecamp_card_id}: {e!r}")
 
 def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
     """Volume real de um lote WIP, em m³: comprimento x (largura fixa x
@@ -65,6 +283,45 @@ def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
         return None
     volume = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
     return volume if volume > 0 else None
+
+def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
+    """Para cada linha de WIP+Toro de uma OF real, reparte volume_total_m3
+    (o volume real da OF, vindo da produção) pelo "peso" de cada linha
+    (campo QTD lido do PDF da OF — sem peso em nenhuma, reparte em partes
+    iguais) e calcula QTD Wip/QTD Toros/Nº de lotes dessa linha a partir
+    do volume já repartido. Devolve uma lista pronta a mostrar/editar,
+    nunca grava nada."""
+    if not linhas:
+        return []
+    pesos = [l["peso"] for l in linhas]
+    soma = sum(p for p in pesos if p)
+    n = len(linhas)
+    resultado = []
+    for l in linhas:
+        if soma > 0 and l["peso"]:
+            fracao = l["peso"] / soma
+        else:
+            fracao = 1 / n
+        volume_linha = round((volume_total_m3 or 0) * fracao, 3) if volume_total_m3 is not None else None
+        indice_wip = l["indice_wip"] if l["indice_wip"] is not None else INDICE_WIP_DEFAULT
+        indice_toros = l["indice_toros"] if l["indice_toros"] is not None else INDICE_TOROS_DEFAULT
+        qtd_wip_m3 = round(volume_linha * indice_wip, 2) if volume_linha is not None else None
+        qtd_toros_m3 = round(volume_linha * indice_toros, 2) if volume_linha is not None else None
+        resultado.append({
+            "id": l["id"],
+            "artigo": l["artigo"],
+            "peso": l["peso"],
+            "wip_cmp": l["wip_cmp"],
+            "wip_esp": l["wip_esp"],
+            "indice_wip": indice_wip,
+            "qtd_wip_m3": qtd_wip_m3,
+            "n_lotes": _calcular_n_lotes(qtd_wip_m3, l["wip_cmp"], l["wip_esp"]),
+            "toro_cmp": l["toro_cmp"],
+            "toro_tipo": l["toro_tipo"],
+            "indice_toros": indice_toros,
+            "qtd_toros_m3": qtd_toros_m3,
+        })
+    return resultado
 
 def _calcular_n_lotes(qtd_wip_m3, wip_cmp_mm, wip_esp_mm):
     """Nº de lotes (pedido explícito do Rui, 2026-10-04) = QTD Wip a
@@ -127,6 +384,9 @@ def estado_planeamento_entradas() -> dict:
     cards_ativos = ps._cards_of_ativos()
     agendamentos = {a["basecamp_card_id"]: a for a in db.agendamentos_producao_ecos_largos()}
     extras = {e["basecamp_card_id"]: e for e in db.entradas_charriot_ecos_largos()}
+    linhas_por_card = {}
+    for l in db.linhas_entrada_ecos_largos():
+        linhas_por_card.setdefault(l["basecamp_card_id"], []).append(l)
 
     entradas = []
     for c in cards_ativos:
@@ -151,16 +411,7 @@ def estado_planeamento_entradas() -> dict:
         em_continuo = extra.get("em_continuo")
         if em_continuo is None:
             em_continuo = True
-        indice_toros = extra.get("indice_toros")
-        if indice_toros is None:
-            indice_toros = INDICE_TOROS_DEFAULT
-        indice_wip = extra.get("indice_wip")
-        if indice_wip is None:
-            indice_wip = INDICE_WIP_DEFAULT
-        wip_cmp = extra.get("wip_cmp")
-        wip_esp = extra.get("wip_esp")
         volume = agendamento["volume_m3"]
-        qtd_wip_m3 = round(volume * indice_wip, 2) if volume is not None else None
         entradas.append({
             "basecamp_card_id": c["id"],
             "titulo": c["titulo"],
@@ -180,16 +431,8 @@ def estado_planeamento_entradas() -> dict:
             "charriots": extra.get("charriots") or [],
             "largura_dias": extra.get("largura_dias_visual") or 1,
             "produzido": bool(extra.get("produzido")),
-            "wip_cmp": wip_cmp,
             "wip_lar": WIP_LAR_FIXA,
-            "wip_esp": wip_esp,
-            "indice_wip": indice_wip,
-            "qtd_wip_m3": qtd_wip_m3,
-            "n_lotes": _calcular_n_lotes(qtd_wip_m3, wip_cmp, wip_esp),
-            "toro_cmp": extra.get("toro_cmp"),
-            "toro_tipo": extra.get("toro_tipo"),
-            "indice_toros": indice_toros,
-            "qtd_toros_m3": round(volume * indice_toros, 2) if volume is not None else None,
+            "linhas": _linhas_com_calculo(linhas_por_card.get(c["id"], []), volume),
         })
 
     # cards "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplicados
@@ -241,7 +484,14 @@ def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
     mesmo tempo (ex: Charriot 1 e 2 em simultâneo, pedido explícito do
     Rui, 2026-10-02), ou nenhum (None/lista vazia volta para "por
     atribuir"). basecamp_card_id negativo = card "Buffer" (ver
-    criar_buffer) — mesmo gesto de arrastar, só muda a tabela de destino."""
+    criar_buffer) — mesmo gesto de arrastar, só muda a tabela de destino.
+
+    Ao sair de "por atribuir" pela primeira vez (nenhum charriot antes,
+    pelo menos um agora) numa OF real, dispara em segundo plano o
+    "Algoritmo de Comprimentos" (pedido explícito do Rui, 2026-10-23: "assim
+    que o card é arrastado do por atribuir para os charriots/locais
+    corretos") — nunca ao mudar de um charriot já atribuído para outro,
+    só nesta transição específica."""
     charriots = [c for c in (charriots or []) if c] or None
     if charriots is not None:
         desconhecidos = [c for c in charriots if c not in CHARRIOTS]
@@ -249,7 +499,13 @@ def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
             return {"erro": f"charriot desconhecido: {desconhecidos[0]!r}"}
     if basecamp_card_id < 0:
         return db.atribuir_charriots_buffer(-basecamp_card_id, charriots)
-    return db.atribuir_charriots_entrada(basecamp_card_id, charriots)
+    tinha_charriots_antes = bool(next(
+        (e["charriots"] for e in db.entradas_charriot_ecos_largos() if e["basecamp_card_id"] == basecamp_card_id),
+        None))
+    resultado = db.atribuir_charriots_entrada(basecamp_card_id, charriots)
+    if not tinha_charriots_antes and charriots:
+        threading.Thread(target=_calcular_automaticamente_em_fundo, args=(basecamp_card_id,), daemon=True).start()
+    return resultado
 
 LARGURA_DIAS_MAX = 14
 
@@ -292,30 +548,38 @@ def _validar_numero_positivo(nome: str, valor):
         return f"{nome} tem de ser maior que 0"
     return None
 
-def guardar_wip(basecamp_card_id: int, cmp: float = None, lar: float = None, esp: float = None,
-                indice_wip: float = None) -> dict:
-    for nome, valor in (("comprimento (WIP)", cmp), ("largura (WIP)", lar), ("espessura (WIP)", esp),
-                       ("índice de WIP", indice_wip)):
+def _validar_linha(linha: dict):
+    for nome, valor in (("comprimento (WIP)", linha.get("wip_cmp")), ("espessura (WIP)", linha.get("wip_esp")),
+                       ("índice de WIP", linha.get("indice_wip")), ("índice de toros", linha.get("indice_toros"))):
         erro = _validar_numero_positivo(nome, valor)
         if erro:
-            return {"erro": erro}
-    if esp is not None and round(float(esp)) not in FIADAS_POR_ESPESSURA:
-        return {"erro": f"espessura {esp!r} não consta da tabela \"WIP Lotes\""}
-    lar = WIP_LAR_FIXA
-    return db.guardar_wip_entrada(basecamp_card_id, cmp, lar, esp, indice_wip)
+            return erro
+    if linha.get("wip_esp") is not None and round(float(linha["wip_esp"])) not in FIADAS_POR_ESPESSURA:
+        return f"espessura {linha['wip_esp']!r} não consta da tabela \"WIP Lotes\""
+    toro_cmp = linha.get("toro_cmp")
+    if toro_cmp is not None and not str(toro_cmp).strip():
+        return "comprimento do toro inválido"
+    toro_tipo = linha.get("toro_tipo")
+    if toro_tipo is not None and toro_tipo not in TORO_TIPOS:
+        return f"tipo de toro desconhecido: {toro_tipo!r} — usa \"IN\" ou \"MT\""
+    return None
 
-def guardar_toro(basecamp_card_id: int, cmp: str = None, tipo: str = None, indice_toros: float = None) -> dict:
-    # cmp é texto, não número (ver TORO_CMP_PRESETS — pode vir a ter opções
-    # que não sejam um número puro, ex: com diâmetro); só o índice tem de
-    # ser validado como número positivo.
-    erro = _validar_numero_positivo("índice de toros", indice_toros)
-    if erro:
-        return {"erro": erro}
-    if cmp is not None and not str(cmp).strip():
-        return {"erro": "comprimento do toro inválido"}
-    if tipo is not None and tipo not in TORO_TIPOS:
-        return {"erro": f"tipo de toro desconhecido: {tipo!r} — usa \"IN\" ou \"MT\""}
-    return db.guardar_toro_entrada(basecamp_card_id, cmp, tipo, indice_toros)
+def guardar_linhas_entrada(basecamp_card_id: int, linhas: list) -> dict:
+    """Grava a ficha completa de linhas de WIP+Toro de uma OF real (pedido
+    explícito do Rui, 2026-10-23: "permite a sua edição e alteração") —
+    substitui sempre todas as linhas desta OF pelas dadas, a mesma função
+    usada pelo cálculo automático (ver calcular_linhas_automaticamente),
+    para nunca haver dois caminhos diferentes a escrever a mesma tabela.
+    `linhas`: lista de {"artigo","peso","wip_cmp","wip_esp","indice_wip",
+    "toro_cmp","toro_tipo","indice_toros"}, todos opcionais."""
+    if basecamp_card_id < 0:
+        return {"erro": "um card \"Buffer\" não tem linhas de WIP+Toro — usa guardar_buffer"}
+    for linha in linhas or []:
+        erro = _validar_linha(linha)
+        if erro:
+            return {"erro": erro}
+    db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, linhas or [])
+    return {"ok": True, "basecamp_card_id": basecamp_card_id}
 
 def criar_buffer(basecamp_card_id_origem: int) -> dict:
     """Botão "Fazer Buffer" (pedido explícito do Rui, 2026-10-04): duplica
@@ -324,20 +588,25 @@ def criar_buffer(basecamp_card_id_origem: int) -> dict:
     lotes já calculado nesse card (ou 1, se ainda não houver nenhum) — a
     partir daqui, o Nº de lotes do duplicado escreve-se à mão (ver
     guardar_buffer), e QTD Wip/QTD Toros recalculam-se sempre a partir
-    dele. Devolve o novo card já no formato de estado_planeamento_
-    entradas (basecamp_card_id negativo, "buffer": True)."""
+    dele. Um "Buffer" só tem um único WIP+Toro (nunca várias linhas, ao
+    contrário de uma OF real — ver guardar_linhas_entrada); se a OF de
+    origem já tiver mais de uma linha, copia-se só a primeira. Devolve o
+    novo card já no formato de estado_planeamento_entradas
+    (basecamp_card_id negativo, "buffer": True)."""
     estado = estado_planeamento_entradas()
     origem = next((e for e in estado["entradas"] if e["basecamp_card_id"] == basecamp_card_id_origem), None)
     if origem is None:
         return {"erro": "card de origem não encontrado"}
+    primeira_linha = (origem.get("linhas") or [{}])[0]
     novo_id = db.criar_buffer_entrada(
         basecamp_card_id_origem=basecamp_card_id_origem,
         titulo=origem["titulo"] + " (Buffer)",
         linha=origem["linha"], cor=origem["cor"], dia_entrada=origem["dia_entrada"],
         charriots=origem["charriots"], largura_dias_visual=origem["largura_dias"],
-        wip_cmp=origem["wip_cmp"], wip_esp=origem["wip_esp"], indice_wip=origem["indice_wip"],
-        n_lotes=origem["n_lotes"] or 1, toro_cmp=origem["toro_cmp"], toro_tipo=origem["toro_tipo"],
-        indice_toros=origem["indice_toros"])
+        wip_cmp=primeira_linha.get("wip_cmp"), wip_esp=primeira_linha.get("wip_esp"),
+        indice_wip=primeira_linha.get("indice_wip"),
+        n_lotes=primeira_linha.get("n_lotes") or 1, toro_cmp=primeira_linha.get("toro_cmp"),
+        toro_tipo=primeira_linha.get("toro_tipo"), indice_toros=primeira_linha.get("indice_toros"))
     novo_estado = estado_planeamento_entradas()
     return next(e for e in novo_estado["entradas"] if e["basecamp_card_id"] == -novo_id)
 
@@ -345,8 +614,10 @@ def guardar_buffer(id: int, charriots: list = None, largura_dias=None, wip_cmp: 
                    wip_esp: float = None, indice_wip: float = None, n_lotes: float = None,
                    toro_cmp: str = None, toro_tipo: str = None, indice_toros: float = None) -> dict:
     """Grava a ficha completa de um card "Buffer" já criado (ver
-    criar_buffer) — ao contrário de guardar_wip/guardar_toro, grava tudo
-    de uma vez, porque é um card próprio (não lê nada de uma OF real)."""
+    criar_buffer) — ao contrário de guardar_linhas_entrada, grava tudo de
+    uma vez (um único WIP+Toro, nunca várias linhas), porque é um card
+    próprio (não lê nada de uma OF real, não tem PDF nenhum para o
+    "Algoritmo de Comprimentos" ler)."""
     charriots = [c for c in (charriots or []) if c] or None
     if charriots is not None:
         desconhecidos = [c for c in charriots if c not in CHARRIOTS]
@@ -1256,6 +1527,118 @@ function wipEspOptionsHtml(atual){
   return `<option value="" ${atual==null?"selected":""}>—</option>` +
     WIP_LOTES_TABELA.map(([esp])=>`<option value="${esp}"${atual===esp?" selected":""}>${esp}</option>`).join("");
 }
+/* uma linha de WIP+Toro (pedido explícito do Rui, 2026-10-23, "Algoritmo
+   de Comprimentos") — uma OF real pode ter várias, uma por artigo/
+   comprimento identificado no PDF; data-peso guarda o peso relativo (QTD
+   do PDF) usado para repartir o volume da OF entre linhas, nunca mostrado
+   nem editado diretamente (só o resultado interessa à equipa). */
+function linhaWipToroHtml(linha, idx){
+  const toroEhPreset = linha.toroCmp!=null && TORO_PRESETS.includes(linha.toroCmp);
+  const toroOutroValor = (linha.toroCmp!=null && !toroEhPreset) ? linha.toroCmp : "";
+  return `
+  <div class="linhaWipToro" data-idx="${idx}" data-peso="${linha.peso??""}"
+       style="border:1px solid var(--linha,#333);border-radius:8px;padding:10px;margin-bottom:10px">
+    <div class="frow" style="margin-top:0">
+      <label>Artigo</label>
+      <input class="fArtigo" type="text" value="${linha.artigo||""}" placeholder="(identificado automaticamente)">
+      <button type="button" class="btn fRemoverLinha" style="flex:0 0 auto">Remover linha</button>
+    </div>
+    <label class="grupoLbl" style="margin-top:6px">WIP</label>
+    <div class="miniRow">
+      <div class="miniField"><label>Cmp</label><select class="fWipCmp">${wipCmpOptionsHtml(linha.wipCmp)}</select></div>
+      <div class="miniField"><label>Lar</label><input type="text" value="${WIP_LAR_FIXA}" disabled></div>
+      <div class="miniField"><label>Esp</label><select class="fWipEsp">${wipEspOptionsHtml(linha.wipEsp)}</select></div>
+      <div class="miniField"><label>Fiadas</label><b class="fFiadas mono" style="align-self:center">—</b></div>
+      <div class="miniField"><label>Índice</label><input class="fIndiceWip" type="text" inputmode="decimal" value="${linha.indiceWip??INDICE_WIP_DEFAULT}"></div>
+      <div class="miniField"><label>QTD Wip</label><b class="fQtdWip mono" style="align-self:center">—</b></div>
+      <div class="miniField"><label>Nº lotes</label><b class="fNLotes mono" style="align-self:center">—</b></div>
+    </div>
+    <label class="grupoLbl">Toro</label>
+    <div class="miniRow">
+      <div class="miniField"><label>Cmp</label><select class="fToroCmp">${toroCmpOptionsHtml(linha.toroCmp)}</select></div>
+      <div class="miniField fToroCmpOutroWrap" style="${(toroEhPreset||linha.toroCmp==null)?"display:none":""}">
+        <label>Valor</label><input class="fToroCmpOutro" type="text" inputmode="decimal" value="${toroOutroValor}" list="histToroCmp"></div>
+      <div class="miniField"><label>Tipo</label><select class="fToroTipo">
+        <option value="" ${!linha.toroTipo?"selected":""}>—</option>
+        <option value="IN"${linha.toroTipo==="IN"?" selected":""}>IN</option>
+        <option value="MT"${linha.toroTipo==="MT"?" selected":""}>MT</option>
+      </select></div>
+      <div class="miniField"><label>Índice</label><input class="fIndiceToros" type="text" inputmode="decimal" value="${linha.indiceToros??INDICE_TOROS_DEFAULT}"></div>
+      <div class="miniField"><label>QTD Toros</label><b class="fQtdToros mono" style="align-self:center">—</b></div>
+    </div>
+  </div>`;
+}
+function bindLinhaHandlers(container, it){
+  const toroCmpEl=container.querySelector(".fToroCmp");
+  toroCmpEl.onchange=()=>{
+    container.querySelector(".fToroCmpOutroWrap").style.display = toroCmpEl.value==="outro" ? "" : "none";
+  };
+  container.querySelector(".fIndiceWip").oninput=()=>recalcularLinha(it,container);
+  container.querySelector(".fIndiceToros").oninput=()=>recalcularLinha(it,container);
+  container.querySelector(".fWipCmp").onchange=()=>recalcularLinha(it,container);
+  container.querySelector(".fWipEsp").onchange=()=>recalcularLinha(it,container);
+  container.querySelector(".fRemoverLinha").onclick=()=>{
+    const todas=document.querySelectorAll("#linhasWipToro .linhaWipToro");
+    if(todas.length<=1){ alert("Tem de ficar pelo menos uma linha."); return; }
+    container.remove();
+    recalcularTodasLinhas(it);
+  };
+  recalcularLinha(it,container);
+}
+/* reparte it.volume (volume real da OF) pelo peso relativo (data-peso) de
+   cada linha, tal como tools.planeamento_entradas._linhas_com_calculo —
+   sem peso em nenhuma linha, reparte em partes iguais (mesma regra). */
+function recalcularLinha(it, container){
+  const todas=Array.from(document.querySelectorAll("#linhasWipToro .linhaWipToro"));
+  const pesos=todas.map(c=>parseFloat(c.dataset.peso));
+  const somaPesos=pesos.reduce((s,p)=>s+(isNaN(p)?0:p),0);
+  const n=todas.length;
+  const pesoLinha=parseFloat(container.dataset.peso);
+  const fracao=(somaPesos>0 && !isNaN(pesoLinha)) ? pesoLinha/somaPesos : 1/n;
+  const volumeLinha=(it.volume!=null) ? it.volume*fracao : null;
+  const indiceWip=parseFloat(container.querySelector(".fIndiceWip").value);
+  const indiceToros=parseFloat(container.querySelector(".fIndiceToros").value);
+  const wipCmpEl=container.querySelector(".fWipCmp"), wipEspEl=container.querySelector(".fWipEsp");
+  const wipCmp=wipCmpEl.value?parseFloat(wipCmpEl.value):null;
+  const wipEsp=wipEspEl.value?parseFloat(wipEspEl.value):null;
+  const fiadas=fiadasPorEspessura(wipEsp);
+  container.querySelector(".fFiadas").textContent=fiadas!=null?fiadas:"—";
+  const qtdWip=(volumeLinha!=null && !isNaN(indiceWip)) ? Math.round(volumeLinha*indiceWip*100)/100 : null;
+  container.querySelector(".fQtdWip").textContent=qtdWip!=null?qtdWip+" m³":"—";
+  container.querySelector(".fQtdToros").textContent=(volumeLinha!=null && !isNaN(indiceToros))
+    ? (Math.round(volumeLinha*indiceToros*100)/100)+" m³" : "—";
+  const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
+  container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
+}
+function recalcularTodasLinhas(it){
+  document.querySelectorAll("#linhasWipToro .linhaWipToro").forEach(c=>recalcularLinha(it,c));
+}
+/* lê o estado atual de todas as linhas da ficha, tal como ficaram depois
+   de editadas à mão — formato pronto a enviar a /planeamento-entradas/
+   linhas (ver tools.planeamento_entradas.guardar_linhas_entrada). */
+function coletarLinhas(){
+  return Array.from(document.querySelectorAll("#linhasWipToro .linhaWipToro")).map(c=>{
+    const toroCmpSel=c.querySelector(".fToroCmp").value;
+    let toroCmp=null;
+    if(toroCmpSel==="outro"){ toroCmp=c.querySelector(".fToroCmpOutro").value||null; }
+    else if(toroCmpSel){ toroCmp=toroCmpSel; }
+    const wipCmp=c.querySelector(".fWipCmp").value;
+    const wipEsp=c.querySelector(".fWipEsp").value;
+    const indiceWip=c.querySelector(".fIndiceWip").value;
+    const indiceToros=c.querySelector(".fIndiceToros").value;
+    const peso=c.dataset.peso;
+    return {
+      artigo: c.querySelector(".fArtigo").value||null,
+      peso: peso!==""?parseFloat(peso):null,
+      wip_cmp: wipCmp?parseFloat(wipCmp):null,
+      wip_esp: wipEsp?parseFloat(wipEsp):null,
+      indice_wip: indiceWip?parseFloat(indiceWip):null,
+      toro_cmp: toroCmp,
+      toro_tipo: c.querySelector(".fToroTipo").value||null,
+      indice_toros: indiceToros?parseFloat(indiceToros):null,
+    };
+  });
+}
 function closeSheet(){ $("#veil").classList.remove("on"); $("#sheet").classList.remove("on"); }
 /* QTD Toros/QTD Wip nunca se guardam — recalculam-se aqui ao vivo, à
    medida que o índice muda no formulário (pedido explícito do Rui,
@@ -1331,6 +1714,7 @@ function openSheet(id){
     <div class="frow"><label class="destaque">Em contínuo</label>
       <input id="fEmContinuo" type="checkbox" style="width:auto;flex:0 0 auto;transform:scale(1.3)" ${it.emContinuo?"checked":""}></div>`}
 
+    ${it.buffer ? `
     <label class="grupoLbl">WIP</label>
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><select id="fWipCmp">${wipCmpOptionsHtml(it.wipCmp)}</select></div>
@@ -1339,9 +1723,8 @@ function openSheet(id){
       <div class="miniField"><label>Fiadas</label><b id="fFiadas" class="mono" style="align-self:center">—</b></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="text" inputmode="decimal" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
-      <div class="miniField"><label>Nº lotes</label>${it.buffer
-        ? `<input id="fNLotes" type="text" inputmode="numeric" style="width:60px" value="${it.nLotes??""}">`
-        : `<b id="fNLotes" class="mono" style="align-self:center">—</b>`}</div>
+      <div class="miniField"><label>Nº lotes</label>
+        <input id="fNLotes" type="text" inputmode="numeric" style="width:60px" value="${it.nLotes??""}"></div>
     </div>
 
     <label class="grupoLbl">Toro</label>
@@ -1356,7 +1739,16 @@ function openSheet(id){
       </select></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceToros" type="text" inputmode="decimal" value="${it.indiceToros}"></div>
       <div class="miniField"><label>QTD Toros</label><b id="fQtdToros" class="mono" style="align-self:center">—</b></div>
-    </div>
+    </div>` : `
+    <label class="grupoLbl" style="margin-top:0">Linhas de WIP+Toro</label>
+    <div class="owner" style="font-size:12.5px;color:var(--dim);margin-bottom:6px">
+      Uma linha por artigo/comprimento identificado no PDF da OF — "Calcular automaticamente" lê o PDF e
+      substitui estas linhas pelo resultado; também podes editar ou adicionar à mão.</div>
+    <div id="linhasWipToro">${(it.linhas&&it.linhas.length?it.linhas:[{}]).map((l,i)=>linhaWipToroHtml(l,i)).join("")}</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button type="button" class="btn" id="btnAdicionarLinha">+ Adicionar linha</button>
+      <button type="button" class="btn" id="btnCalcularAuto">Calcular automaticamente</button>
+    </div>`}
     ${datalistHtml("histToroCmp",historico.toro_cmp)}
 
     <div class="kv" style="margin-top:16px"><span>Nome</span><b>${it.titulo}</b></div>
@@ -1407,12 +1799,40 @@ function openSheet(id){
       }
     };
   }
-  $("#fIndiceWip").oninput=()=>recalcularQtd(it);
-  $("#fIndiceToros").oninput=()=>recalcularQtd(it);
-  $("#fWipCmp").onchange=()=>recalcularQtd(it);
-  $("#fWipEsp").onchange=()=>recalcularQtd(it);
-  if(it.buffer) $("#fNLotes").oninput=()=>recalcularQtd(it);
-  recalcularQtd(it);
+  if(it.buffer){
+    $("#fIndiceWip").oninput=()=>recalcularQtd(it);
+    $("#fIndiceToros").oninput=()=>recalcularQtd(it);
+    $("#fWipCmp").onchange=()=>recalcularQtd(it);
+    $("#fWipEsp").onchange=()=>recalcularQtd(it);
+    $("#fNLotes").oninput=()=>recalcularQtd(it);
+    recalcularQtd(it);
+  }else{
+    document.querySelectorAll("#linhasWipToro .linhaWipToro").forEach(c=>bindLinhaHandlers(c,it));
+    $("#btnAdicionarLinha").onclick=()=>{
+      const container=document.createElement("div");
+      const idx=document.querySelectorAll("#linhasWipToro .linhaWipToro").length;
+      container.innerHTML=linhaWipToroHtml({},idx);
+      const novaLinha=container.firstElementChild;
+      $("#linhasWipToro").appendChild(novaLinha);
+      bindLinhaHandlers(novaLinha,it);
+      recalcularTodasLinhas(it);
+    };
+    $("#btnCalcularAuto").onclick=async()=>{
+      $("#fErro").textContent="";
+      const btn=$("#btnCalcularAuto");
+      btn.disabled=true; btn.textContent="A calcular…";
+      try{
+        const r=await fetch("/planeamento-entradas/linhas/calcular",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({basecamp_card_id:it.id})});
+        const d=await r.json();
+        if(d.erro){ $("#fErro").textContent=d.erro; return; }
+        log("local",`"${it.titulo}": comprimentos calculados automaticamente (${d.linhas.length} linha(s), de "${d.ficheiro}")`);
+        await carregar();
+        openSheet(it.id);
+      }catch(e){ $("#fErro").textContent="Falhou a calcular: "+e; }
+      finally{ btn.disabled=false; btn.textContent="Calcular automaticamente"; }
+    };
+  }
   if(it.buffer){
     $("#btnApagarBuffer").onclick=async()=>{
       if(!confirm(`Apagar o card "${it.titulo}"? Não pode ser desfeito.`)) return;
@@ -1455,23 +1875,22 @@ function openSheet(id){
   }
   $("#guardar").onclick=async()=>{
     $("#fErro").textContent="";
-    const wipCmp=$("#fWipCmp").value?parseFloat($("#fWipCmp").value):null;
-    const wipLar=WIP_LAR_FIXA;
-    const wipEsp=$("#fWipEsp").value?parseFloat($("#fWipEsp").value):null;
-    const indiceWip=$("#fIndiceWip").value?parseFloat($("#fIndiceWip").value):null;
-    const indiceToros=$("#fIndiceToros").value?parseFloat($("#fIndiceToros").value):null;
-    // toroCmp é texto (não número — há opções como "255 ⌀16", ver
-    // TORO_PRESETS): nunca usar parseFloat aqui, perderia o "⌀16".
-    let toroCmp=null;
-    if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value||null; }
-    else if($("#fToroCmp").value){ toroCmp=$("#fToroCmp").value; }
-    const toroTipo=$("#fToroTipo").value||null;
     const charriots=Array.from(document.querySelectorAll(".fCharriot:checked")).map(x=>x.value);
     const larguraDias=Math.max(1,Math.min(LARGURA_DIAS_MAX,parseInt($("#fLarguraDias").value)||1));
     // card "Buffer" (pedido explícito do Rui, 2026-10-04): grava tudo de
     // uma vez (não é uma OF real, não há nada para ler de outro lado) —
     // ver tools/planeamento_entradas.guardar_buffer.
     if(it.buffer){
+      const wipCmp=$("#fWipCmp").value?parseFloat($("#fWipCmp").value):null;
+      const wipEsp=$("#fWipEsp").value?parseFloat($("#fWipEsp").value):null;
+      const indiceWip=$("#fIndiceWip").value?parseFloat($("#fIndiceWip").value):null;
+      const indiceToros=$("#fIndiceToros").value?parseFloat($("#fIndiceToros").value):null;
+      // toroCmp é texto (não número — há opções como "255 ⌀16", ver
+      // TORO_PRESETS): nunca usar parseFloat aqui, perderia o "⌀16".
+      let toroCmp=null;
+      if($("#fToroCmp").value==="outro"){ toroCmp=$("#fToroCmpOutro").value||null; }
+      else if($("#fToroCmp").value){ toroCmp=$("#fToroCmp").value; }
+      const toroTipo=$("#fToroTipo").value||null;
       const nLotes=$("#fNLotes").value?parseFloat($("#fNLotes").value):null;
       try{
         if(!(await guardarDiaEntradaSeMudou(it))) return;
@@ -1487,6 +1906,7 @@ function openSheet(id){
       return;
     }
     const emContinuo=$("#fEmContinuo").checked;
+    const linhas=coletarLinhas();
     try{
       if(!(await guardarDiaEntradaSeMudou(it))) return;
       if(JSON.stringify(charriots)!==JSON.stringify(it.charriots||[])){
@@ -1501,24 +1921,16 @@ function openSheet(id){
         const d4=await r4.json();
         if(d4.erro){ $("#fErro").textContent=d4.erro; return; }
       }
-      const r1=await fetch("/planeamento-entradas/wip",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:it.id,cmp:wipCmp,lar:wipLar,esp:wipEsp,indice_wip:indiceWip})});
+      const r1=await fetch("/planeamento-entradas/linhas",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({basecamp_card_id:it.id,linhas})});
       const d1=await r1.json();
       if(d1.erro){ $("#fErro").textContent=d1.erro; return; }
-      const r2=await fetch("/planeamento-entradas/toro",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({basecamp_card_id:it.id,cmp:toroCmp,tipo:toroTipo,indice_toros:indiceToros})});
-      const d2=await r2.json();
-      if(d2.erro){ $("#fErro").textContent=d2.erro; return; }
       if(emContinuo!==it.emContinuo){
         const r3=await fetch("/planeamento-entradas/em-continuo",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({basecamp_card_id:it.id,em_continuo:emContinuo})});
         const d3=await r3.json();
         if(d3.erro){ $("#fErro").textContent=d3.erro; return; }
       }
-      it.charriots=charriots; it.larguraDias=larguraDias;
-      it.wipCmp=wipCmp; it.wipLar=wipLar; it.wipEsp=wipEsp; it.toroCmp=toroCmp; it.toroTipo=toroTipo;
-      it.indiceWip=indiceWip??INDICE_WIP_DEFAULT; it.indiceToros=indiceToros??INDICE_TOROS_DEFAULT;
-      it.emContinuo=emContinuo;
       log("local",`dados de "${it.titulo}" guardados`);
       closeSheet();
       await carregar(); // o dia de entrada pode ter mudado (ver "em contínuo")
@@ -1549,6 +1961,11 @@ async function carregar(){
       indiceWip:e.indice_wip, qtdWip:e.qtd_wip_m3, nLotes:e.n_lotes,
       toroCmp:e.toro_cmp, toroTipo:e.toro_tipo,
       indiceToros:e.indice_toros, qtdToros:e.qtd_toros_m3,
+      linhas:(e.linhas||[]).map(l=>({
+        id:l.id, artigo:l.artigo, peso:l.peso,
+        wipCmp:l.wip_cmp, wipEsp:l.wip_esp, indiceWip:l.indice_wip, qtdWip:l.qtd_wip_m3, nLotes:l.n_lotes,
+        toroCmp:l.toro_cmp, toroTipo:l.toro_tipo, indiceToros:l.indice_toros, qtdToros:l.qtd_toros_m3,
+      })),
       buffer:!!e.buffer,
     })).filter(e=>e.gs>=0);
     historico=d.historico||historico;

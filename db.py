@@ -836,6 +836,38 @@ FROM (
     FROM compras_toros_cards WHERE ordem IS NULL
 ) sub
 WHERE c.id = sub.id AND c.ordem IS NULL;
+
+-- "Algoritmo de Comprimentos" (pedido explícito do Rui, 2026-10-23,
+-- página "Planeamento de Entradas" da Ecos Largos): uma OF pode ter mais
+-- de um artigo/comprimento, por isso passa a ter várias linhas de
+-- WIP+Toro, uma por artigo identificado no PDF da OF (ver
+-- tools/planeamento_entradas.calcular_linhas_automaticamente) — substitui
+-- os campos únicos wip_cmp/wip_esp/toro_cmp/toro_tipo/indice_wip/
+-- indice_toros de entradas_charriot_ecos_largos (que ficam só para os
+-- cards "Buffer", nunca para uma OF real — ver
+-- buffers_entrada_ecos_largos, uma tabela à parte). `peso` é o valor lido
+-- do campo "QTD" do PDF para este artigo — nunca um volume em si, só um
+-- peso relativo para repartir o volume real da OF (vindo da produção)
+-- entre as várias linhas (ver tools/planeamento_entradas._repartir_
+-- volume_por_linhas). Uma linha sem nenhuma informação lida do PDF
+-- (criada/editada à mão) tem `artigo`/`peso` a NULL.
+CREATE TABLE IF NOT EXISTS planeamento_entradas_linhas (
+    id SERIAL PRIMARY KEY,
+    basecamp_card_id BIGINT NOT NULL,
+    ordem INTEGER NOT NULL DEFAULT 0,
+    artigo TEXT,
+    peso NUMERIC,
+    wip_cmp NUMERIC,
+    wip_esp NUMERIC,
+    indice_wip NUMERIC,
+    toro_cmp TEXT,
+    toro_tipo TEXT,
+    indice_toros NUMERIC,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS planeamento_entradas_linhas_card_idx
+    ON planeamento_entradas_linhas (basecamp_card_id);
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1713,43 +1745,55 @@ def definir_feriado(dia: str, feriado: bool, motivo: str = None) -> dict:
         conn.commit()
     return {"guardado": True, "dia": dia, "feriado": feriado}
 
-def guardar_wip_entrada(basecamp_card_id: int, cmp: float, lar: float, esp: float, indice_wip: float = None) -> dict:
-    """Guarda os campos WIP (comprimento/largura/espessura) e o índice usado
-    para calcular QTD Wip (m³) desta OF na página "Planeamento de
-    Entradas" — indice_wip=None mantém o já guardado (ou o valor por
-    omissão, 1.8, se nunca tiver sido definido; ver
-    tools.planeamento_entradas.INDICE_WIP_DEFAULT)."""
+def linhas_entrada_ecos_largos() -> list[dict]:
+    """Todas as linhas de WIP+Toro de todas as OFs da página "Planeamento
+    de Entradas" (ver planeamento_entradas_linhas) — uma OF pode ter mais
+    de uma (um artigo/comprimento cada, "Algoritmo de Comprimentos",
+    pedido explícito do Rui, 2026-10-23). Pedidas todas de uma vez (como
+    entradas_charriot_ecos_largos) e agrupadas por OF em
+    tools.planeamento_entradas.estado_planeamento_entradas, para nunca
+    fazer uma pergunta à base de dados por OF."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, wip_cmp, wip_lar, wip_esp, indice_wip)
-                   VALUES (%s, %s, %s, %s, %s)
-                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
-                       wip_cmp = EXCLUDED.wip_cmp, wip_lar = EXCLUDED.wip_lar, wip_esp = EXCLUDED.wip_esp,
-                       indice_wip = COALESCE(EXCLUDED.indice_wip, entradas_charriot_ecos_largos.indice_wip),
-                       atualizado_em = now()""",
-                (basecamp_card_id, cmp, lar, esp, indice_wip)
+                """SELECT id, basecamp_card_id, ordem, artigo, peso, wip_cmp, wip_esp, indice_wip,
+                          toro_cmp, toro_tipo, indice_toros
+                   FROM planeamento_entradas_linhas
+                   ORDER BY basecamp_card_id, ordem, id"""
             )
-        conn.commit()
-    return {"guardado": True, "basecamp_card_id": basecamp_card_id}
+            return [{
+                "id": l["id"],
+                "basecamp_card_id": l["basecamp_card_id"],
+                "ordem": l["ordem"],
+                "artigo": l["artigo"],
+                "peso": float(l["peso"]) if l["peso"] is not None else None,
+                "wip_cmp": float(l["wip_cmp"]) if l["wip_cmp"] is not None else None,
+                "wip_esp": float(l["wip_esp"]) if l["wip_esp"] is not None else None,
+                "indice_wip": float(l["indice_wip"]) if l["indice_wip"] is not None else None,
+                "toro_cmp": l["toro_cmp"],
+                "toro_tipo": l["toro_tipo"],
+                "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
+            } for l in cur.fetchall()]
 
-def guardar_toro_entrada(basecamp_card_id: int, cmp: str, tipo: str, indice_toros: float = None) -> dict:
-    """Guarda os campos Toro (comprimento/tipo) e o índice usado para
-    calcular QTD Toros (m³) desta OF na página "Planeamento de Entradas"
-    — indice_toros=None mantém o já guardado (ou o valor por omissão,
-    1.58, se nunca tiver sido definido; ver
-    tools.planeamento_entradas.INDICE_TOROS_DEFAULT)."""
+def substituir_linhas_entrada_ecos_largos(basecamp_card_id: int, linhas: list[dict]):
+    """Substitui TODAS as linhas de WIP+Toro de uma OF pelas dadas — usado
+    tanto pelo cálculo automático (calcular_linhas_automaticamente, que
+    substitui sempre pelo resultado, pedido explícito do Rui, 2026-10-23)
+    como pela ficha ao gravar à mão. Apaga as antigas e insere as novas
+    na mesma transação, nunca deixando a OF sem nenhuma a meio do
+    caminho."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """INSERT INTO entradas_charriot_ecos_largos (basecamp_card_id, toro_cmp, toro_tipo, indice_toros)
-                   VALUES (%s, %s, %s, %s)
-                   ON CONFLICT (basecamp_card_id) DO UPDATE SET
-                       toro_cmp = EXCLUDED.toro_cmp, toro_tipo = EXCLUDED.toro_tipo,
-                       indice_toros = COALESCE(EXCLUDED.indice_toros, entradas_charriot_ecos_largos.indice_toros),
-                       atualizado_em = now()""",
-                (basecamp_card_id, cmp, tipo, indice_toros)
-            )
+            cur.execute("DELETE FROM planeamento_entradas_linhas WHERE basecamp_card_id = %s", (basecamp_card_id,))
+            for i, l in enumerate(linhas):
+                cur.execute(
+                    """INSERT INTO planeamento_entradas_linhas
+                       (basecamp_card_id, ordem, artigo, peso, wip_cmp, wip_esp, indice_wip,
+                        toro_cmp, toro_tipo, indice_toros)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (basecamp_card_id, i, l.get("artigo"), l.get("peso"), l.get("wip_cmp"), l.get("wip_esp"),
+                     l.get("indice_wip"), l.get("toro_cmp"), l.get("toro_tipo"), l.get("indice_toros"))
+                )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}
 

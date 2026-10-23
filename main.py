@@ -840,28 +840,33 @@ def planeamento_entradas_atribuir(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/planeamento-entradas/wip")
-def planeamento_entradas_wip(corpo: dict = Body(...)):
-    """Guarda os campos WIP (comprimento/largura/espessura) e o índice de
-    WIP de uma OF — ver tools/planeamento_entradas.guardar_wip."""
+@app.post("/planeamento-entradas/linhas")
+def planeamento_entradas_linhas(corpo: dict = Body(...)):
+    """Grava (substitui) todas as linhas de WIP+Toro de uma OF real — ver
+    tools/planeamento_entradas.guardar_linhas_entrada ("Algoritmo de
+    Comprimentos", pedido explícito do Rui, 2026-10-23)."""
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    resultado = planeamento_entradas.guardar_wip(
-        basecamp_card_id, corpo.get("cmp"), corpo.get("lar"), corpo.get("esp"), corpo.get("indice_wip"))
+    resultado = planeamento_entradas.guardar_linhas_entrada(basecamp_card_id, corpo.get("linhas") or [])
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.post("/planeamento-entradas/toro")
-def planeamento_entradas_toro(corpo: dict = Body(...)):
-    """Guarda os campos Toro (comprimento/tipo) e o índice de toros de uma
-    OF — ver tools/planeamento_entradas.guardar_toro."""
+@app.post("/planeamento-entradas/linhas/calcular")
+def planeamento_entradas_linhas_calcular(corpo: dict = Body(...)):
+    """Dispara à mão o "Algoritmo de Comprimentos" para uma OF — lê o PDF
+    da OF, identifica artigos/comprimentos e substitui as linhas de
+    WIP+Toro pelo resultado — ver
+    tools/planeamento_entradas.calcular_linhas_automaticamente. Corre
+    automaticamente ao atribuir o primeiro charriot (ver
+    tools/planeamento_entradas.atribuir_charriots); este botão serve para
+    tentar de novo (ex: o PDF só foi anexado depois, ou a 1ª tentativa
+    falhou)."""
     basecamp_card_id = corpo.get("basecamp_card_id")
     if not basecamp_card_id:
         return JSONResponse({"erro": "falta indicar basecamp_card_id"}, status_code=400)
-    resultado = planeamento_entradas.guardar_toro(
-        basecamp_card_id, corpo.get("cmp"), corpo.get("tipo"), corpo.get("indice_toros"))
+    resultado = planeamento_entradas.calcular_linhas_automaticamente(basecamp_card_id)
     if "erro" in resultado:
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
