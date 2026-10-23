@@ -1233,30 +1233,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-ecos-largos-ai-api-tools")
-def _debug_ecos_largos_ai_api_tools():
-    import httpx as _httpx
-    base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
-    tentativas = [
-        ("get_daily_production hoje", {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}),
-        ("list_alerts ativos", {"name": "list_alerts", "arguments": {}}),
-        ("get_kpi_daily_snapshot hoje", {"name": "get_kpi_daily_snapshot", "arguments": {"snapshot_date": "2026-10-23"}}),
-        ("register_missing_data_request teste", {"name": "register_missing_data_request",
-         "arguments": {"data_type": "teste_alma", "description": "chamada de teste da Alma, ignorar"}}),
-    ]
-    resultados = []
-    for nome, corpo in tentativas:
-        try:
-            r = _httpx.post(base, params={"action": "call"}, json=corpo, timeout=15)
-            try:
-                conteudo = r.json()
-            except ValueError:
-                conteudo = r.text[:500]
-            resultados.append({"tentativa": nome, "status": r.status_code, "resposta": conteudo})
-        except Exception as e:
-            resultados.append({"tentativa": nome, "erro": str(e)})
-    return resultados
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
