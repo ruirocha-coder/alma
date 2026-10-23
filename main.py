@@ -1233,6 +1233,27 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
+@app.get("/_debug-testar-anthropic-key")
+def _debug_testar_anthropic_key():
+    import anthropic as _anthropic
+    chave = os.environ.get("ANTHROPIC_API_KEY") or ""
+    info = {
+        "comprimento": len(chave),
+        "tem_espacos_bordas": chave != chave.strip(),
+        "prefixo": chave[:12],
+        "sufixo": chave[-4:] if len(chave) >= 4 else None,
+    }
+    try:
+        resposta = _anthropic.Anthropic().messages.create(
+            model="claude-haiku-5-5", max_tokens=5, messages=[{"role": "user", "content": "oi"}]
+        )
+        info["chamada_ok"] = True
+        info["resposta"] = resposta.content[0].text if resposta.content else None
+    except Exception as e:
+        info["chamada_ok"] = False
+        info["erro"] = str(e)
+    return info
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
