@@ -1238,8 +1238,10 @@ def _debug_ecos_largos_ai_api_auth():
     import httpx as _httpx
     base = "http://ecoslargos.duckdns.org:9000/server/ai_api.php"
     token = "C1RzXi3B9g7LtGoYEHsm"
-    corpo = {"name": "get_daily_production", "arguments": {"production_date": "2026-10-23"}}
+    corpo = {"name": "register_missing_data_request",
+             "arguments": {"data_type": "teste_alma", "description": "chamada de teste da Alma, ignorar"}}
     tentativas = [
+        ("sem auth (controlo)", {}, None),
         ("Authorization Bearer", {"Authorization": f"Bearer {token}"}, None),
         ("X-API-Key header", {"X-API-Key": token}, None),
         ("api_key no corpo", {}, {"api_key": token}),
