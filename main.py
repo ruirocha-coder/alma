@@ -1233,53 +1233,51 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-investigar-talaoes-30-acima")
-def _debug_investigar_talaoes_30_acima():
+@app.post("/_debug-corrigir-obs-talaoes-30-acima")
+def _debug_corrigir_obs_talaoes_30_acima():
+    """Pedido pontual do Rui, 2026-10-23: talões 11383, 11384, 11385,
+    11386, 11388 (Mariano Ramos, MT 2.64 normal, 23/10) entraram no Park
+    In sem a OBS "30 ACIMA" por esquecimento — corrige a OBS (mesmo
+    formato já usado para os talões antigos corrigidos em 2026-10-20) e
+    deixa o motor de abates reprocessá-los do zero com a OBS certa."""
     import traceback
     try:
         import db as _db
+        from tools import compras_toros as _ct
         talaoes = ["11383", "11384", "11385", "11386", "11388"]
-        resultado = []
+        corrigidos = []
         with _db.get_conn() as conn:
             with conn.cursor() as cur:
                 for talao in talaoes:
                     cur.execute(
-                        """SELECT id, talao, fornecedor, data, tipo, comprimento, espessura,
-                                  peso_liquido_kg, obs
-                           FROM parkin_entradas WHERE talao = %s ORDER BY id DESC LIMIT 1""",
-                        (talao,)
+                        "SELECT id FROM parkin_entradas WHERE talao = %s ORDER BY id DESC LIMIT 1", (talao,)
                     )
                     entrada = cur.fetchone()
                     if not entrada:
-                        resultado.append({"talao": talao, "erro": "não encontrado"})
+                        corrigidos.append({"talao": talao, "erro": "não encontrado"})
                         continue
-                    entrada = dict(entrada)
-                    entrada["data"] = entrada["data"].isoformat()
-                    entrada["peso_liquido_kg"] = float(entrada["peso_liquido_kg"])
-                    entrada["comprimento"] = float(entrada["comprimento"])
+                    cur.execute("UPDATE parkin_entradas SET obs = %s WHERE id = %s", ("30 ACIMA", entrada["id"]))
+                    corrigidos.append({"talao": talao, "entrada_id": entrada["id"], "obs": "30 ACIMA"})
+            conn.commit()
+        _ct.processar_abates_pendentes()
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                for c in corrigidos:
+                    if "entrada_id" not in c:
+                        continue
                     cur.execute(
-                        """SELECT a.id AS abate_id, a.quantidade_kg, l.id AS linha_id, l.card_id,
-                                  c.fornecedor AS card_fornecedor, c.notas AS card_notas
+                        """SELECT l.id AS linha_id, l.card_id, cd.fornecedor AS card_fornecedor, cd.notas AS card_notas
                            FROM compras_toros_abates a
                            JOIN compras_toros_linhas l ON l.id = a.linha_id
-                           JOIN compras_toros_cards c ON c.id = l.card_id
+                           JOIN compras_toros_cards cd ON cd.id = l.card_id
                            WHERE a.entrada_id = %s""",
-                        (entrada["id"],)
+                        (c["entrada_id"],)
                     )
-                    abates = [dict(r) for r in cur.fetchall()]
-                    for a in abates:
-                        a["quantidade_kg"] = float(a["quantidade_kg"])
-                    cur.execute(
-                        "SELECT id FROM compras_toros_excessos WHERE entrada_id = %s", (entrada["id"],)
-                    )
-                    excesso = cur.fetchone()
-                    entrada["abates"] = abates
-                    entrada["excesso_id"] = excesso["id"] if excesso else None
-                    resultado.append(entrada)
-                cur.execute("SELECT talao, obs FROM parkin_entradas WHERE talao = ANY(%s)",
-                           (["11364", "11365", "11324", "11332", "11349", "11344", "11342", "11341"],))
-                historico = [dict(r) for r in cur.fetchall()]
-        return {"novos": resultado, "historico_ja_corrigido": historico}
+                    c["abates"] = [dict(r) for r in cur.fetchall()]
+                    cur.execute("SELECT id FROM compras_toros_excessos WHERE entrada_id = %s", (c["entrada_id"],))
+                    exc = cur.fetchone()
+                    c["excesso_id"] = exc["id"] if exc else None
+        return corrigidos
     except Exception as e:
         return JSONResponse({"erro": str(e), "tipo": type(e).__name__, "traceback": traceback.format_exc()},
                            status_code=500)
