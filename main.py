@@ -1238,18 +1238,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-texto-pdf-of")
-def _debug_texto_pdf_of(basecamp_card_id: int):
-    from tools import planeamento_serracao as ps, planeamento_entradas as pe
-    card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
-    if not card:
-        return {"erro": "card não encontrado"}
-    texto, nome = pe._ler_pdf_of(card)
-    if texto is None:
-        return {"erro": nome}
-    artigos = pe._extrair_artigos_of(texto)
-    return {"ficheiro": nome, "artigos_extraidos": artigos}
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
