@@ -502,7 +502,7 @@ def dados_quadro() -> dict:
         "id": e["id"], "talao": e["talao"], "fornecedor": e["fornecedor"],
         "artigo": _rotulo_artigo(e["tipo"], e["comprimento"], e["espessura"]),
         "quantidade_kg": float(e["quantidade_kg"]),
-        "criado_em": e["criado_em"].isoformat() if e["criado_em"] else None,
+        "data_talao": e["data_talao"].isoformat() if e["data_talao"] else None,
     } for e in db.excessos_compras_toros()]
 
     return {"colunas": colunas_resultado, "excessos": excessos}

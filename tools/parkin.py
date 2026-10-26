@@ -2224,7 +2224,7 @@ function renderComprasToros(){
     $("#boardExcessos").style.display = "";
     $("#listaExcessos").innerHTML = excessos.map(e => `
       <li><span class="nome">Talão ${e.talao} · ${e.fornecedor} · ${e.artigo}</span>
-        <span class="val">${t(e.quantidade_kg)} · ${dataPt(e.criado_em)}</span></li>`).join("");
+        <span class="val">${t(e.quantidade_kg)} · ${dataPt(e.data_talao)}</span></li>`).join("");
   } else {
     $("#boardExcessos").style.display = "none";
   }

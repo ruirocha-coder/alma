@@ -3553,13 +3553,24 @@ def registar_excesso_compras_toros(entrada_id: int, fornecedor: str, tipo: str, 
         conn.commit()
 
 def excessos_compras_toros() -> list[dict]:
+    """Excessos ainda por reconciliar, para mostrar no quadro — ver
+    tools/compras_toros.dados_quadro.
+
+    Bug real (Rui, 2026-10-26): mostrava `e.criado_em` (quando ESTE
+    REGISTO de excesso foi escrito na base de dados) como se fosse a data
+    do talão — errado sempre que o excesso já tinha sido desfeito e
+    recriado pelo menos uma vez (ver desfazer_excesso_compras_toros,
+    chamado por tools/compras_toros._reconciliar_excessos_pendentes a
+    cada tentativa falhada): `criado_em` fica sempre "agora" nesse
+    momento, nunca a data real do talão. Mostra agora `p.data` (a data
+    real do talão, vinda do Park In, que nunca muda)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT e.id, e.entrada_id, e.fornecedor, e.tipo, e.comprimento, e.espessura, e.quantidade_kg,
-                          e.criado_em, p.talao
+                          p.talao, p.data AS data_talao
                    FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id
-                   ORDER BY e.criado_em DESC"""
+                   ORDER BY p.data DESC"""
             )
             return cur.fetchall()
 
