@@ -1245,7 +1245,10 @@ def _debug_texto_pdf_of(basecamp_card_id: int):
     if not card:
         return {"erro": "card não encontrado"}
     texto, nome = pe._ler_pdf_of(card)
-    return {"ficheiro": nome, "texto": texto}
+    if texto is None:
+        return {"erro": nome}
+    artigos = pe._extrair_artigos_of(texto)
+    return {"ficheiro": nome, "artigos_extraidos": artigos}
 
 @app.get("/health/config")
 def health_config():
