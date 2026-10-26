@@ -176,6 +176,19 @@ def _limpar_bloco_codigo(texto: str) -> str:
             texto = texto[:-3]
     return texto.strip()
 
+_RE_TITULO_OF = re.compile(r"\bOF\b", re.IGNORECASE)
+
+def _eh_quadradilho(titulo: str) -> bool:
+    """Um "quadradilho" é uma OF sem número (título sem "OF", ex: "Girona
+    — 2600MT", "Serraenvas — Quadradilho MT") — já era a regra usada para
+    "em contínuo" por omissão (ver entradas_charriot_ecos_largos em
+    db.py). Confirmado ao vivo pelo Rui, 2026-10-26: estas OFs NUNCA têm
+    PDF anexado (não têm processo formal de encomenda com desenho
+    técnico) — o Algoritmo de Comprimentos nunca se aplica, e nem vale a
+    pena tentar (ler o Basecamp + chamar o modelo só para falhar sempre
+    da mesma forma)."""
+    return not _RE_TITULO_OF.search(titulo or "")
+
 def _extrair_artigos_of(texto_pdf: str) -> list:
     """Chama o modelo para identificar os artigos (comprimento + qtd) no
     texto do PDF da OF — ver _MISSAO_EXTRACAO_ARTIGOS_OF. Devolve sempre
@@ -227,6 +240,9 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
     if not card:
         return {"erro": "card desta OF não encontrado entre as OFs ativas"}
+    if _eh_quadradilho(card["titulo"]):
+        return {"erro": "esta OF é \"quadradilho\" (título sem número) — nunca tem PDF anexado, "
+                        "o Algoritmo de Comprimentos não se aplica aqui"}
 
     texto_pdf, nome_ou_erro = _ler_pdf_of(card)
     if texto_pdf is None:
