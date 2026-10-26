@@ -3445,10 +3445,22 @@ def _primeira_palavra_fornecedor(nome: str) -> str:
 
 def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: str, comprimento: float,
                                                        espessura: str) -> list[dict]:
-    """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antigo
-    primeiro (FIFO) — ver tools/compras_toros.processar_abates_pendentes.
-    `criado_em_data` serve para a regra "o card não pode ter sido criado
-    depois do talão" (ver tools/compras_toros._card_pode_abater_entrada).
+    """Linhas de cards ainda ABERTOS deste fornecedor+artigo, mais antiga
+    encomenda primeiro (FIFO, por `data_encomenda` — não por `criado_em`,
+    ver nota abaixo) — ver tools/compras_toros.processar_abates_pendentes.
+    `data_encomenda` serve para a regra "o card não pode abater um talão
+    mais antigo do que a própria encomenda" (ver
+    tools/compras_toros._card_pode_abater_entrada).
+
+    Bug real (Rui, 2026-10-26): esta regra comparava com `criado_em`
+    (quando a linha da base de dados foi mesmo criada, "agora") em vez de
+    `data_encomenda` (quando a encomenda foi de facto feita ao
+    fornecedor, podendo ser uma data anterior à criação do card no
+    sistema) — um card criado hoje com `data_encomenda` de sexta-feira
+    nunca apanhava um talão chegado na própria sexta, porque "hoje" é
+    sempre posterior a "sexta". `data_encomenda` é o campo correto para
+    esta regra: é a data que a pessoa escolhe de propósito ao criar o
+    card, exatamente para representar quando a encomenda foi feita.
 
     Bug real (Rui, 2026-10-15): o fornecedor do card é texto livre (ex:
     "Altri", escrito à mão ao criar o card) e o fornecedor do talão vem
@@ -3480,13 +3492,13 @@ def linhas_abertas_compras_toros_por_fornecedor_artigo(fornecedor: str, tipo: st
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT l.id, l.card_id, l.encomendado_kg, l.entregue_kg, c.fornecedor, c.notas,
-                          c.criado_em::date AS criado_em_data
+                          c.data_encomenda
                    FROM compras_toros_linhas l
                    JOIN compras_toros_cards c ON c.id = l.card_id
                    JOIN compras_toros_colunas col ON col.id = c.coluna_id
                    WHERE c.estado = 'aberto' AND col.estado = 'aberta'
                      AND l.tipo = %s AND l.comprimento = %s AND l.espessura = %s
-                   ORDER BY c.criado_em ASC, l.id ASC""",
+                   ORDER BY c.data_encomenda ASC, c.criado_em ASC, l.id ASC""",
                 (tipo, comprimento, espessura)
             )
             return [r for r in cur.fetchall() if _primeira_palavra_fornecedor(r["fornecedor"]) == alvo]

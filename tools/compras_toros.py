@@ -35,15 +35,22 @@ def _numero_acima(texto):
     m = _RE_NUMERO_ACIMA.search(texto)
     return int(m.group(1)) if m else None
 
-def _card_pode_abater_entrada(linha_criado_em_data, data_entrada) -> bool:
-    """Um card só pode abater um talão da mesma data da sua criação ou
-    posterior — nunca um talão mais antigo que o próprio card (pedido
-    explícito do Rui, 2026-10-23: um card nunca pode ser retroativo sobre
-    um talão que já existia antes de ele ser criado). Um talão chegado
-    antes de o card certo existir fica em excesso (ver
+def _card_pode_abater_entrada(data_encomenda, data_entrada) -> bool:
+    """Um card só pode abater um talão da mesma data da sua encomenda ou
+    posterior — nunca um talão mais antigo do que a própria encomenda
+    (pedido explícito do Rui, 2026-10-23: um card nunca pode ser
+    retroativo sobre um talão que já existia antes de a encomenda ser
+    feita). Compara com `data_encomenda` (a data real da encomenda ao
+    fornecedor, escolhida por quem cria o card), nunca com `criado_em` (a
+    data em que a linha foi mesmo escrita na base de dados, "agora") —
+    bug real (Rui, 2026-10-26): um card criado hoje mas com
+    `data_encomenda` de sexta-feira tem de apanhar um talão chegado na
+    própria sexta, coisa que nunca acontecia comparando com `criado_em`
+    (sempre "hoje", portanto sempre posterior a "sexta"). Um talão
+    chegado antes da encomenda ser feita fica em excesso (ver
     db.compras_toros_excessos) até alguém o mover à mão para o card
     correto — nunca é apanhado sozinho por este motor."""
-    return linha_criado_em_data <= data_entrada
+    return data_encomenda <= data_entrada
 
 
 def _obs_bate_com_notas_card(notas_card, obs_entrada) -> bool:
@@ -369,7 +376,7 @@ def _reconciliar_excessos_pendentes():
         candidatas = db.linhas_abertas_compras_toros_por_fornecedor_artigo(
             exc["fornecedor"], exc["tipo"], float(exc["comprimento"]), exc["espessura"])
         for linha in candidatas:
-            if not _card_pode_abater_entrada(linha["criado_em_data"], exc["data_entrada"]):
+            if not _card_pode_abater_entrada(linha["data_encomenda"], exc["data_entrada"]):
                 continue
             if not _obs_bate_com_notas_card(linha["notas"], exc["obs"]):
                 continue
@@ -401,7 +408,7 @@ def processar_abates_pendentes():
             for linha in candidatas:
                 if restante <= 1e-6:
                     break
-                if not _card_pode_abater_entrada(linha["criado_em_data"], entrada["data"]):
+                if not _card_pode_abater_entrada(linha["data_encomenda"], entrada["data"]):
                     continue
                 if not _obs_bate_com_notas_card(linha["notas"], entrada["obs"]):
                     continue
