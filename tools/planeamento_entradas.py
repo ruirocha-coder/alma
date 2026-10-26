@@ -189,11 +189,38 @@ def _eh_quadradilho(titulo: str) -> bool:
     da mesma forma)."""
     return not _RE_TITULO_OF.search(titulo or "")
 
+_RE_DIMENSAO_ARTIGO = re.compile(r"(\d+)(?:/\d+)?\s*[xX]\s*\d+\s*[xX]\s*\d+")
+
+def _comprimento_do_nome_artigo(nome: str):
+    """Extrai o comprimento diretamente do nome/descrição do artigo, pelo
+    padrão "<comprimento>x<largura>x<espessura>" (ex: "Barrote 800x90x65"
+    -> 800; "1200/1000X82X16" -> 1200, o primeiro de dois comprimentos
+    alternativos). Bug real confirmado ao vivo (OF.629 Lampre,
+    2026-10-26): o modelo, ao extrair o comprimento do texto do PDF,
+    confundiu-se com o valor de volume (M3) de cada linha, bem mais perto
+    do número na mesma linha do que a própria descrição do artigo (ex:
+    linha "Barrote 2980x80x50 ... 8,67" extraída como comprimento_mm
+    8670, quando o comprimento real, 2980, já estava sem ambiguidade
+    nenhuma no próprio nome do artigo). Como este padrão aparece sempre
+    que o nome do artigo já traz as 3 dimensões (confirmado em várias
+    OFs reais), este valor substitui sempre o do modelo quando bate
+    certo — nunca o contrário, por mais nenhuma razão para confiar mais
+    num texto solto do PDF do que no nome do próprio artigo já
+    identificado. None se o nome não tiver este padrão (PDF com formato
+    diferente — aí usa-se o valor do modelo, sem alternativa melhor)."""
+    if not nome:
+        return None
+    m = _RE_DIMENSAO_ARTIGO.search(nome)
+    return float(m.group(1)) if m else None
+
 def _extrair_artigos_of(texto_pdf: str) -> list:
     """Chama o modelo para identificar os artigos (comprimento + qtd) no
     texto do PDF da OF — ver _MISSAO_EXTRACAO_ARTIGOS_OF. Devolve sempre
     uma lista (vazia se a extração falhar ou não devolver JSON válido),
-    nunca inventa dados."""
+    nunca inventa dados. O comprimento do modelo é sempre substituído
+    pelo lido diretamente do nome do artigo quando possível (ver
+    _comprimento_do_nome_artigo) — mais fiável do que confiar no número
+    que o modelo escolher no texto do PDF."""
     resposta = _client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=2048,
         system=_MISSAO_EXTRACAO_ARTIGOS_OF,
@@ -209,19 +236,22 @@ def _extrair_artigos_of(texto_pdf: str) -> list:
         return []
     validos = []
     for a in artigos:
-        if not isinstance(a, dict) or not a.get("comprimento_mm"):
+        if not isinstance(a, dict):
             continue
-        try:
-            comprimento = float(a["comprimento_mm"])
-        except (TypeError, ValueError):
-            continue
-        if comprimento <= 0:
+        nome_artigo = a.get("artigo") or None
+        comprimento = _comprimento_do_nome_artigo(nome_artigo)
+        if comprimento is None:
+            try:
+                comprimento = float(a["comprimento_mm"]) if a.get("comprimento_mm") else None
+            except (TypeError, ValueError):
+                comprimento = None
+        if not comprimento or comprimento <= 0:
             continue
         try:
             qtd = float(a["qtd"]) if a.get("qtd") is not None else None
         except (TypeError, ValueError):
             qtd = None
-        validos.append({"artigo": a.get("artigo") or None, "comprimento_mm": comprimento, "qtd": qtd})
+        validos.append({"artigo": nome_artigo, "comprimento_mm": comprimento, "qtd": qtd})
     return validos
 
 def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
