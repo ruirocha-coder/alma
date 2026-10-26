@@ -1238,21 +1238,6 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
-@app.get("/_debug-anexos-card-of")
-def _debug_anexos_card_of(basecamp_card_id: int):
-    from tools import planeamento_serracao as ps, basecamp as bc
-    card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
-    if not card:
-        return {"erro": "card não encontrado"}
-    recording = bc.obter_recording(card["url_api"])
-    anexos = (recording.get("description_attachments") or []) + (recording.get("content_attachments") or [])
-    comentarios = bc.ler_comentarios(card["comments_url"]) if card.get("comments_url") else []
-    return {
-        "titulo": card["titulo"],
-        "anexos_descricao": [a.get("filename") for a in anexos],
-        "comentarios_com_anexos": [{"anexos": c["anexos"]} for c in comentarios if c.get("anexos")],
-    }
-
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
