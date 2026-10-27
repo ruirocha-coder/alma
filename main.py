@@ -1305,6 +1305,17 @@ def _debug_auditoria_abates_toros():
             })
     return {"total_entradas_verificadas": len(linhas), "divergentes": divergentes}
 
+@app.get("/_debug-linhas-card-toros")
+def _debug_linhas_card_toros(card_id: int):
+    import db as _db
+    from decimal import Decimal
+    def limpa(d):
+        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
+               for k, v in d.items()}
+    card = _db.card_compras_toros(card_id)
+    linhas = _db.linhas_compras_toros_do_card(card_id)
+    return {"card": limpa(card) if card else None, "linhas": [limpa(l) for l in linhas]}
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
