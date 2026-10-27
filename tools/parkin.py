@@ -1494,6 +1494,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <h2>Excessos por abater <span class="nota">talões sem card aberto para abater (fornecedor + artigo)</span></h2>
       <ul class="rank" id="listaExcessos"></ul>
     </div>
+    <div class="board" id="boardDiferencasPequenas" style="display:none;margin-bottom:16px">
+      <h2>Diferenças pequenas por preencher <span class="nota">cards quase completos (até 1t) — uma carga só encaixa se bater certo, nunca em pedaços</span></h2>
+      <ul class="rank" id="listaDiferencasPequenas"></ul>
+    </div>
     <div class="kanban" id="kanban"></div>
 
     <!-- Pedido explícito do Rui (2026-10-14): uma coluna arquivada não
@@ -2218,7 +2222,7 @@ $("#colunasArquivadasToggle").onclick = () => {
 };
 
 function renderComprasToros(){
-  const { colunas, excessos } = dadosComprasToros;
+  const { colunas, excessos, diferencas_pequenas } = dadosComprasToros;
 
   if(excessos.length){
     $("#boardExcessos").style.display = "";
@@ -2227,6 +2231,15 @@ function renderComprasToros(){
         <span class="val">${t(e.quantidade_kg)} · ${dataPt(e.data_talao)}</span></li>`).join("");
   } else {
     $("#boardExcessos").style.display = "none";
+  }
+
+  if(diferencas_pequenas && diferencas_pequenas.length){
+    $("#boardDiferencasPequenas").style.display = "";
+    $("#listaDiferencasPequenas").innerHTML = diferencas_pequenas.map(d => `
+      <li><span class="nome">${d.fornecedor} · ${d.artigos}</span>
+        <span class="val">falta ${t(d.em_falta_kg)}</span></li>`).join("");
+  } else {
+    $("#boardDiferencasPequenas").style.display = "none";
   }
 
   const abertas = colunas.filter(c => c.estado !== "arquivada");
