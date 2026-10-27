@@ -91,6 +91,12 @@ CORES_VALIDAS = {
     "azul_escuro", "azul", "azul_medio", "azul_claro",
     "roxo_escuro", "roxo", "roxo_medio", "roxo_claro",
     "castanho",  # cor automática da coluna "Armazém" (pedido explícito do Rui, 2026-10-09)
+    # pedido explícito do Rui, 2026-10-27: "branco" é diferente de limpar a
+    # cor de fundo (volta a "cinza"/automática, que ainda pode herdar a cor
+    # do estado/coluna no Basecamp, ex: castanho em "Armazém") — força o
+    # card a ficar sempre com o fundo normal (branco), mesmo num estado com
+    # cor automática (ver fundoCard no template, abaixo).
+    "branco",
 }
 
 # estados/colunas do Basecamp que têm uma cor automática de fundo no
@@ -1799,6 +1805,7 @@ const CORES={
   roxo_claro:{hex:"#E1BEE7",label:"Roxo claro"},
   cinza:{hex:"#9AA0A6",label:"Automática"},
   castanho:{hex:"#795548",label:"Castanho"},
+  branco:{hex:"#FFFFFF",label:"Branco (fundo normal)"},
 };
 // estado/coluna Basecamp -> chave interna (ver tools/planeamento_serracao.ESTADOS_COR)
 const ESTADOS_COR={"Produzido":"produzido","Em Produção":"em_producao","Vendido":"vendido","Secagem":"secagem","Armazém":"armazem"};
@@ -1819,6 +1826,10 @@ function fundoManual(c){
   return (c.corFundo && CORES[c.corFundo]) ? tintRgba(CORES[c.corFundo].hex,.22) : null;
 }
 function fundoCard(c){
+  // "branco" força sempre o fundo normal do card, mesmo num estado com cor
+  // automática (ex: castanho em "Armazém") — diferente de limpar a cor de
+  // fundo (volta a "cinza"/automática, que ainda herda a cor do estado).
+  if(c.corFundo==="branco") return "";
   return fundoManual(c) || corEstadoFundo(c);
 }
 
@@ -1914,7 +1925,7 @@ function renderCoresEstado(){
       <div style="font-size:13px;color:var(--dim);margin-bottom:6px">${coluna}</div>
       <div class="cores">${Object.entries(CORES).filter(([k])=>k!=="cinza").map(([k,v])=>
         `<button class="swatch${CORES_ESTADO[chave]===k?" sel":""}" data-estado="${chave}" data-cor="${k}"
-          style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+          style="background:${v.hex};box-shadow:0 0 0 1px rgba(0,0,0,.15) inset" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     </div>`).join("");
   $("#coresEstadoLista").querySelectorAll(".swatch").forEach(sw=>{
     sw.onclick=async()=>{
@@ -2502,11 +2513,11 @@ function openSheet(id,somenteLeitura){
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral (tipo de produto)</label>
     <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
-        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+        style="background:${v.hex};box-shadow:0 0 0 1px rgba(0,0,0,.15) inset" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
-        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+        style="background:${v.hex};box-shadow:0 0 0 1px rgba(0,0,0,.15) inset" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     ${somenteLeitura?"":`
     <div class="acts">
       <button class="btn" id="duplicar">Duplicar</button>
@@ -2740,11 +2751,11 @@ function openSheetLogistica(id,somenteLeitura){
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor da barra lateral</label>
     <div class="cores" id="coresBarra">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.cor||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
-        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+        style="background:${v.hex};box-shadow:0 0 0 1px rgba(0,0,0,.15) inset" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <label style="font-size:14px;color:var(--dim);display:block;margin-top:12px">Cor de fundo</label>
     <div class="cores" id="coresFundo">${Object.entries(CORES).map(([chave,v])=>
       `<button class="swatch${(c.corFundo||"cinza")===chave?" sel":""}" data-cor="${chave==="cinza"?"":chave}" ${dis}
-        style="background:${v.hex}" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
+        style="background:${v.hex};box-shadow:0 0 0 1px rgba(0,0,0,.15) inset" title="${v.label}" aria-label="${v.label}"></button>`).join("")}</div>
     <div class="owner">Isto é o duplicado de logística desta OF — mover ou apagar aqui não altera a produção nem o Basecamp. As duas cores são exceção: são da OF, uma só, por isso mudam também no card de produção.</div>
     ${somenteLeitura?"":`
     <div class="acts">
