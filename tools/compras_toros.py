@@ -364,14 +364,17 @@ def _reconciliar_excessos_pendentes():
     seguir. Corre agora sempre que o motor de abates corre (ver
     processar_abates_pendentes, chamado a cada leitura do quadro): para
     cada excesso ainda por reconciliar, verifica se alguma linha aberta
-    do mesmo fornecedor+artigo já tem espaço, foi criada na data do
-    talão ou antes (ver _card_pode_abater_entrada) e bate com o "X
-    acima" (ver _obs_bate_com_notas_card) — se sim, desfaz o excesso para
-    a entrada voltar a ser vista como não processada e o motor a abater
-    do zero, já a seguir, na mesma passagem. Um talão chegado antes de
-    existir qualquer card certo para ele fica em excesso para sempre,
-    até alguém criar ou corrigir manualmente o card certo (pedido
-    explícito do Rui, 2026-10-23: nunca retroativo)."""
+    do mesmo fornecedor+artigo já tem espaço para o LEVAR TODO, foi
+    criada na data do talão ou antes (ver _card_pode_abater_entrada) e
+    bate com o "X acima" (ver _obs_bate_com_notas_card) — se sim, desfaz
+    o excesso para a entrada voltar a ser vista como não processada e o
+    motor a abater do zero, já a seguir, na mesma passagem. Um talão
+    chegado antes de existir qualquer card certo para ele fica em
+    excesso para sempre, até alguém criar ou corrigir manualmente o card
+    certo (pedido explícito do Rui, 2026-10-23: nunca retroativo).
+    Pedido explícito do Rui, 2026-10-27: uma carga nunca se divide por
+    vários cards — só reconcilia quando um card consegue levá-la POR
+    INTEIRO (ver processar_abates_pendentes)."""
     for exc in db.todos_excessos_compras_toros():
         candidatas = db.linhas_abertas_compras_toros_por_fornecedor_artigo(
             exc["fornecedor"], exc["tipo"], float(exc["comprimento"]), exc["espessura"])
@@ -381,7 +384,7 @@ def _reconciliar_excessos_pendentes():
             if not _obs_bate_com_notas_card(linha["notas"], exc["obs"]):
                 continue
             falta = float(linha["encomendado_kg"]) - float(linha["entregue_kg"])
-            if falta <= 1e-6:
+            if falta + 1e-6 < float(exc["quantidade_kg"]):
                 continue
             db.desfazer_excesso_compras_toros(exc["id"], exc["entrada_id"])
             break
@@ -389,17 +392,21 @@ def _reconciliar_excessos_pendentes():
 
 def processar_abates_pendentes():
     """Motor de FIFO: cada entrada real do Park In ainda não vista abate
-    às linhas abertas do mesmo fornecedor+artigo, a mais antiga primeiro
+    a uma linha aberta do mesmo fornecedor+artigo, a mais antiga primeiro
     — só contam linhas de cards criados até à data do talão (ver
-    _card_pode_abater_entrada). O que sobrar sem linha para abater fica
-    registado como excesso — nunca perdido, reavaliado sozinho sempre
-    que este motor corre (ver _reconciliar_excessos_pendentes), mas só
-    abate a um card criado na data do talão ou antes, nunca a um criado
-    depois. Chamado sempre que o quadro é lido (ver dados_quadro) — uma
-    entrada pode ser reprocessada mais que uma vez (sempre que o seu
-    excesso é desfeito por _reconciliar_excessos_pendentes), por isso o
-    `restante` desconta sempre o que já foi abatido em passagens
-    anteriores (ver db.total_abatido_entrada_compras_toros)."""
+    _card_pode_abater_entrada). Pedido explícito do Rui, 2026-10-27: uma
+    carga nunca se divide por vários cards (ficava confuso de seguir) —
+    ou um card consegue levá-la POR INTEIRO, ou passa à candidata
+    seguinte; se nenhuma conseguir, fica tudo em excesso, nunca só uma
+    parte. O que fica sem card fica registado como excesso — nunca
+    perdido, reavaliado sozinho sempre que este motor corre (ver
+    _reconciliar_excessos_pendentes), mas só abate a um card criado na
+    data do talão ou antes, nunca a um criado depois. Chamado sempre que
+    o quadro é lido (ver dados_quadro) — uma entrada pode ser
+    reprocessada mais que uma vez (sempre que o seu excesso é desfeito
+    por _reconciliar_excessos_pendentes), por isso o `restante` desconta
+    sempre o que já foi abatido em passagens anteriores (ver
+    db.total_abatido_entrada_compras_toros)."""
     with _lock_abates:
         _reconciliar_excessos_pendentes()
         for entrada in db.entradas_parkin_nao_processadas_compras_toros():
@@ -421,12 +428,12 @@ def processar_abates_pendentes():
                 if not _obs_bate_com_notas_card(linha["notas"], entrada["obs"]):
                     continue
                 falta = float(linha["encomendado_kg"]) - float(linha["entregue_kg"])
-                if falta <= 1e-6:
+                if falta + 1e-6 < restante:
                     continue
-                aplicar = min(restante, falta)
-                db.registar_abate_compras_toros(linha["id"], entrada["id"], aplicar)
-                restante -= aplicar
+                db.registar_abate_compras_toros(linha["id"], entrada["id"], restante)
                 _tentar_fechar_card_automatico(linha["card_id"])
+                restante = 0.0
+                break
             if restante > 1e-6:
                 db.registar_excesso_compras_toros(
                     entrada["id"], entrada["fornecedor"], entrada["tipo"], comprimento,
