@@ -395,16 +395,24 @@ def processar_abates_pendentes():
     registado como excesso — nunca perdido, reavaliado sozinho sempre
     que este motor corre (ver _reconciliar_excessos_pendentes), mas só
     abate a um card criado na data do talão ou antes, nunca a um criado
-    depois. Chamado sempre que o quadro é lido (ver dados_quadro) — cada
-    entrada é processada exatamente uma vez, para sempre (até ficar
-    excesso e ser desfeita por _reconciliar_excessos_pendentes)."""
+    depois. Chamado sempre que o quadro é lido (ver dados_quadro) — uma
+    entrada pode ser reprocessada mais que uma vez (sempre que o seu
+    excesso é desfeito por _reconciliar_excessos_pendentes), por isso o
+    `restante` desconta sempre o que já foi abatido em passagens
+    anteriores (ver db.total_abatido_entrada_compras_toros)."""
     with _lock_abates:
         _reconciliar_excessos_pendentes()
         for entrada in db.entradas_parkin_nao_processadas_compras_toros():
             comprimento = float(entrada["comprimento"])
             candidatas = db.linhas_abertas_compras_toros_por_fornecedor_artigo(
                 entrada["fornecedor"], entrada["tipo"], comprimento, entrada["espessura"])
-            restante = float(entrada["peso_liquido_kg"] or 0)
+            # Bug real (talão 11400, Rui 2026-10-27): uma entrada pode ser
+            # reprocessada mais que uma vez (ver desfazer_excesso_compras_toros,
+            # chamado por _reconciliar_excessos_pendentes acima) — sem descontar
+            # o que já tinha sido abatido numa passagem anterior, o `restante`
+            # reiniciava do peso_liquido_kg todo e contava esse peso a dobrar.
+            ja_abatido = db.total_abatido_entrada_compras_toros(entrada["id"])
+            restante = float(entrada["peso_liquido_kg"] or 0) - ja_abatido
             for linha in candidatas:
                 if restante <= 1e-6:
                     break

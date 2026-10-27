@@ -3516,6 +3516,22 @@ def registar_abate_compras_toros(linha_id: int, entrada_id: int, quantidade_kg: 
             )
         conn.commit()
 
+def total_abatido_entrada_compras_toros(entrada_id: int) -> float:
+    """Soma já abatida desta entrada em passagens anteriores do motor —
+    ver tools/compras_toros.processar_abates_pendentes. Necessário porque
+    uma entrada pode ser reprocessada mais que uma vez (ver
+    desfazer_excesso_compras_toros): sem isto, o `restante` reiniciava
+    sempre do peso_liquido_kg todo, contando a dobrar o que já tinha sido
+    abatido numa passagem anterior (bug real, talão 11400, Rui
+    2026-10-27)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(quantidade_kg), 0) AS total FROM compras_toros_abates WHERE entrada_id = %s",
+                (entrada_id,)
+            )
+            return float(cur.fetchone()["total"])
+
 def mover_abate_compras_toros(abate_id: int, nova_linha_id: int):
     """Move um abate já registado para outra linha (ex: corrigir um talão
     que afinal pertencia a outro card) — desconta o entregue_kg da linha
