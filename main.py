@@ -1238,6 +1238,43 @@ def health():
         "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "desconhecido")[:12],
     }
 
+@app.get("/_debug-historico-talao")
+def _debug_historico_talao(talao: str):
+    import db as _db
+    from decimal import Decimal
+    def limpa(d):
+        if not d:
+            return d
+        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
+               for k, v in d.items()}
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg, saldo_kg, obs "
+                "FROM parkin_entradas WHERE talao = %s ORDER BY id", (talao,)
+            )
+            entradas = [limpa(r) for r in cur.fetchall()]
+            resultado = []
+            for ent in entradas:
+                cur.execute(
+                    """SELECT a.id AS abate_id, a.quantidade_kg, a.criado_em, l.id AS linha_id, l.card_id,
+                              c.fornecedor AS card_fornecedor, c.notas AS card_notas, c.data_encomenda,
+                              c.estado AS card_estado
+                       FROM compras_toros_abates a
+                       JOIN compras_toros_linhas l ON l.id = a.linha_id
+                       JOIN compras_toros_cards c ON c.id = l.card_id
+                       WHERE a.entrada_id = %s ORDER BY a.criado_em""",
+                    (ent["id"],)
+                )
+                abates = [limpa(r) for r in cur.fetchall()]
+                cur.execute(
+                    "SELECT id, quantidade_kg, criado_em FROM compras_toros_excessos WHERE entrada_id = %s ORDER BY id",
+                    (ent["id"],)
+                )
+                excessos = [limpa(r) for r in cur.fetchall()]
+                resultado.append({"entrada": ent, "abates": abates, "excessos": excessos})
+    return resultado
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
