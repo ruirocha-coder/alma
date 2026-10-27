@@ -1090,41 +1090,6 @@ def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
     return compras_toros.dados_quadro()
 
-@app.get("/_debug-verificar-talao")
-def _debug_verificar_talao(talao: str):
-    import db as _db
-    from decimal import Decimal
-    def limpa(d):
-        if not d:
-            return d
-        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
-               for k, v in d.items()}
-    with _db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, talao, peso_liquido_kg FROM parkin_entradas WHERE talao = %s ORDER BY id", (talao,)
-            )
-            entradas = [limpa(r) for r in cur.fetchall()]
-            resultado = []
-            for ent in entradas:
-                cur.execute(
-                    """SELECT a.id AS abate_id, a.quantidade_kg, l.id AS linha_id, l.card_id, c.estado AS card_estado,
-                              l.encomendado_kg, l.entregue_kg
-                       FROM compras_toros_abates a
-                       JOIN compras_toros_linhas l ON l.id = a.linha_id
-                       JOIN compras_toros_cards c ON c.id = l.card_id
-                       WHERE a.entrada_id = %s ORDER BY a.criado_em""",
-                    (ent["id"],)
-                )
-                abates = [limpa(r) for r in cur.fetchall()]
-                cur.execute(
-                    "SELECT id, quantidade_kg FROM compras_toros_excessos WHERE entrada_id = %s", (ent["id"],)
-                )
-                excessos = [limpa(r) for r in cur.fetchall()]
-                soma = sum(a["quantidade_kg"] for a in abates) + sum(e["quantidade_kg"] for e in excessos)
-                resultado.append({"entrada": ent, "abates": abates, "excessos": excessos,
-                                   "soma": soma, "bate_certo": abs(soma - ent["peso_liquido_kg"]) <= 0.5})
-    return resultado
 
 @app.post("/park-in/compras-toros/coluna")
 def park_in_compras_toros_criar_coluna(corpo: dict = Body(...)):
