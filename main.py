@@ -1316,6 +1316,105 @@ def _debug_linhas_card_toros(card_id: int):
     linhas = _db.linhas_compras_toros_do_card(card_id)
     return {"card": limpa(card) if card else None, "linhas": [limpa(l) for l in linhas]}
 
+@app.post("/_debug-corrigir-dobragem-compras-toros")
+def _debug_corrigir_dobragem_compras_toros():
+    """Corrige os dados já corrompidos pelo bug de contagem a dobrar (ver
+    commit "Corrige bug grave..."). Para cada um dos 6 talões afetados,
+    corta de volta o abate mais recente (criado por um reprocessamento
+    indevido) só pelo excesso que não devia ter existido — nunca mexe nos
+    abates mais antigos, legítimos. Reabre os 3 cards que, com o abate
+    corrigido, deixam de ter a entrega completa. Idempotente: cada passo
+    confere o valor atual antes de o alterar, para poder ser corrido mais
+    que uma vez em segurança."""
+    import db as _db
+    passos = []
+
+    def corrigir_abate(abate_id, valor_esperado_atual, novo_valor, descricao):
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT linha_id, quantidade_kg FROM compras_toros_abates WHERE id = %s", (abate_id,))
+                row = cur.fetchone()
+                if not row:
+                    passos.append({"abate_id": abate_id, "ignorado": "não encontrado"})
+                    return
+                atual = float(row["quantidade_kg"])
+                if abs(atual - valor_esperado_atual) > 0.5:
+                    passos.append({"abate_id": abate_id, "ignorado": f"já corrigido ou alterado (atual={atual})"})
+                    return
+                delta = novo_valor - atual
+                cur.execute("UPDATE compras_toros_abates SET quantidade_kg = %s WHERE id = %s", (novo_valor, abate_id))
+                cur.execute("UPDATE compras_toros_linhas SET entregue_kg = entregue_kg + %s WHERE id = %s",
+                            (delta, row["linha_id"]))
+            conn.commit()
+        passos.append({"abate_id": abate_id, "descricao": descricao, "de": atual, "para": novo_valor})
+
+    def apagar_abate(abate_id, valor_esperado_atual, descricao):
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT linha_id, quantidade_kg FROM compras_toros_abates WHERE id = %s", (abate_id,))
+                row = cur.fetchone()
+                if not row:
+                    passos.append({"abate_id": abate_id, "ignorado": "já apagado"})
+                    return
+                atual = float(row["quantidade_kg"])
+                if abs(atual - valor_esperado_atual) > 0.5:
+                    passos.append({"abate_id": abate_id, "ignorado": f"valor inesperado, não apagado (atual={atual})"})
+                    return
+                cur.execute("UPDATE compras_toros_linhas SET entregue_kg = entregue_kg - %s WHERE id = %s",
+                            (atual, row["linha_id"]))
+                cur.execute("DELETE FROM compras_toros_abates WHERE id = %s", (abate_id,))
+            conn.commit()
+        passos.append({"abate_id": abate_id, "descricao": descricao, "apagado": atual})
+
+    def apagar_excesso(excesso_id, valor_esperado_atual, descricao):
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT quantidade_kg FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+                row = cur.fetchone()
+                if not row:
+                    passos.append({"excesso_id": excesso_id, "ignorado": "já apagado"})
+                    return
+                atual = float(row["quantidade_kg"])
+                if abs(atual - valor_esperado_atual) > 0.5:
+                    passos.append({"excesso_id": excesso_id, "ignorado": f"valor inesperado, não apagado (atual={atual})"})
+                    return
+                cur.execute("DELETE FROM compras_toros_excessos WHERE id = %s", (excesso_id,))
+            conn.commit()
+        passos.append({"excesso_id": excesso_id, "descricao": descricao, "apagado": atual})
+
+    def reabrir_se_fechado(card_id, descricao):
+        card = _db.card_compras_toros(card_id)
+        if card and card["estado"] == "fechado":
+            _db.reabrir_card_compras_toros(card_id)
+            passos.append({"card_id": card_id, "descricao": descricao, "reaberto": True})
+        else:
+            passos.append({"card_id": card_id, "descricao": descricao, "reaberto": False, "estado_atual": card["estado"] if card else None})
+
+    # Talão 11358 (entrada 770) — abate 58 tinha 5300kg a mais (já abatidos antes no abate 36)
+    corrigir_abate(58, 38250.0, 32950.0, "talão 11358 / card 28")
+    reabrir_se_fechado(28, "talão 11358")
+
+    # Talão 11371 (entrada 783) — abate 60 tinha 8300kg a mais (já abatidos antes no abate 49)
+    corrigir_abate(60, 33150.0, 24850.0, "talão 11371 / card 26")
+
+    # Talão 11382 (entrada 795) — abate 88 é inteiramente fantasma; abate 78 tinha 50kg a mais (arredondamento)
+    apagar_abate(88, 44150.0, "talão 11382 / card 42")
+    corrigir_abate(78, 6900.0, 6850.0, "talão 11382 / card 34")
+    reabrir_se_fechado(34, "talão 11382")
+
+    # Talão 11387 (entrada 800) — abate 91 é inteiramente fantasma
+    apagar_abate(91, 35950.0, "talão 11387 / card 43")
+
+    # Talão 11395 (entrada 808) — abate 92 é inteiramente fantasma
+    apagar_abate(92, 38900.0, "talão 11395 / card 44")
+
+    # Talão 11400 (entrada 812) — excesso 234 é inteiramente fantasma; abate 93 tinha 50kg a mais (arredondamento)
+    apagar_excesso(234, 34400.0, "talão 11400")
+    corrigir_abate(93, 5700.0, 5650.0, "talão 11400 / card 45")
+    reabrir_se_fechado(45, "talão 11400")
+
+    return {"ok": True, "passos": passos}
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
