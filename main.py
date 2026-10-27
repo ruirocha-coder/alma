@@ -1090,6 +1090,15 @@ def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
     return compras_toros.dados_quadro()
 
+@app.get("/_debug-erro-compras-toros")
+def _debug_erro_compras_toros():
+    import traceback
+    try:
+        compras_toros.dados_quadro()
+        return {"ok": True}
+    except Exception:
+        return JSONResponse({"traceback": traceback.format_exc()}, status_code=200)
+
 @app.post("/park-in/compras-toros/coluna")
 def park_in_compras_toros_criar_coluna(corpo: dict = Body(...)):
     """Novo levantamento de necessidade — ver tools/compras_toros.criar_coluna."""
