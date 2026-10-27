@@ -3601,7 +3601,7 @@ def todos_excessos_compras_toros() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT e.id, e.entrada_id, e.fornecedor, e.tipo, e.comprimento, e.espessura,
+                """SELECT e.id, e.entrada_id, e.fornecedor, e.tipo, e.comprimento, e.espessura, e.quantidade_kg,
                           p.data AS data_entrada, p.obs
                    FROM compras_toros_excessos e JOIN parkin_entradas p ON p.id = e.entrada_id"""
             )

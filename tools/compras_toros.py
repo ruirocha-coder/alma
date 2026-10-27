@@ -445,16 +445,6 @@ def _rotulo_artigo(tipo: str, comprimento, espessura: str) -> str:
     return f"{tipo} · {float(comprimento):.2f}m · {'Fina' if espessura == 'fina' else 'Normal'}"
 
 
-# Pedido explícito do Rui, 2026-10-27: desde que uma carga deixou de se
-# poder dividir por vários cards (ver processar_abates_pendentes), um card
-# pode ficar parado com uma diferença pequena por preencher — nenhuma carga
-# futura vai encaixar nele à medida, só uma que bata certo. Mostra esses
-# casos à parte no quadro, para o Rui poder decidir corrigir a mão (ex:
-# ajustar o encomendado) em vez de ficar à espera de uma carga que talvez
-# nunca apareça do tamanho exato.
-LIMITE_DIFERENCA_PEQUENA_KG = 1000
-
-
 def dados_quadro() -> dict:
     """Tudo o que o quadro precisa para se desenhar — colunas (abertas e
     arquivadas), cada uma com a sua necessidade por artigo e os seus
@@ -464,7 +454,6 @@ def dados_quadro() -> dict:
     desatualizados."""
     processar_abates_pendentes()
 
-    diferencas_pequenas = []
     colunas_resultado = []
     for coluna in db.colunas_compras_toros():
         necessidades = db.necessidades_compras_toros(coluna["id"])
@@ -514,13 +503,6 @@ def dados_quadro() -> dict:
                 "encomendado_kg": round(encomendado, 1), "entregue_kg": round(entregue, 1),
                 "em_falta_kg": round(max(0.0, encomendado - entregue), 1),
             })
-            em_falta = encomendado - entregue
-            if card["estado"] == "aberto" and 1e-6 < em_falta <= LIMITE_DIFERENCA_PEQUENA_KG:
-                diferencas_pequenas.append({
-                    "card_id": card["id"], "fornecedor": card["fornecedor"],
-                    "em_falta_kg": round(em_falta, 1),
-                    "artigos": ", ".join(_rotulo_artigo(l["tipo"], l["comprimento"], l["espessura"]) for l in linhas_card),
-                })
 
         colunas_resultado.append({
             "id": coluna["id"], "data_levantamento": coluna["data_levantamento"].isoformat(),
@@ -538,4 +520,4 @@ def dados_quadro() -> dict:
         "data_talao": e["data_talao"].isoformat() if e["data_talao"] else None,
     } for e in db.excessos_compras_toros()]
 
-    return {"colunas": colunas_resultado, "excessos": excessos, "diferencas_pequenas": diferencas_pequenas}
+    return {"colunas": colunas_resultado, "excessos": excessos}
