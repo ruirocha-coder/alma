@@ -1275,6 +1275,36 @@ def _debug_historico_talao(talao: str):
                 resultado.append({"entrada": ent, "abates": abates, "excessos": excessos})
     return resultado
 
+@app.get("/_debug-auditoria-abates-toros")
+def _debug_auditoria_abates_toros():
+    """Para toda entrada já processada pelo motor de Compras de Toro,
+    confere se SUM(abates) + excesso atual == peso_liquido_kg (com
+    tolerância de 0,5kg) — qualquer divergência indica a mesma
+    duplicação encontrada no talão 11400 (reprocessamento a partir do
+    peso_liquido_kg inteiro, ignorando o que já tinha sido abatido antes)."""
+    import db as _db
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT p.id AS entrada_id, p.talao, p.fornecedor, p.peso_liquido_kg,
+                          COALESCE((SELECT SUM(a.quantidade_kg) FROM compras_toros_abates a WHERE a.entrada_id = p.id), 0) AS total_abatido,
+                          COALESCE((SELECT SUM(e.quantidade_kg) FROM compras_toros_excessos e WHERE e.entrada_id = p.id), 0) AS total_excesso
+                   FROM parkin_entradas p
+                   WHERE p.id IN (SELECT entrada_id FROM compras_toros_entradas_processadas)"""
+            )
+            linhas = cur.fetchall()
+    divergentes = []
+    for l in linhas:
+        peso = float(l["peso_liquido_kg"] or 0)
+        soma = float(l["total_abatido"]) + float(l["total_excesso"])
+        if abs(peso - soma) > 0.5:
+            divergentes.append({
+                "entrada_id": l["entrada_id"], "talao": l["talao"], "fornecedor": l["fornecedor"],
+                "peso_liquido_kg": peso, "total_abatido": float(l["total_abatido"]),
+                "total_excesso": float(l["total_excesso"]), "soma": soma, "diferenca": round(soma - peso, 1),
+            })
+    return {"total_entradas_verificadas": len(linhas), "divergentes": divergentes}
+
 @app.get("/health/config")
 def health_config():
     """Diz quais as variáveis de ambiente necessárias que estão definidas (nunca os valores) — para diagnosticar sem ir ao painel do Railway."""
