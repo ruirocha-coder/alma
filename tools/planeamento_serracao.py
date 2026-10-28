@@ -864,6 +864,17 @@ def agendar(basecamp_card_id: int, linha: str, dia_inicio: str, volume_m3: float
     if erro:
         return {"erro": erro}
     db.guardar_agendamento_producao(basecamp_card_id, linha, dia_inicio, duracao_dias, volume_m3)
+    if existente and existente["dia_inicio"] != dia_inicio:
+        # pedido explícito do Rui, 2026-10-28 (bug real: OF 504 da Palcax
+        # — reagendada para 3 de novembro, mas o Planeamento de Entradas
+        # continuava a mostrá-la a 8 de outubro): um dia de entrada
+        # escolhido à mão no Planeamento de Entradas (ver
+        # tools/planeamento_entradas.definir_dia_entrada) fica preso ao
+        # dia de início antigo quando a OF é reagendada aqui — limpa-o
+        # sempre que o dia de início muda, para voltar ao cálculo
+        # automático a partir do novo dia; pode voltar a definir-se à mão
+        # depois, se for mesmo preciso.
+        db.definir_dia_entrada_manual(basecamp_card_id, None)
     if not existente or existente["dia_inicio"] != dia_inicio:
         # melhor esforço: uma falha aqui (ex: Basecamp em baixo) não pode
         # impedir o agendamento local, que é a fonte de verdade real do

@@ -1085,12 +1085,6 @@ def park_in_registar_artigo(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
-@app.get("/_debug-palcax")
-def _debug_palcax():
-    import db as _db
-    extra = next((e for e in _db.entradas_charriot_ecos_largos() if e["basecamp_card_id"] == 10285846651), None)
-    return {"extra_of_504": extra}
-
 @app.get("/park-in/compras-toros/dados")
 def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
