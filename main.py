@@ -1090,6 +1090,34 @@ def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
     return compras_toros.dados_quadro()
 
+@app.post("/_debug-reordenar-cards-por-fornecedor")
+def _debug_reordenar_cards_por_fornecedor():
+    """Corrige, uma única vez, a ordem visual dos cards já existentes em
+    todos os levantamentos: passa a agrupar por fornecedor (A-Z) e só
+    depois por data de criação dentro de cada grupo — pedido explícito do
+    Rui, 2026-10-27. Daqui para a frente, novos cards já nascem na
+    posição certa (ver db.criar_card_compras_toros)."""
+    import db as _db
+    with _db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM compras_toros_colunas")
+            coluna_ids = [r["id"] for r in cur.fetchall()]
+    resultado = []
+    for coluna_id in coluna_ids:
+        with _db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, fornecedor, criado_em FROM compras_toros_cards WHERE coluna_id = %s",
+                    (coluna_id,)
+                )
+                cards = cur.fetchall()
+                cards.sort(key=lambda c: (_db._chave_ordenacao_fornecedor(c["fornecedor"]), c["criado_em"]))
+                for i, c in enumerate(cards):
+                    cur.execute("UPDATE compras_toros_cards SET ordem = %s WHERE id = %s", (i, c["id"]))
+            conn.commit()
+        resultado.append({"coluna_id": coluna_id, "cards": [c["fornecedor"] for c in cards]})
+    return {"ok": True, "colunas_corrigidas": resultado}
+
 
 @app.post("/park-in/compras-toros/coluna")
 def park_in_compras_toros_criar_coluna(corpo: dict = Body(...)):

@@ -3253,19 +3253,36 @@ def criar_card_compras_toros(coluna_id: int, fornecedor: str, data_encomenda: st
                              notas: str = None) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # começa sempre no fim da lista visual deste levantamento (ver
-            # ordem, arrastar cards à mão) — nunca afeta o FIFO.
+            # Pedido explícito do Rui, 2026-10-27: a ordem visual por omissão
+            # agrupa os cards por fornecedor (A-Z) e só depois por data de
+            # criação dentro de cada grupo — em vez de simplesmente
+            # acrescentar sempre ao fundo da lista. Insere-se aqui já na
+            # posição certa (logo a seguir ao último card do mesmo
+            # fornecedor, ou antes do primeiro fornecedor seguinte por
+            # ordem alfabética); continua a poder arrastar-se à mão por
+            # cima disto depois (ver reordenar_cards_compras_toros), nunca
+            # afeta o FIFO.
             cur.execute(
-                "SELECT COALESCE(MAX(ordem), 0) + 1 AS seguinte FROM compras_toros_cards WHERE coluna_id = %s",
+                "SELECT id, fornecedor FROM compras_toros_cards WHERE coluna_id = %s "
+                "ORDER BY ordem ASC NULLS LAST, criado_em ASC, id ASC",
                 (coluna_id,)
             )
-            ordem = cur.fetchone()["seguinte"]
+            existentes = cur.fetchall()
+            chave_novo = _chave_ordenacao_fornecedor(fornecedor)
+            posicao = len(existentes)
+            for i, c in enumerate(existentes):
+                if _chave_ordenacao_fornecedor(c["fornecedor"]) > chave_novo:
+                    posicao = i
+                    break
             cur.execute(
                 """INSERT INTO compras_toros_cards (coluna_id, fornecedor, data_encomenda, criado_por, notas, ordem)
                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (coluna_id, fornecedor, data_encomenda, criado_por, notas, ordem)
+                (coluna_id, fornecedor, data_encomenda, criado_por, notas, posicao)
             )
             id_gerado = cur.fetchone()["id"]
+            for i, c in enumerate(existentes):
+                nova_ordem = i if i < posicao else i + 1
+                cur.execute("UPDATE compras_toros_cards SET ordem = %s WHERE id = %s", (nova_ordem, c["id"]))
         conn.commit()
     return id_gerado
 
@@ -3342,20 +3359,33 @@ def obter_coluna_compras_toros(coluna_id: int) -> dict:
 def mover_card_compras_toros(card_id: int, nova_coluna_id: int):
     """Move um card (e as suas linhas, por arrastamento da FK) para outro
     levantamento — ver tools/compras_toros.mover_card. Nunca mexe nas
-    linhas/abates/entregue em si, só a que coluna o card pertence. Fica
-    sempre no fim da lista visual do levantamento de destino (ver ordem,
-    arrastar cards à mão) — nunca afeta o FIFO."""
+    linhas/abates/entregue em si, só a que coluna o card pertence. Insere
+    já na posição alfabética certa (fornecedor, ver
+    criar_card_compras_toros) na lista visual do levantamento de
+    destino — nunca afeta o FIFO."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT fornecedor FROM compras_toros_cards WHERE id = %s", (card_id,))
+            fornecedor = cur.fetchone()["fornecedor"]
             cur.execute(
-                "SELECT COALESCE(MAX(ordem), 0) + 1 AS seguinte FROM compras_toros_cards WHERE coluna_id = %s",
-                (nova_coluna_id,)
+                "SELECT id, fornecedor FROM compras_toros_cards WHERE coluna_id = %s AND id != %s "
+                "ORDER BY ordem ASC NULLS LAST, criado_em ASC, id ASC",
+                (nova_coluna_id, card_id)
             )
-            ordem = cur.fetchone()["seguinte"]
+            existentes = cur.fetchall()
+            chave_novo = _chave_ordenacao_fornecedor(fornecedor)
+            posicao = len(existentes)
+            for i, c in enumerate(existentes):
+                if _chave_ordenacao_fornecedor(c["fornecedor"]) > chave_novo:
+                    posicao = i
+                    break
             cur.execute(
                 "UPDATE compras_toros_cards SET coluna_id = %s, ordem = %s WHERE id = %s",
-                (nova_coluna_id, ordem, card_id)
+                (nova_coluna_id, posicao, card_id)
             )
+            for i, c in enumerate(existentes):
+                nova_ordem = i if i < posicao else i + 1
+                cur.execute("UPDATE compras_toros_cards SET ordem = %s WHERE id = %s", (nova_ordem, c["id"]))
         conn.commit()
 
 def reordenar_cards_compras_toros(coluna_id: int, ordem_cards: list[int]):
@@ -3428,6 +3458,20 @@ def reabrir_card_compras_toros(card_id: int):
                 (card_id,)
             )
         conn.commit()
+
+def _chave_ordenacao_fornecedor(nome: str) -> str:
+    """Chave de ordenação alfabética de um fornecedor — tolerante a
+    acentos e maiúsculas/minúsculas, mas com o nome completo (ao
+    contrário de _primeira_palavra_fornecedor, que só serve para
+    comparar se dois textos são o mesmo fornecedor no FIFO). Pedido
+    explícito do Rui, 2026-10-27: a ordem visual por omissão dos cards
+    de um levantamento agrupa por fornecedor (A-Z) e só depois por data
+    de criação dentro de cada grupo — ver criar_card_compras_toros/
+    mover_card_compras_toros, que inserem cada card já na posição
+    certa (continua a poder arrastar-se à mão por cima disto, ver
+    reordenar_cards_compras_toros)."""
+    sem_acentos = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode("ascii")
+    return sem_acentos.strip().lower()
 
 def _primeira_palavra_fornecedor(nome: str) -> str:
     """Normaliza um nome de fornecedor para comparação tolerante: 1ª
