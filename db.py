@@ -101,6 +101,25 @@ CREATE TABLE IF NOT EXISTS portal_documentos_processados (
     criado_em TIMESTAMPTZ DEFAULT now()
 );
 
+-- pedido explícito do Rui, 2026-10-28: a fase "projeto" do portal (PDF
+-- "Apresentação") nunca pode abrir-se sozinha só por o documento aparecer
+-- no card — tem primeiro de ser aprovada pela Mariana Morgado, num
+-- comentário à parte com uma palavra de aprovação clara (ver
+-- agents/responder_basecamp._tentar_aprovar_fase_projeto). Até isso
+-- acontecer, o documento fica registado aqui, "pendente"; a aprovação lê
+-- esta tabela para saber qual download_url usar, sem precisar de o
+-- redescobrir. Uma linha por (card_id, fase): um documento novo da mesma
+-- fase substitui o anterior ainda pendente (ver
+-- registar_portal_fase_pendente_aprovacao).
+CREATE TABLE IF NOT EXISTS portal_fases_pendentes_aprovacao (
+    card_id BIGINT NOT NULL,
+    fase TEXT NOT NULL,
+    download_url TEXT NOT NULL,
+    ficheiro TEXT,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (card_id, fase)
+);
+
 -- mapeamento id da Agenda (Schedule) do Basecamp, projeto Entregas -> id do
 -- evento no Google Calendar (ver tools/google_calendar.py e
 -- agents/sincronizacao_calendario.py) — sincronização unidirecional
@@ -2628,6 +2647,42 @@ def registar_portal_documento_processado(comment_id: int, card_id: int):
                 """INSERT INTO portal_documentos_processados (comment_id, card_id)
                    VALUES (%s, %s) ON CONFLICT (comment_id) DO NOTHING""",
                 (comment_id, card_id)
+            )
+        conn.commit()
+
+def registar_portal_fase_pendente_aprovacao(card_id: int, fase: str, download_url: str, ficheiro: str = None):
+    """Guarda um documento da fase "projeto" como pendente de aprovação da
+    Mariana Morgado (pedido explícito do Rui, 2026-10-28) — ver
+    agents/responder_basecamp._tentar_aprovar_fase_projeto, que lê isto
+    quando ela aprova num comentário à parte. Um documento novo da mesma
+    fase substitui (nunca acumula) o que estava pendente antes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO portal_fases_pendentes_aprovacao (card_id, fase, download_url, ficheiro)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (card_id, fase) DO UPDATE SET
+                     download_url = EXCLUDED.download_url, ficheiro = EXCLUDED.ficheiro, criado_em = now()""",
+                (card_id, fase, download_url, ficheiro)
+            )
+        conn.commit()
+
+def obter_portal_fase_pendente_aprovacao(card_id: int, fase: str) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT card_id, fase, download_url, ficheiro FROM portal_fases_pendentes_aprovacao "
+                "WHERE card_id = %s AND fase = %s",
+                (card_id, fase)
+            )
+            return cur.fetchone()
+
+def remover_portal_fase_pendente_aprovacao(card_id: int, fase: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM portal_fases_pendentes_aprovacao WHERE card_id = %s AND fase = %s",
+                (card_id, fase)
             )
         conn.commit()
 

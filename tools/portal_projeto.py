@@ -1088,6 +1088,24 @@ def abrir_fase_portal(card_id: int, fase: str, download_url: str = None,
     return {"ok": True, "fase": fase, "novo_estado": "aguarda", "url": resultado["url"]}
 
 
+def registar_documento_pendente_aprovacao(card_id: int, fase: str, download_url: str, ficheiro: str = None) -> dict:
+    """Pedido explícito do Rui, 2026-10-28: a fase "projeto" (PDF
+    "Apresentação") nunca pode abrir-se sozinha só por o documento
+    aparecer no card — fica à espera de uma aprovação explícita da
+    Mariana Morgado, num comentário à parte com uma palavra de aprovação
+    clara (ver agents/responder_basecamp._tentar_aprovar_fase_projeto,
+    que lê isto e chama abrir_fase_portal quando ela aprova). As fases
+    "conceito" e "orcamento" continuam a abrir-se sozinhas, sem passar por
+    aqui — usa isto SÓ para a fase "projeto". Um documento novo da mesma
+    fase substitui (nunca acumula) o que estava pendente antes — não
+    verifica nada do estado do portal, só regista; a validação de que a
+    fase ainda está "prevista" acontece só quando a aprovação chegar."""
+    if fase != "projeto":
+        return {"erro": "registar_documento_pendente_aprovacao só serve para a fase \"projeto\""}
+    db.registar_portal_fase_pendente_aprovacao(card_id, fase, download_url, ficheiro)
+    return {"ok": True, "pendente": True, "fase": fase}
+
+
 def substituir_documento_portal(card_id: int, documento: str, download_url: str) -> dict:
     """Substitui um documento já publicado num portal existente — pedido
     real (Mary, 2026-10-14, ver card "Sofia Pinto"): quando a fase já
@@ -1429,6 +1447,30 @@ TOOLS_PORTAL_PROJETO = [
                                           "description": "só para fase \"orcamento\": true a confirmar que valor_produto já inclui IVA"},
                 "valor_transporte": {"type": "number",
                                      "description": "só para fase \"orcamento\", obrigatório: o valor da linha \"ENTREGA E INSTALAÇÃO\" do PDF do orçamento (texto fixo \"Transporte, montagem e instalação de todo o equipamento acima mencionado...\"), já com IVA — o crédito de 10% nunca se aplica a este valor"}
+            },
+            "required": ["card_id", "fase", "download_url"]
+        }
+    },
+    {
+        "name": "registar_documento_pendente_aprovacao",
+        "description": (
+            "Usa isto SÓ para a fase \"projeto\" (PDF \"Apresentação\"), EM VEZ de abrir_fase_portal: "
+            "pedido explícito do Rui, 2026-10-28, essa fase nunca pode abrir-se sozinha só por o "
+            "documento aparecer no card — fica à espera de uma aprovação à parte da Mariana Morgado, "
+            "feita por outra automação quando ela comentar com uma palavra de aprovação clara. Chama "
+            "isto depois de confirmares pelo NOME do ficheiro que é mesmo o PDF de \"Apresentação\" "
+            "certo (mesma regra de sempre) — nunca chames abrir_fase_portal para \"projeto\". Para as "
+            "fases \"conceito\" e \"orcamento\" continua a usar abrir_fase_portal normalmente, nunca "
+            "esta ferramenta."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "card_id": {"type": "integer", "description": "id numérico do card do Basecamp"},
+                "fase": {"type": "string", "enum": ["projeto"], "description": "só \"projeto\""},
+                "download_url": {"type": "string",
+                                 "description": "download_url do PDF de \"Apresentação\", tal como veio de listar_pdfs_anexados_por_data"},
+                "ficheiro": {"type": "string", "description": "nome do ficheiro, para referência"}
             },
             "required": ["card_id", "fase", "download_url"]
         }

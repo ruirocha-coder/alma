@@ -558,6 +558,8 @@ def _preparar(system_prompt: str, tools: list, utilizador: str, origem: str, pro
         "obter_portal_atual": lambda card_id: portal_projeto.obter_portal_atual(card_id),
         "abrir_fase_portal": lambda card_id, fase, download_url=None, valor_produto=None, valor_produto_com_iva=False, valor_transporte=None: (
             portal_projeto.abrir_fase_portal(card_id, fase, download_url, valor_produto, valor_produto_com_iva, valor_transporte)),
+        "registar_documento_pendente_aprovacao": lambda card_id, fase, download_url, ficheiro=None: (
+            portal_projeto.registar_documento_pendente_aprovacao(card_id, fase, download_url, ficheiro)),
         "substituir_documento_portal": lambda card_id, documento, download_url: (
             portal_projeto.substituir_documento_portal(card_id, documento, download_url)),
     }

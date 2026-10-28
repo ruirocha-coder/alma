@@ -4,7 +4,7 @@ from persona import PERSONA
 from agents.base import correr_agente, TOOLS_COMUNS, INSTRUCAO_INTERNET
 from agents import ecos_largos as ecos_largos_agent, qualidade_toros_ecos_largos, ceo as ceo_agent
 from orchestrator import escolher_agente_ecos_largos
-from tools import basecamp, logistica
+from tools import basecamp, logistica, portal_projeto
 import db
 
 # partilhado pelas duas missões abaixo — as convenções de como responder a
@@ -192,12 +192,21 @@ A tua tarefa, passo a passo:
      NÃO tiver indicação de ser uma alternativa (ex: "LOW COST").
 3. Só se o documento novo corresponder claramente, pelo NOME, a essa
    fase:
-   chama abrir_fase_portal com o card_id, a fase, e o download_url desse
-   PDF (tal como veio de listar_pdfs_anexados_por_data — nunca um
-   download_url obtido de outro lado); para a fase "orcamento" passa
-   também valor_produto e valor_produto_com_iva=true. Nunca chames
-   gerar_portal_projeto aqui — essa é só para criar um portal novo a
-   partir do zero, nunca para abrir uma fase de um já existente.
+   - fase "conceito" ou "orcamento": chama abrir_fase_portal com o
+     card_id, a fase, e o download_url desse PDF (tal como veio de
+     listar_pdfs_anexados_por_data — nunca um download_url obtido de
+     outro lado); para "orcamento" passa também valor_produto e
+     valor_produto_com_iva=true.
+   - fase "projeto": NUNCA chames abrir_fase_portal diretamente — pedido
+     explícito do Rui, 2026-10-28, essa fase só pode abrir depois de uma
+     aprovação à parte da Mariana Morgado (tratada por outra automação,
+     fora desta tua tarefa). Chama antes registar_documento_pendente_
+     aprovacao com o card_id, fase="projeto" e o download_url desse PDF
+     — a tua tarefa aqui acaba nisto, não esperes pela aprovação nem
+     verifiques mais nada.
+   Nunca chames gerar_portal_projeto aqui — essa é só para criar um
+   portal novo a partir do zero, nunca para abrir uma fase de um já
+   existente.
 4. Se o documento novo não corresponder a nenhuma fase "prevista" (ex: é
    um comprovativo de pagamento, uma fatura, uma planta técnica, uma
    versão de um documento cuja fase já está aberta ou validada), não
@@ -270,6 +279,48 @@ Ficheiro(s) PDF anexado(s) no comentário novo que despoletou isto:
     except Exception:
         print(f"[responder_basecamp] ERRO ao tentar atualizar o portal do card {card_id}: {traceback.format_exc()}")
 
+# pedido explícito do Rui, 2026-10-28: a fase "projeto" só pode abrir depois
+# de uma aprovação clara da Mariana Morgado num comentário à parte — nunca
+# por "parecer" uma aprovação (mesmo princípio das outras regras deste
+# ficheiro: na dúvida, não faz nada). Lista pequena e literal de propósito;
+# comparada já sem acentos/maiúsculas (ver basecamp._normalizar).
+_NOME_APROVADORA_FASE_PROJETO = "mariana morgado"
+_PALAVRAS_APROVACAO_FASE_PROJETO = ("aprovado", "aprovada", "aprovo", "aprova", "pode avancar", "pode enviar")
+
+def _tentar_aprovar_fase_projeto(card_id: int, projeto: str, nome_autor: str, texto_comentario: str) -> None:
+    """Chamado a partir de QUALQUER comentário novo num card (não precisa
+    de mencionar a Alma, mesmo princípio de _tentar_atualizar_portal) —
+    se houver um documento da fase "projeto" pendente de aprovação (ver
+    tools/portal_projeto.registar_documento_pendente_aprovacao) e este
+    comentário for da Mariana Morgado com uma palavra de aprovação clara,
+    abre a fase sozinha com o download_url já guardado. Falha em
+    silêncio — nunca pode impedir o resto do processamento do evento."""
+    try:
+        if basecamp._normalizar(nome_autor or "") != _NOME_APROVADORA_FASE_PROJETO:
+            return
+        pendente = db.obter_portal_fase_pendente_aprovacao(card_id, "projeto")
+        if not pendente:
+            return
+        texto_norm = basecamp._normalizar(texto_comentario or "")
+        if not any(palavra in texto_norm for palavra in _PALAVRAS_APROVACAO_FASE_PROJETO):
+            return
+        resultado = portal_projeto.abrir_fase_portal(card_id, "projeto", pendente["download_url"])
+        if "erro" in resultado:
+            print(f"[responder_basecamp] aprovação da Mariana Morgado no card {card_id}, mas não consegui "
+                 f"abrir a fase \"projeto\": {resultado['erro']}")
+            return
+        db.remover_portal_fase_pendente_aprovacao(card_id, "projeto")
+        registo = db.obter_documento_gerado_por_card_id(card_id)
+        app_url = os.environ["ALMA_APP_URL"].rstrip("/")
+        link = f"{app_url}/documentos-gerados/{registo['id']}"
+        comentario = (f"Portal atualizado automaticamente — a fase \"Projeto\" já está disponível para a "
+                     f"cliente validar (aprovado por {nome_autor}): {link}\n\n— Alma")
+        basecamp.comentar(card_id, comentario, projeto=projeto)
+        print(f"[responder_basecamp] fase \"projeto\" do card {card_id} aberta após aprovação de {nome_autor}")
+    except Exception:
+        print(f"[responder_basecamp] ERRO ao tentar aprovar a fase \"projeto\" do card {card_id}: "
+             f"{traceback.format_exc()}")
+
 def processar_evento_webhook(payload: dict):
     """Reage a um evento de webhook do Basecamp (comentário criado, ou tarefa/card
     criado/atualizado) que mencione a Alma pelo nome — lê o contexto e responde."""
@@ -319,6 +370,12 @@ def _processar(payload: dict):
             _tentar_atualizar_portal(alvo["id"], alvo.get("title"),
                                      (recording.get("bucket") or {}).get("name") or "",
                                      pdfs_novos, evento_id)
+        # reage a uma aprovação da Mariana Morgado mesmo sem menção à Alma
+        # nem documento anexado neste comentário (ver
+        # _tentar_aprovar_fase_projeto) — independente do fluxo acima.
+        if alvo.get("type") == "Kanban::Card" and alvo.get("id"):
+            _tentar_aprovar_fase_projeto(alvo["id"], (recording.get("bucket") or {}).get("name") or "",
+                                         criador.get("name") or "", _texto_simples(texto_bruto))
     else:
         # menção dentro do próprio card/tarefa (título ou descrição), não numa resposta
         evento_id = recording.get("id")
