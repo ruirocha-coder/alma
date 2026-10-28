@@ -1085,6 +1085,20 @@ def park_in_registar_artigo(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.get("/_debug-palcax")
+def _debug_palcax():
+    import db as _db
+    cards_ativos = planeamento_serracao._cards_of_ativos()
+    candidatos = [c for c in cards_ativos if "palcax" in (c.get("titulo") or "").lower()]
+    agendamentos = {a["basecamp_card_id"]: a for a in _db.agendamentos_producao_ecos_largos()}
+    resultado = []
+    for c in candidatos:
+        resultado.append({
+            "card": c,
+            "agendamento": agendamentos.get(c["id"]),
+        })
+    return {"total_cards_ativos": len(cards_ativos), "candidatos_palcax": resultado}
+
 @app.get("/park-in/compras-toros/dados")
 def park_in_compras_toros_dados():
     """Dados do quadro de Compras de Toro — ver tools/compras_toros.dados_quadro."""
