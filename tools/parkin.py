@@ -857,15 +857,28 @@ def _variacoes_stock() -> dict:
 
     chaves_brutas = set(stock_hoje) | set(stock_sexta)
     variacoes = {}
-    total = 0.0
+    total_inicio_hoje = 0.0
+    total_inicio_sexta = 0.0
     for chave_bruta in chaves_brutas:
         tipo, comprimento, espessura = chave_bruta
         inicio_hoje = stock_hoje.get(chave_bruta, 0.0) - entradas_hoje.get(chave_bruta, 0.0)
         inicio_sexta = stock_sexta.get(chave_bruta, 0.0) - entradas_sexta.get(chave_bruta, 0.0)
-        v = inicio_hoje - inicio_sexta
-        variacoes[_chave_artigo(tipo, comprimento, espessura)] = round(v, 1)
-        total += v
-    variacoes["total"] = round(total, 1)
+        # pedido explícito do Rui, 2026-10-29: mostrar não só a variação em
+        # si, mas a conta toda por trás do triângulo — ver
+        # renderVariacaoTriangulo, que agora mostra isto na legenda.
+        variacoes[_chave_artigo(tipo, comprimento, espessura)] = {
+            "variacao_kg": round(inicio_hoje - inicio_sexta, 1),
+            "inicio_hoje_kg": round(inicio_hoje, 1),
+            "inicio_sexta_kg": round(inicio_sexta, 1),
+        }
+        total_inicio_hoje += inicio_hoje
+        total_inicio_sexta += inicio_sexta
+    variacoes["total"] = {
+        "variacao_kg": round(total_inicio_hoje - total_inicio_sexta, 1),
+        "inicio_hoje_kg": round(total_inicio_hoje, 1),
+        "inicio_sexta_kg": round(total_inicio_sexta, 1),
+    }
+    variacoes["_sexta_data"] = sexta.isoformat()
     return variacoes
 
 
@@ -1052,14 +1065,17 @@ def dados_dashboard(dias_top_entradas: int = 30, dias_movimentos: int = 14) -> d
     # — anexada a cada barra (total + por artigo), pedido explícito do
     # Rui, 2026-10-22.
     variacoes = _variacoes_stock()
+    sexta_data = variacoes.pop("_sexta_data")
+    vazio = {"variacao_kg": 0.0, "inicio_hoje_kg": 0.0, "inicio_sexta_kg": 0.0}
     total = stock_total()
-    total["variacao_kg"] = variacoes.get("total", 0.0)
+    total.update(variacoes.get("total", vazio))
     por_artigo = stock_por_artigo()
     for a in por_artigo:
-        a["variacao_kg"] = variacoes.get(a["artigo"], 0.0)
+        a.update(variacoes.get(a["artigo"], vazio))
     return {
         "stock_total": total,
         "stock_por_artigo": por_artigo,
+        "variacao_sexta_data": sexta_data,
         "top_qualidade": top_qualidade(3),
         "top_entradas": top_entradas(dias_top_entradas, 5),
         # pedido explícito do Rui (2026-10-12): a própria página do Park In
@@ -1698,14 +1714,19 @@ function renderGauge(porCategoria, semCategoria, totalKg, minimo, maximo, escala
 // Triângulo com a variação do stock desde a sexta-feira anterior, à
 // frente de cada barra — pedido explícito do Rui, 2026-10-22. Vermelho
 // se estivermos a gastar mais do que a receber, verde no contrário.
-function renderVariacaoTriangulo(variacaoKg){
+// Pedido explícito do Rui, 2026-10-29: a legenda (data-tip) mostra agora
+// a conta toda (stock no início de hoje, stock no início dessa
+// sexta-feira, e a diferença), não só o resultado final.
+function renderVariacaoTriangulo(inicioHojeKg, inicioSextaKg, variacaoKg){
   const cls = variacaoKg > 0.05 ? "pos" : variacaoKg < -0.05 ? "neg" : "zero";
   const sinal = variacaoKg > 0 ? "+" : "";
   // arredondado às toneladas inteiras (pedido explícito do Rui,
   // 2026-10-22) — com 1 casa decimal, números maiores (ex: "+392,7")
   // não cabiam dentro do triângulo.
   const valor = Math.round(variacaoKg/1000).toLocaleString("pt-PT");
-  return `<div class="var-triangulo ${cls}" data-tip="Variação desde a sexta-feira anterior: ${sinal}${t(variacaoKg)}">
+  const legenda = `Início de hoje: ${t(inicioHojeKg)} · Início de ${dataPt(DADOS.variacao_sexta_data)} `
+    + `(sexta-feira anterior): ${t(inicioSextaKg)} · Variação: ${sinal}${t(variacaoKg)}`;
+  return `<div class="var-triangulo ${cls}" data-tip="${legenda}">
     <div class="forma"></div><div class="val">${sinal}${valor}</div>
   </div>`;
 }
@@ -1812,7 +1833,7 @@ function renderStockTotal(){
   const el = $("#stockTotal");
   if(s.total_kg<=0){ el.innerHTML = '<div class="vazio">Ainda sem stock registado.</div>'; return; }
   el.innerHTML = legenda(s.por_categoria_kg, s.sem_categoria_kg, s.total_kg)
-    + `<div class="gauge-row">${renderVariacaoTriangulo(s.variacao_kg)}
+    + `<div class="gauge-row">${renderVariacaoTriangulo(s.inicio_hoje_kg, s.inicio_sexta_kg, s.variacao_kg)}
        ${renderGauge(s.por_categoria_kg, s.sem_categoria_kg, s.total_kg, s.minimo_kg, s.maximo_kg)}</div>`
     + `<div class="sub mono">Total: ${t(s.total_kg)}</div>`;
 }
@@ -1834,7 +1855,7 @@ function renderStockArtigo(){
       <div class="titulo"><span>${a.artigo==="desconhecido" ? "Artigo desconhecido (histórico sem essa informação)"
         : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`}</span>
         <span class="tot mono">${t(a.total_kg)}</span></div>
-      <div class="gauge-row">${renderVariacaoTriangulo(a.variacao_kg)}
+      <div class="gauge-row">${renderVariacaoTriangulo(a.inicio_hoje_kg, a.inicio_sexta_kg, a.variacao_kg)}
         ${renderGauge(a.por_categoria_kg, a.sem_categoria_kg, a.total_kg, a.minimo_kg, a.maximo_kg, escalaGlobal)}</div>
     </div>
   `).join("");
