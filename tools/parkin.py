@@ -1147,24 +1147,24 @@ def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None,
 # calcular_necessidades_propostas): só uma PROPOSTA, mostrada ao lado do
 # limite atual no separador "Limites" — nunca grava sozinha por cima do
 # que já lá estava, para uma correção manual nunca se perder sem se
-# querer. Mínimo = procura dos próximos 7 dias, Máximo = procura dos
-# próximos 14 dias (inclui sempre a dos 7, por isso Máximo nunca fica
-# abaixo do Mínimo). O Planeamento de Entradas não regista espessura —
+# querer. Mínimo = procura dos próximos 30 dias, Máximo = o dobro do
+# Mínimo (pedido explícito do Rui, 2026-10-29, revisto — antes Máximo era
+# a procura a 14 dias). O Planeamento de Entradas não regista espessura —
 # conta sempre para o artigo "normal" desse tipo+comprimento; "fina"
 # mantém-se só manual.
-DIAS_LIMITE_MINIMO_PROCURA = 7
-DIAS_LIMITE_MAXIMO_PROCURA = 14
+DIAS_LIMITE_MINIMO_PROCURA = 30
+MULTIPLICADOR_LIMITE_MAXIMO = 2
 
 def limites_propostos_por_procura() -> dict:
     procura_min = pe.procura_toros_por_artigo(DIAS_LIMITE_MINIMO_PROCURA)
-    procura_max = pe.procura_toros_por_artigo(DIAS_LIMITE_MAXIMO_PROCURA)
     propostas = {}
-    for chave_toro in set(procura_min) | set(procura_max):
+    for chave_toro, kg in procura_min.items():
         tipo, comprimento_m = chave_toro
         chave = _chave_artigo(tipo, comprimento_m, "normal")
+        minimo = round(kg, 1)
         propostas[chave] = {
-            "minimo_kg": round(procura_min.get(chave_toro, 0.0), 1),
-            "maximo_kg": round(procura_max.get(chave_toro, 0.0), 1),
+            "minimo_kg": minimo,
+            "maximo_kg": round(minimo * MULTIPLICADOR_LIMITE_MAXIMO, 1),
         }
     return propostas
 
@@ -2270,7 +2270,7 @@ async function renderLimites(){
       const el = document.getElementById(`proposta-${chave}`);
       if(!el) continue;
       const p = propostas[chave];
-      el.innerHTML = `Proposta pela procura (próx. 7/14 dias): mín ${t(p.minimo_kg)} · máx ${t(p.maximo_kg)} `
+      el.innerHTML = `Proposta pela procura (mín = próx. 30 dias, máx = 2x mín): mín ${t(p.minimo_kg)} · máx ${t(p.maximo_kg)} `
         + `<a href="#" data-usar-proposta="${chave}" data-min="${p.minimo_kg}" data-max="${p.maximo_kg}">usar</a>`;
     }
     $("#limitesLista").querySelectorAll("[data-usar-proposta]").forEach(a => {
