@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta
 import anthropic
 import db
 from tools import visao
+from tools import planeamento_entradas as pe
 
 _client = anthropic.Anthropic()
 
@@ -1138,6 +1139,34 @@ def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None)
     return {"ok": True}
 
 
+# Limites "propostos" a partir da procura real do Planeamento de Entradas
+# (pedido explícito do Rui, 2026-10-29) — mesmo princípio já usado na
+# "necessidade" do Compras de Toro (ver tools.compras_toros.
+# calcular_necessidades_propostas): só uma PROPOSTA, mostrada ao lado do
+# limite atual no separador "Limites" — nunca grava sozinha por cima do
+# que já lá estava, para uma correção manual nunca se perder sem se
+# querer. Mínimo = procura dos próximos 7 dias, Máximo = procura dos
+# próximos 14 dias (inclui sempre a dos 7, por isso Máximo nunca fica
+# abaixo do Mínimo). O Planeamento de Entradas não regista espessura —
+# conta sempre para o artigo "normal" desse tipo+comprimento; "fina"
+# mantém-se só manual.
+DIAS_LIMITE_MINIMO_PROCURA = 7
+DIAS_LIMITE_MAXIMO_PROCURA = 14
+
+def limites_propostos_por_procura() -> dict:
+    procura_min = pe.procura_toros_por_artigo(DIAS_LIMITE_MINIMO_PROCURA)
+    procura_max = pe.procura_toros_por_artigo(DIAS_LIMITE_MAXIMO_PROCURA)
+    propostas = {}
+    for chave_toro in set(procura_min) | set(procura_max):
+        tipo, comprimento_m = chave_toro
+        chave = _chave_artigo(tipo, comprimento_m, "normal")
+        propostas[chave] = {
+            "minimo_kg": round(procura_min.get(chave_toro, 0.0), 1),
+            "maximo_kg": round(procura_max.get(chave_toro, 0.0), 1),
+        }
+    return propostas
+
+
 # Ferramentas do Park In para a Alma (pedido explícito do Rui, 2026-10-09):
 # a página é dinâmica, não indexada, e o teu tool genérico de internet
 # (web_fetch/web_search) não a consegue ler — usa sempre estas, nunca
@@ -2168,7 +2197,7 @@ $("#bCorrecaoGuardar").onclick = async () => {
   $("#bCorrecaoGuardar").disabled = false;
 };
 
-function renderLimites(){
+async function renderLimites(){
   const linhas = [{chave:"total", rotulo:"Stock total", lim:DADOS.stock_total}]
     .concat(DADOS.stock_por_artigo.map(a => ({chave:a.artigo,
       rotulo: a.artigo==="desconhecido" ? "Artigo desconhecido"
@@ -2180,7 +2209,33 @@ function renderLimites(){
         <input type="text" inputmode="decimal" style="width:80px" data-chave="${l.chave}" data-campo="maximo_kg" placeholder="máx kg" value="${l.lim.maximo_kg??''}">
       </span>
     </div>
+    <div class="sub" id="proposta-${l.chave}" style="margin:-6px 0 10px"></div>
   `).join("");
+  // Pedido explícito do Rui, 2026-10-29: proposta de Mín/Máx calculada a
+  // partir da procura real do Planeamento de Entradas (próximos 7/14
+  // dias) — só aparece ao lado, nunca substitui sozinha o que já lá
+  // estava; "usar" preenche os campos, mas só grava ao clicar Guardar.
+  try{
+    const propostas = await (await fetch("/park-in/limites/propostas")).json();
+    for(const chave in propostas){
+      const el = document.getElementById(`proposta-${chave}`);
+      if(!el) continue;
+      const p = propostas[chave];
+      el.innerHTML = `Proposta pela procura (próx. 7/14 dias): mín ${t(p.minimo_kg)} · máx ${t(p.maximo_kg)} `
+        + `<a href="#" data-usar-proposta="${chave}" data-min="${p.minimo_kg}" data-max="${p.maximo_kg}">usar</a>`;
+    }
+    $("#limitesLista").querySelectorAll("[data-usar-proposta]").forEach(a => {
+      a.onclick = (ev) => {
+        ev.preventDefault();
+        const chave = a.dataset.usarProposta;
+        document.querySelectorAll("#limitesLista input").forEach(inp => {
+          if(inp.dataset.chave !== chave) return;
+          if(inp.dataset.campo === "minimo_kg") inp.value = a.dataset.min;
+          if(inp.dataset.campo === "maximo_kg") inp.value = a.dataset.max;
+        });
+      };
+    });
+  } catch(e){ console.error("falhou a obter propostas de limite:", e); }
 }
 
 $("#bLimitesGuardar").onclick = async () => {

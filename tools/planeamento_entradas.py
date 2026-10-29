@@ -525,6 +525,46 @@ def estado_planeamento_entradas() -> dict:
     return {"charriots": CHARRIOTS, "entradas": entradas, "historico": db.historico_valores_entradas(),
             "feriados": db.feriados_ecos_largos()}
 
+def procura_toros_por_artigo(dias: int) -> dict:
+    """Soma, em kg (1 m³ = 1 tonelada, mesma conversão usada em todo o
+    lado — ver agents.relatorio_aprovisionamento_toros.KG_POR_M3), a
+    procura de toros das OFs/buffers deste quadro cujo dia de entrada
+    caia nos próximos `dias` dias (hoje incluído, entradas já passadas
+    ficam de fora) — por (tipo, comprimento_m). Pedido explícito do Rui,
+    2026-10-29, para calcular os Limites do Park In a partir da procura
+    real (ver tools.parkin.limites_propostos_por_procura) — nunca por
+    espessura, que este quadro não regista."""
+    hoje = date.today()
+    fim = hoje + timedelta(days=dias)
+    procura = {}
+
+    def _somar(toro_tipo, toro_cmp_mm, qtd_toros_m3):
+        if not toro_tipo or not toro_cmp_mm or not qtd_toros_m3:
+            return
+        try:
+            comprimento_m = round(float(toro_cmp_mm) / 1000, 2)
+        except (TypeError, ValueError):
+            return  # preset não numérico (ex: "outro" por definir) — não entra nesta conta
+        chave = (toro_tipo, comprimento_m)
+        procura[chave] = procura.get(chave, 0.0) + float(qtd_toros_m3) * 1000
+
+    for e in estado_planeamento_entradas()["entradas"]:
+        dia_entrada = e.get("dia_entrada")
+        if not dia_entrada:
+            continue
+        try:
+            d = date.fromisoformat(dia_entrada)
+        except ValueError:
+            continue
+        if not (hoje <= d <= fim):
+            continue
+        if e.get("buffer"):
+            _somar(e.get("toro_tipo"), e.get("toro_cmp"), e.get("qtd_toros_m3"))
+        else:
+            for l in e.get("linhas") or []:
+                _somar(l.get("toro_tipo"), l.get("toro_cmp"), l.get("qtd_toros_m3"))
+    return procura
+
 def atribuir_charriots(basecamp_card_id: int, charriots: list = None) -> dict:
     """Atribui (substitui) os charriots de uma OF — pode estar em vários ao
     mesmo tempo (ex: Charriot 1 e 2 em simultâneo, pedido explícito do

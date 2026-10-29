@@ -1072,6 +1072,12 @@ def park_in_limites(corpo: dict = Body(...)):
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
 
+@app.get("/park-in/limites/propostas")
+def park_in_limites_propostas():
+    """Propostas de limite por artigo, calculadas a partir da procura real
+    do Planeamento de Entradas — ver tools/parkin.limites_propostos_por_procura."""
+    return parkin.limites_propostos_por_procura()
+
 @app.post("/park-in/artigo")
 def park_in_registar_artigo(corpo: dict = Body(...)):
     """Regista um artigo novo (tipo+comprimento+espessura) mesmo sem
