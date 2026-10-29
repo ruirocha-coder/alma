@@ -1156,16 +1156,40 @@ DIAS_LIMITE_MINIMO_PROCURA = 30
 MULTIPLICADOR_LIMITE_MAXIMO = 2
 
 def limites_propostos_por_procura() -> dict:
+    """Uma proposta por CADA artigo "normal" conhecido do Park In (os já
+    registados/com stock, ver stock_por_artigo, mais qualquer outro que só
+    apareça na procura) — pedido explícito do Rui, 2026-10-29: "porque é
+    que não está a fazer os cálculos para todos os artigos?". Um artigo
+    sem nenhuma OF a precisar dele nos próximos 30 dias tem mesmo
+    proposta 0/0 (resposta honesta: "sem procura", nunca "em falta"/por
+    calcular). Um artigo que o Planeamento de Entradas nunca pode propor
+    (ex: "MT · 3,05m", comprimento fora dos presets do Algoritmo de
+    Comprimentos — ver tools.planeamento_entradas.TORO_CMP_PRESETS) fica
+    também a 0/0 pela mesma razão: nunca há nenhuma OF com esse
+    comprimento para contar.
+
+    Inclui também "total" = soma de todas as propostas por artigo (pedido
+    explícito do Rui: "o mín e máx [do stock total] deve partir da soma
+    dos cálculos automáticos já feitos para os outros artigos") — nunca
+    recalculado à parte, por isso Máximo do total também fica sempre o
+    dobro do Mínimo do total."""
     procura_min = pe.procura_toros_por_artigo(DIAS_LIMITE_MINIMO_PROCURA)
+    chaves_toro = {(a["tipo"], a["comprimento"]) for a in stock_por_artigo() if a["espessura"] == "normal"}
+    chaves_toro |= set(procura_min)
     propostas = {}
-    for chave_toro, kg in procura_min.items():
-        tipo, comprimento_m = chave_toro
+    total_minimo = 0.0
+    for tipo, comprimento_m in chaves_toro:
         chave = _chave_artigo(tipo, comprimento_m, "normal")
-        minimo = round(kg, 1)
+        minimo = round(procura_min.get((tipo, comprimento_m), 0.0), 1)
         propostas[chave] = {
             "minimo_kg": minimo,
             "maximo_kg": round(minimo * MULTIPLICADOR_LIMITE_MAXIMO, 1),
         }
+        total_minimo += minimo
+    propostas["total"] = {
+        "minimo_kg": round(total_minimo, 1),
+        "maximo_kg": round(total_minimo * MULTIPLICADOR_LIMITE_MAXIMO, 1),
+    }
     return propostas
 
 
