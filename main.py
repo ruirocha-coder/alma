@@ -1083,39 +1083,6 @@ def park_in_limites(corpo: dict = Body(...)):
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg"),
                                               bool(corpo.get("automatico"))))
 
-@app.get("/_debug-talao")
-def _debug_talao(talao: str):
-    import db as _db
-    from decimal import Decimal
-    def limpa(d):
-        if not d:
-            return d
-        return {k: (float(v) if isinstance(v, Decimal) else (v.isoformat() if hasattr(v, "isoformat") else v))
-               for k, v in d.items()}
-    with _db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, talao, fornecedor, data, tipo, comprimento, espessura, peso_liquido_kg, saldo_kg, "
-                "categoria_qualidade, obs, criado_em FROM parkin_entradas WHERE talao = %s ORDER BY id", (talao,)
-            )
-            entradas = [limpa(r) for r in cur.fetchall()]
-            resultado = []
-            for ent in entradas:
-                cur.execute(
-                    """SELECT d.id, d.quantidade_kg, d.saida_id, d.correcao_id,
-                              s.data AS saida_data, s.talao AS saida_talao, s.quantidade_kg AS saida_quantidade_kg,
-                              s.criado_em AS saida_criado_em,
-                              c.data AS correcao_data, c.motivo AS correcao_motivo, c.criado_em AS correcao_criado_em
-                       FROM parkin_depletions d
-                       LEFT JOIN parkin_saidas s ON s.id = d.saida_id
-                       LEFT JOIN parkin_correcoes c ON c.id = d.correcao_id
-                       WHERE d.entrada_id = %s ORDER BY d.id""",
-                    (ent["id"],)
-                )
-                depletions = [limpa(r) for r in cur.fetchall()]
-                resultado.append({"entrada": ent, "depletions": depletions})
-    return resultado
-
 @app.get("/park-in/limites/propostas")
 def park_in_limites_propostas():
     """Propostas de limite por artigo, calculadas a partir da procura real
