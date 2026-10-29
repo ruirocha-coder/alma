@@ -2270,7 +2270,7 @@ async function renderLimites(){
       const el = document.getElementById(`proposta-${chave}`);
       if(!el) continue;
       const p = propostas[chave];
-      el.innerHTML = `Proposta pela procura (mín = próx. 30 dias, máx = 2x mín): mín ${t(p.minimo_kg)} · máx ${t(p.maximo_kg)} `
+      el.innerHTML = `Proposta: mín ${t(p.minimo_kg)} · máx ${t(p.maximo_kg)} `
         + `<a href="#" data-usar-proposta="${chave}" data-min="${p.minimo_kg}" data-max="${p.maximo_kg}">usar</a>`;
     }
     $("#limitesLista").querySelectorAll("[data-usar-proposta]").forEach(a => {
