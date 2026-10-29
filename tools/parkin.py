@@ -913,6 +913,7 @@ def stock_total() -> dict:
         "sem_categoria_kg": round(sem_categoria, 1),
         "minimo_kg": limites.get("minimo_kg"),
         "maximo_kg": limites.get("maximo_kg"),
+        "automatico": bool(limites.get("automatico")),
     }
 
 
@@ -979,6 +980,7 @@ def stock_por_artigo() -> list[dict]:
             "por_categoria_kg": {k: round(v, 1) for k, v in a["por_categoria_kg"].items()},
             "sem_categoria_kg": round(a["sem_categoria_kg"], 1),
             "minimo_kg": lim.get("minimo_kg"), "maximo_kg": lim.get("maximo_kg"),
+            "automatico": bool(lim.get("automatico")),
         })
     resultado.sort(key=lambda x: _chave_ordenacao_artigo(x["tipo"], x["comprimento"], x["espessura"]))
     return resultado
@@ -1134,8 +1136,8 @@ def listar_movimentos(dias: int = 30) -> list[dict]:
     return movimentos
 
 
-def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None) -> dict:
-    db.definir_limite_parkin(chave, minimo_kg, maximo_kg)
+def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None, automatico: bool = False) -> dict:
+    db.definir_limite_parkin(chave, minimo_kg, maximo_kg, automatico)
     return {"ok": True}
 
 
@@ -1165,6 +1167,25 @@ def limites_propostos_por_procura() -> dict:
             "maximo_kg": round(procura_max.get(chave_toro, 0.0), 1),
         }
     return propostas
+
+
+def atualizar_limites_automaticos():
+    """Recalcula e grava os limites marcados como "automático" (ver
+    definir_limite/limites_parkin) a partir da procura atual — pedido
+    explícito do Rui, 2026-10-29: "os limites devem ser atualizados de
+    semana a semana", corrido pelo scheduler (ver main.py) toda
+    segunda-feira de manhã. Um limite marcado "manual" (corrigido à mão)
+    nunca é tocado aqui — só volta a seguir a procura se alguém clicar
+    outra vez em "usar" na proposta, no separador Limites. Um artigo que
+    já foi automático mas deixou de ter qualquer procura (nenhuma OF
+    agendada para ele) fica a 0/0 — sinal real de que não há procura
+    próxima nenhuma, nunca um valor desatualizado."""
+    propostas = limites_propostos_por_procura()
+    for chave, lim in db.limites_parkin().items():
+        if not lim.get("automatico"):
+            continue
+        proposta = propostas.get(chave, {"minimo_kg": 0.0, "maximo_kg": 0.0})
+        db.definir_limite_parkin(chave, proposta["minimo_kg"], proposta["maximo_kg"], automatico=True)
 
 
 # Ferramentas do Park In para a Alma (pedido explícito do Rui, 2026-10-09):
@@ -1285,6 +1306,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
   select,input,textarea{background:var(--paper);color:var(--ink);border:1px solid var(--edge);
     border-radius:8px;padding:6px 9px;font:inherit;font-size:14px}
   input:focus,select:focus,textarea:focus{outline:2px solid var(--blue);outline-offset:0;border-color:var(--blue)}
+  /* limite "automático" (segue a procura, ver renderLimites) — cor
+     diferente para se distinguir à vista de um "manual"; pedido
+     explícito do Rui, 2026-10-29 */
+  input.limite-automatico{background:#EAF2FC;border-color:var(--blue);color:var(--blue)}
   .acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;justify-content:flex-end}
   .err{color:var(--red);font-size:13px;margin-top:10px}
   .ok{color:var(--green);font-size:13px;margin-top:10px}
@@ -2197,24 +2222,48 @@ $("#bCorrecaoGuardar").onclick = async () => {
   $("#bCorrecaoGuardar").disabled = false;
 };
 
+// Pedido explícito do Rui, 2026-10-29: marca visualmente (cor diferente)
+// os campos de um limite "automático" (a seguir sempre a proposta pela
+// procura, recalculada toda semana — ver tools/parkin.
+// atualizar_limites_automaticos) — assim que se altera o valor à mão,
+// volta à cor normal (passa a "manual", só clicando outra vez em "usar"
+// é que volta a ficar automático). `limitesAutomaticoPorChave` guarda o
+// estado atual de cada linha, enviado ao Guardar.
+let limitesAutomaticoPorChave = {};
+
+function marcarLimiteAutomatico(chave, automatico){
+  limitesAutomaticoPorChave[chave] = automatico;
+  document.querySelectorAll("#limitesLista input").forEach(inp => {
+    if(inp.dataset.chave === chave) inp.classList.toggle("limite-automatico", automatico);
+  });
+}
+
 async function renderLimites(){
+  limitesAutomaticoPorChave = {};
   const linhas = [{chave:"total", rotulo:"Stock total", lim:DADOS.stock_total}]
     .concat(DADOS.stock_por_artigo.map(a => ({chave:a.artigo,
       rotulo: a.artigo==="desconhecido" ? "Artigo desconhecido"
         : `${a.tipo} · ${a.comprimento.toFixed(2)}m · ${a.espessura==="fina"?"Fina":"Normal"}`, lim:a})));
+  linhas.forEach(l => { limitesAutomaticoPorChave[l.chave] = !!l.lim.automatico; });
   $("#limitesLista").innerHTML = linhas.map(l => `
     <div class="frow"><label>${l.rotulo}</label>
       <span style="display:flex;gap:6px">
-        <input type="text" inputmode="decimal" style="width:80px" data-chave="${l.chave}" data-campo="minimo_kg" placeholder="mín kg" value="${l.lim.minimo_kg??''}">
-        <input type="text" inputmode="decimal" style="width:80px" data-chave="${l.chave}" data-campo="maximo_kg" placeholder="máx kg" value="${l.lim.maximo_kg??''}">
+        <input type="text" inputmode="decimal" class="${l.lim.automatico ? "limite-automatico" : ""}"
+          style="width:80px" data-chave="${l.chave}" data-campo="minimo_kg" placeholder="mín kg" value="${l.lim.minimo_kg??''}">
+        <input type="text" inputmode="decimal" class="${l.lim.automatico ? "limite-automatico" : ""}"
+          style="width:80px" data-chave="${l.chave}" data-campo="maximo_kg" placeholder="máx kg" value="${l.lim.maximo_kg??''}">
       </span>
     </div>
     <div class="sub" id="proposta-${l.chave}" style="margin:-6px 0 10px"></div>
   `).join("");
+  document.querySelectorAll("#limitesLista input").forEach(inp => {
+    inp.oninput = () => marcarLimiteAutomatico(inp.dataset.chave, false);
+  });
   // Pedido explícito do Rui, 2026-10-29: proposta de Mín/Máx calculada a
   // partir da procura real do Planeamento de Entradas (próximos 7/14
   // dias) — só aparece ao lado, nunca substitui sozinha o que já lá
-  // estava; "usar" preenche os campos, mas só grava ao clicar Guardar.
+  // estava; "usar" preenche os campos e marca-os como automáticos
+  // (cor diferente), mas só grava mesmo ao clicar Guardar.
   try{
     const propostas = await (await fetch("/park-in/limites/propostas")).json();
     for(const chave in propostas){
@@ -2233,6 +2282,7 @@ async function renderLimites(){
           if(inp.dataset.campo === "minimo_kg") inp.value = a.dataset.min;
           if(inp.dataset.campo === "maximo_kg") inp.value = a.dataset.max;
         });
+        marcarLimiteAutomatico(chave, true);
       };
     });
   } catch(e){ console.error("falhou a obter propostas de limite:", e); }
@@ -2242,7 +2292,7 @@ $("#bLimitesGuardar").onclick = async () => {
   const chaves = {};
   document.querySelectorAll("#limitesLista input").forEach(inp => {
     const chave = inp.dataset.chave;
-    chaves[chave] = chaves[chave] || {chave};
+    chaves[chave] = chaves[chave] || {chave, automatico: !!limitesAutomaticoPorChave[chave]};
     const v = inp.value.trim();
     chaves[chave][inp.dataset.campo] = v ? parseFloat(v.replace(",",".")) : null;
   });

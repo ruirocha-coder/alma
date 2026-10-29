@@ -887,6 +887,14 @@ CREATE TABLE IF NOT EXISTS planeamento_entradas_linhas (
 );
 CREATE INDEX IF NOT EXISTS planeamento_entradas_linhas_card_idx
     ON planeamento_entradas_linhas (basecamp_card_id);
+-- pedido explícito do Rui, 2026-10-29: distinguir um limite "automático"
+-- (a seguir sempre a proposta pela procura do Planeamento de Entradas,
+-- recalculada toda semana — ver tools.parkin.atualizar_limites_automaticos)
+-- de um "manual" (corrigido à mão, nunca mais tocado pelo recálculo
+-- automático até se voltar a clicar em "usar" na proposta) — default
+-- false para nunca mudar o comportamento de limites já definidos antes
+-- desta funcionalidade existir.
+ALTER TABLE parkin_limites ADD COLUMN IF NOT EXISTS automatico BOOLEAN NOT NULL DEFAULT false;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -3178,23 +3186,30 @@ def ligar_entrada_a_correcao(correcao_id: int, entrada_id: int):
         conn.commit()
 
 def limites_parkin() -> dict:
-    """{chave: {"minimo_kg", "maximo_kg"}} — 'total' é o limite da barra de
-    stock geral; qualquer outra chave é um artigo ("tipo|comprimento|espessura",
-    ver tools/parkin._chave_artigo). Sem entrada = sem limites definidos."""
+    """{chave: {"minimo_kg", "maximo_kg", "automatico"}} — 'total' é o
+    limite da barra de stock geral; qualquer outra chave é um artigo
+    ("tipo|comprimento|espessura", ver tools/parkin._chave_artigo). Sem
+    entrada = sem limites definidos. `automatico` (pedido explícito do
+    Rui, 2026-10-29): true quando o limite segue sempre a proposta pela
+    procura do Planeamento de Entradas (ver
+    tools.parkin.atualizar_limites_automaticos), false quando foi
+    corrigido à mão."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT chave, minimo_kg, maximo_kg FROM parkin_limites")
-            return {l["chave"]: {"minimo_kg": l["minimo_kg"], "maximo_kg": l["maximo_kg"]}
+            cur.execute("SELECT chave, minimo_kg, maximo_kg, automatico FROM parkin_limites")
+            return {l["chave"]: {"minimo_kg": l["minimo_kg"], "maximo_kg": l["maximo_kg"],
+                                  "automatico": l["automatico"]}
                    for l in cur.fetchall()}
 
-def definir_limite_parkin(chave: str, minimo_kg: float = None, maximo_kg: float = None):
+def definir_limite_parkin(chave: str, minimo_kg: float = None, maximo_kg: float = None, automatico: bool = False):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO parkin_limites (chave, minimo_kg, maximo_kg) VALUES (%s, %s, %s)
+                """INSERT INTO parkin_limites (chave, minimo_kg, maximo_kg, automatico) VALUES (%s, %s, %s, %s)
                    ON CONFLICT (chave) DO UPDATE SET
-                       minimo_kg = EXCLUDED.minimo_kg, maximo_kg = EXCLUDED.maximo_kg""",
-                (chave, minimo_kg, maximo_kg)
+                       minimo_kg = EXCLUDED.minimo_kg, maximo_kg = EXCLUDED.maximo_kg,
+                       automatico = EXCLUDED.automatico""",
+                (chave, minimo_kg, maximo_kg, automatico)
             )
         conn.commit()
 

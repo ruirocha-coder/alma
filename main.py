@@ -111,6 +111,13 @@ scheduler.add_job(mensagem_motivacional_diaria_ecos_largos.correr_mensagem_diari
 # job por intervalo (não "cron") desta aplicação, porque aqui o objetivo é
 # mesmo "quase em tempo real" e não um horário fixo do dia.
 scheduler.add_job(sincronizacao_calendario.correr_sincronizacao_calendario, "interval", minutes=2)
+# limites de stock do Park In marcados como "automático" (ver
+# tools/parkin.atualizar_limites_automaticos): recalculados a partir da
+# procura do Planeamento de Entradas toda segunda-feira de manhã — pedido
+# explícito do Rui, 2026-10-29 ("os limites devem ser atualizados de
+# semana a semana"). Cedo, antes de tudo o resto, para o quadro já
+# aparecer atualizado ao longo do dia.
+scheduler.add_job(parkin.atualizar_limites_automaticos, "cron", day_of_week="mon", hour=5, minute=0)
 scheduler.start()
 
 class Pedido(BaseModel):
@@ -1066,11 +1073,15 @@ def park_in_correcao(corpo: dict = Body(...)):
 @app.post("/park-in/limites")
 def park_in_limites(corpo: dict = Body(...)):
     """Define o mínimo/máximo de stock de uma chave ("total" ou um artigo
-    "tipo|comprimento|espessura") — ver tools/parkin.definir_limite."""
+    "tipo|comprimento|espessura") — ver tools/parkin.definir_limite.
+    `automatico` (pedido explícito do Rui, 2026-10-29): true quando este
+    limite deve seguir sempre a proposta pela procura (recalculada toda
+    semana, ver tools/parkin.atualizar_limites_automaticos)."""
     chave = corpo.get("chave")
     if not chave:
         return JSONResponse({"erro": "falta indicar chave"}, status_code=400)
-    return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg")))
+    return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg"),
+                                              bool(corpo.get("automatico"))))
 
 @app.get("/park-in/limites/propostas")
 def park_in_limites_propostas():
