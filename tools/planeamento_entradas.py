@@ -160,12 +160,17 @@ depois:
   OBSERVAÇÕES do documento disserem explicitamente que a madeira é "IN"
   (nunca adivinhes a partir de outro sinal, ex: nome do cliente ou do
   artigo; na dúvida, "MT").
-- "artigo": a designação/descrição do artigo tal como está no PDF.
+- "artigo": a designação/descrição do artigo, tal como está na coluna
+  "Descrição" da tabela do PDF — NUNCA de nenhuma outra coluna.
 - "comprimento_mm": o comprimento dessa peça, SEMPRE convertido para
   milímetros (ex: "2,55 m" ou "255 cm" -> 2550; já em mm, usa tal e qual).
 - "qtd": o valor do campo "QTD" (quantidade) desse artigo no PDF, tal
   como está escrito (não convertas unidades) — null se não houver esse
   campo ou não for legível.
+Ignora sempre qualquer linha da tabela cuja "Descrição" seja um
+"travamento" ou um "suporte" — são material de embalagem/fixação para
+transporte, nunca um artigo de produção; não os incluas na lista mesmo
+que tenham comprimento e quantidade como qualquer outro artigo.
 Nunca inventes um artigo ou um comprimento que não estejam mesmo no PDF.
 Se não conseguires identificar nenhum artigo com comprimento, "artigos"
 fica uma lista vazia []."""
