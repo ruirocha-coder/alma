@@ -1731,8 +1731,11 @@ function linhaWipToroHtml(linha, idx){
         <option value="MT"${linha.toroTipo==="MT"?" selected":""}>MT</option>
       </select></div>
       <div class="miniField"><label>Índice</label><input class="fIndiceToros" type="text" inputmode="decimal" value="${linha.indiceToros??INDICE_TOROS_DEFAULT}"></div>
-      <div class="miniField"><label>QTD Toros</label><b class="fQtdToros mono" style="align-self:center">—</b>
-        <span class="fAproveitamento mono" style="align-self:center;color:var(--dim);font-size:12px"></span></div>
+      <div class="miniField"><label>QTD Toros</label>
+        <span style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+          <b class="fQtdToros mono">—</b>
+          <span class="fAproveitamento mono" style="color:var(--dim);font-size:12px"></span>
+        </span></div>
     </div>
   </div>`;
 }
