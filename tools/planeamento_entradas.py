@@ -52,6 +52,23 @@ WIP_LOTES_TABELA = [
 ]
 FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
 
+def _fiadas_mais_proxima(esp_mm):
+    """Nº de fiadas da tabela "WIP Lotes" para este WIP Esp — exata se
+    bater com uma linha da tabela, senão a da espessura mais PRÓXIMA
+    (nunca None só por não bater em cheio). Pedido explícito do Rui,
+    2026-10-30: desde que o WIP Esp passou a vir da largura (L) do nome
+    do artigo (ver _wip_esp_do_nome_artigo), já raramente bate
+    exatamente com uma linha da tabela — "se a espessura tal como está
+    não aparece na tabela, deve ser o valor arredondado e assumir esse
+    número de fiadas". None só se esp_mm for None."""
+    if esp_mm is None:
+        return None
+    esp = round(float(esp_mm))
+    if esp in FIADAS_POR_ESPESSURA:
+        return FIADAS_POR_ESPESSURA[esp]
+    mais_proxima = min(FIADAS_POR_ESPESSURA, key=lambda e: abs(e - esp))
+    return FIADAS_POR_ESPESSURA[mais_proxima]
+
 # QTD Toros = volume da linha (m³) × INDICE_TOROS; QTD Wip = volume da
 # linha (m³) × INDICE_WIP — pedido explícito do Rui (2026-10-01). Cada
 # linha pode ter o seu próprio índice (ver guardar_linhas_entrada); estes
@@ -239,22 +256,24 @@ def _comprimento_do_nome_artigo(nome: str):
     m = _RE_DIMENSAO_ARTIGO.search(nome)
     return float(m.group(1)) if m else None
 
-def _espessura_do_nome_artigo(nome: str):
-    """Extrai a espessura (E) diretamente do nome/descrição do artigo,
-    pelo mesmo padrão "<comprimento>x<largura>x<espessura>" usado em
-    _comprimento_do_nome_artigo (ex: "Barrote 990x52x52" -> 52;
-    "1200/1000X82X16" -> 16) — pedido explícito do Rui, 2026-10-30: "a
-    espessura (E) vem sempre do próprio nome do artigo quando este tem o
-    padrão CxLxE", para o WIP Esp deixar de ficar sempre em branco.
-    Preenche o campo "WIP Esp" (ver calcular_linhas_automaticamente); o
-    nº de lotes só é calculado a seguir se este valor bater com uma linha
-    da tabela "WIP Lotes" (ver FIADAS_POR_ESPESSURA) — senão fica por
-    confirmar à mão, como já acontecia. None se o nome não tiver este
-    padrão."""
+def _wip_esp_do_nome_artigo(nome: str):
+    """O valor do campo "WIP Esp" vem da LARGURA (L), não da espessura
+    (E), do nome/descrição do artigo — mesmo padrão "CxLxE" usado em
+    _comprimento_do_nome_artigo (ex: "Régua 1450x95x22" -> 95, não 22).
+    Pedido explícito do Rui, 2026-10-30, correção de um erro real: a
+    primeira versão disto lia o "E" (espessura) do nome, mas a regra
+    certa é "a espessura vai ser colocada automaticamente... vai ser
+    preenchida pela largura que está no artigo... vais ter de ir buscar
+    o L e preencher tal e qual nesse campo" — o campo "WIP Esp" já não
+    precisa de bater com nenhuma linha da tabela "WIP Lotes" (esse valor
+    pode ser qualquer um, tal como veio do nome); a tabela só entra
+    depois, ao calcular as Fiadas, pela fiada mais próxima quando não
+    bate exatamente (ver _fiadas_mais_proxima). None se o nome não tiver
+    este padrão."""
     if not nome:
         return None
     m = _RE_DIMENSAO_ARTIGO.search(nome)
-    return float(m.group(3)) if m else None
+    return float(m.group(2)) if m else None
 
 def _extrair_artigos_of(texto_pdf: str) -> tuple:
     """Chama o modelo para identificar os artigos (comprimento + qtd) e o
@@ -265,10 +284,10 @@ def _extrair_artigos_of(texto_pdf: str) -> tuple:
     casos), nunca inventa dados. O comprimento do modelo é sempre
     substituído pelo lido diretamente do nome do artigo quando possível
     (ver _comprimento_do_nome_artigo) — mais fiável do que confiar no
-    número que o modelo escolher no texto do PDF. A espessura
-    ("espessura_mm", pedido explícito do Rui, 2026-10-30) vem sempre do
-    mesmo padrão no nome do artigo (ver _espessura_do_nome_artigo) — o
-    modelo nunca é chamado para a extrair."""
+    número que o modelo escolher no texto do PDF. O valor do WIP Esp
+    ("wip_esp_mm", pedido explícito do Rui, 2026-10-30) vem sempre da
+    LARGURA (L) do mesmo padrão no nome do artigo (ver
+    _wip_esp_do_nome_artigo) — o modelo nunca é chamado para a extrair."""
     resposta = _client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=2048,
         system=_MISSAO_EXTRACAO_ARTIGOS_OF,
@@ -304,7 +323,7 @@ def _extrair_artigos_of(texto_pdf: str) -> tuple:
         except (TypeError, ValueError):
             qtd = None
         validos.append({"artigo": nome_artigo, "comprimento_mm": comprimento, "qtd": qtd,
-                        "espessura_mm": _espessura_do_nome_artigo(nome_artigo)})
+                        "wip_esp_mm": _wip_esp_do_nome_artigo(nome_artigo)})
     return tipo_madeira, validos
 
 def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
@@ -319,11 +338,11 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     estado_planeamento_entradas/_linhas_com_calculo, a única fonte desse
     cálculo). Índices (WIP/Toro) assumem sempre os valores por omissão
     (INDICE_WIP_DEFAULT/INDICE_TOROS_DEFAULT) — não há nenhum índice
-    "correto" por artigo a ler de lado nenhum. WIP Esp vem do mesmo nome
-    do artigo (ver _espessura_do_nome_artigo, pedido explícito do Rui,
-    2026-10-30) — None se o nome não tiver o padrão "CxLxE", fica então
-    por preencher à mão como antes. Toro Tipo (pedido explícito do Rui,
-    2026-10-30) vem das observações do PDF (ver
+    "correto" por artigo a ler de lado nenhum. WIP Esp vem da LARGURA (L)
+    do mesmo nome do artigo (ver _wip_esp_do_nome_artigo, pedido
+    explícito do Rui, 2026-10-30) — None se o nome não tiver o padrão
+    "CxLxE", fica então por preencher à mão como antes. Toro Tipo
+    (pedido explícito do Rui, 2026-10-30) vem das observações do PDF (ver
     _MISSAO_EXTRACAO_ARTIGOS_OF): "MT" por omissão, só "IN" se o
     documento o disser explicitamente — é uma propriedade da OF toda,
     por isso o mesmo valor aplica-se a todas as linhas."""
@@ -349,7 +368,7 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
             "artigo": a["artigo"],
             "peso": a["qtd"],
             "wip_cmp": float(wip_cmp_texto) if wip_cmp_texto is not None else None,
-            "wip_esp": a["espessura_mm"],
+            "wip_esp": a["wip_esp_mm"],
             "indice_wip": INDICE_WIP_DEFAULT,
             "toro_cmp": toro_cmp,
             "toro_tipo": tipo_madeira,
@@ -380,12 +399,12 @@ def _calcular_automaticamente_em_fundo(basecamp_card_id: int):
 def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
     """Volume real de um lote WIP, em m³: comprimento x (largura fixa x
     0,7) x nº de fiadas x espessura (cmp/lar/esp em mm, convertidos para
-    metros aqui) — fiadas vêm sempre da tabela "WIP Lotes" pela espessura
-    escolhida (ver FIADAS_POR_ESPESSURA). None sempre que faltar algum dos
-    dados ou a espessura não bater com nenhuma linha da tabela."""
+    metros aqui) — fiadas vêm sempre da tabela "WIP Lotes", pela
+    espessura mais próxima quando não bate exatamente (ver
+    _fiadas_mais_proxima). None sempre que faltar algum dos dados."""
     if wip_cmp_mm is None or wip_esp_mm is None:
         return None
-    fiadas = FIADAS_POR_ESPESSURA.get(round(float(wip_esp_mm)))
+    fiadas = _fiadas_mais_proxima(wip_esp_mm)
     if fiadas is None:
         return None
     volume = (float(wip_cmp_mm) / 1000) * ((WIP_LAR_FIXA / 1000) * 0.7) * fiadas * (float(wip_esp_mm) / 1000)
@@ -716,8 +735,10 @@ def _validar_linha(linha: dict):
         erro = _validar_numero_positivo(nome, valor)
         if erro:
             return erro
-    if linha.get("wip_esp") is not None and round(float(linha["wip_esp"])) not in FIADAS_POR_ESPESSURA:
-        return f"espessura {linha['wip_esp']!r} não consta da tabela \"WIP Lotes\""
+    # pedido explícito do Rui, 2026-10-30: o WIP Esp já não precisa de
+    # bater exatamente com uma linha da tabela "WIP Lotes" (agora vem da
+    # largura do artigo, não da espessura) — as Fiadas assumem sempre a
+    # mais próxima (ver _fiadas_mais_proxima), nunca bloqueiam a gravação.
     toro_cmp = linha.get("toro_cmp")
     if toro_cmp is not None and not str(toro_cmp).strip():
         return "comprimento do toro inválido"
@@ -799,8 +820,6 @@ def guardar_buffer(id: int, charriots: list = None, largura_dias=None, wip_cmp: 
         erro = _validar_numero_positivo(nome, valor)
         if erro:
             return {"erro": erro}
-    if wip_esp is not None and round(float(wip_esp)) not in FIADAS_POR_ESPESSURA:
-        return {"erro": f"espessura {wip_esp!r} não consta da tabela \"WIP Lotes\""}
     if toro_cmp is not None and not str(toro_cmp).strip():
         return {"erro": "comprimento do toro inválido"}
     if toro_tipo is not None and toro_tipo not in TORO_TIPOS:
@@ -1158,10 +1177,20 @@ function ehQuadradilho(titulo){ return !/\bOF\b/i.test(titulo||""); }
    mão (ver "+ Adicionar linha") — nunca impede a correção manual
    depois. */
 function tipoMadeiraDoTitulo(titulo){ return /\bIN\b/i.test(titulo||"") ? "IN" : "MT"; }
+/* exata se bater com uma linha da tabela "WIP Lotes", senão a mais
+   PRÓXIMA (mesma regra de tools.planeamento_entradas._fiadas_mais_
+   proxima) — pedido explícito do Rui, 2026-10-30: desde que o WIP Esp
+   passou a vir da largura do artigo, raramente bate em cheio. */
 function fiadasPorEspessura(espMm){
   if(espMm==null || isNaN(espMm)) return null;
-  const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
-  return linha ? linha[1] : null;
+  const exata=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
+  if(exata) return exata[1];
+  let melhor=null;
+  for(const [e,f] of WIP_LOTES_TABELA){
+    const dist=Math.abs(e-espMm);
+    if(melhor==null || dist<melhor.dist) melhor={dist,f};
+  }
+  return melhor?melhor.f:null;
 }
 /* mesmo padrão de tools.planeamento_entradas._comprimento_do_nome_artigo
    — pedido explícito do Rui, 2026-10-30: "o desperdício tem de aparecer,
@@ -1738,10 +1767,6 @@ function wipCmpOptionsHtml(atual){
   return `<option value="" ${!atualTxt?"selected":""}>—</option>` +
     WIP_CMP_PRESETS.map(v=>`<option value="${v}"${atualTxt===v?" selected":""}>${v}</option>`).join("");
 }
-function wipEspOptionsHtml(atual){
-  return `<option value="" ${atual==null?"selected":""}>—</option>` +
-    WIP_LOTES_TABELA.map(([esp])=>`<option value="${esp}"${atual===esp?" selected":""}>${esp}</option>`).join("");
-}
 /* uma linha de WIP+Toro (pedido explícito do Rui, 2026-10-23, "Algoritmo
    de Comprimentos") — uma OF real pode ter várias, uma por artigo/
    comprimento identificado no PDF; data-peso guarda o peso relativo (QTD
@@ -1763,7 +1788,7 @@ function linhaWipToroHtml(linha, idx){
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><select class="fWipCmp">${wipCmpOptionsHtml(linha.wipCmp)}</select></div>
       <div class="miniField"><label>Lar</label><input type="text" value="${WIP_LAR_FIXA}" disabled></div>
-      <div class="miniField"><label>Esp</label><select class="fWipEsp">${wipEspOptionsHtml(linha.wipEsp)}</select></div>
+      <div class="miniField"><label>Esp</label><input class="fWipEsp" type="text" inputmode="decimal" value="${linha.wipEsp??""}" placeholder="—"></div>
       <div class="miniField"><label>Fiadas</label><b class="fFiadas mono" style="align-self:center">—</b></div>
       <div class="miniField"><label>Índice</label><input class="fIndiceWip" type="text" inputmode="decimal" value="${linha.indiceWip??INDICE_WIP_DEFAULT}"></div>
       <div class="miniField"><label>QTD Wip</label><b class="fQtdWip mono" style="align-self:center">—</b></div>
@@ -1805,7 +1830,7 @@ function bindLinhaHandlers(container, it){
   container.querySelector(".fIndiceWip").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fIndiceToros").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fWipCmp").onchange=()=>recalcularLinha(it,container);
-  container.querySelector(".fWipEsp").onchange=()=>recalcularLinha(it,container);
+  container.querySelector(".fWipEsp").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fRemoverLinha").onclick=()=>{
     const todas=document.querySelectorAll("#linhasWipToro .linhaWipToro");
     if(todas.length<=1){ alert("Tem de ficar pelo menos uma linha."); return; }
@@ -1961,7 +1986,7 @@ function openSheet(id){
     <div class="miniRow">
       <div class="miniField"><label>Cmp</label><select id="fWipCmp">${wipCmpOptionsHtml(it.wipCmp)}</select></div>
       <div class="miniField"><label>Lar</label><input type="text" value="${WIP_LAR_FIXA}" disabled></div>
-      <div class="miniField"><label>Esp</label><select id="fWipEsp">${wipEspOptionsHtml(it.wipEsp)}</select></div>
+      <div class="miniField"><label>Esp</label><input id="fWipEsp" type="text" inputmode="decimal" value="${it.wipEsp??""}" placeholder="—"></div>
       <div class="miniField"><label>Fiadas</label><b id="fFiadas" class="mono" style="align-self:center">—</b></div>
       <div class="miniField"><label>Índice</label><input id="fIndiceWip" type="text" inputmode="decimal" value="${it.indiceWip}"></div>
       <div class="miniField"><label>QTD Wip</label><b id="fQtdWip" class="mono" style="align-self:center">—</b></div>
@@ -2047,7 +2072,7 @@ function openSheet(id){
     $("#fIndiceWip").oninput=()=>recalcularQtd(it);
     $("#fIndiceToros").oninput=()=>recalcularQtd(it);
     $("#fWipCmp").onchange=()=>recalcularQtd(it);
-    $("#fWipEsp").onchange=()=>recalcularQtd(it);
+    $("#fWipEsp").oninput=()=>recalcularQtd(it);
     $("#fNLotes").oninput=()=>recalcularQtd(it);
     recalcularQtd(it);
   }else{
