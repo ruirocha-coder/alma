@@ -87,10 +87,16 @@ def _artigos_com_limite() -> list[dict]:
 def _pendente_por_artigo() -> dict:
     """{(tipo,comprimento,espessura): kg pendente} — soma de
     (encomendado-entregue) de todas as linhas de cards ainda ABERTOS, de
-    qualquer coluna (pedido explícito do Rui: "quantidade encomendada em
-    cards abertos e ainda não entregue")."""
+    qualquer coluna AINDA ABERTA (pedido explícito do Rui: "quantidade
+    encomendada em cards abertos e ainda não entregue"; correção de um
+    erro real, 2026-10-30: "não podes considerar as pendentes
+    arquivadas" — uma coluna pode ser arquivada à mão mesmo com algum
+    card ainda "aberto" lá dentro, ver arquivar_coluna; essa pendente não
+    pode continuar a contar para a necessidade de novas colunas)."""
     pendente = {}
     for coluna in db.colunas_compras_toros():
+        if coluna["estado"] == "arquivada":
+            continue
         for l in db.linhas_compras_toros_da_coluna(coluna["id"]):
             if l["card_estado"] != "aberto":
                 continue
