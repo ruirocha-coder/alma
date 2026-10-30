@@ -16,7 +16,7 @@
 # aqui sozinha, sempre que se lê o estado (ver estado_planeamento_entradas),
 # exatamente como uma OF com tipo de madeira definido aparece sozinha na
 # logística.
-import json, re, threading
+import itertools, json, re, threading
 from datetime import date, timedelta
 import anthropic
 import db
@@ -103,25 +103,45 @@ INDICE_WIP_DEFAULT = 1.8
 # total").
 TOLERANCIA_CORTE_MM = 5
 
-def _aproveitamento_pct(comprimento_artigo_mm, preset_mm):
+def _aproveitamento_pct_multi(comprimentos_mm, preset_mm):
     """% de aproveitamento de um WIP/Toro de `preset_mm` a cortar peças de
-    `comprimento_artigo_mm` (cada uma a precisar de comprimento_artigo_mm
-    + TOLERANCIA_CORTE_MM de espaço, a folga de corte/serra entre peças)
-    — None se faltar algum dos dois valores, ou se nem uma peça só
-    couber. Mostrado junto da QTD Toros na ficha de uma OF (pedido
-    explícito do Rui, 2026-10-30) — recalculado sempre ao vivo a partir
-    do comprimento do artigo guardado (ver comprimento_artigo_mm),
-    nunca congelado, para continuar certo mesmo que o WIP/Toro Cmp seja
-    depois corrigido à mão."""
-    if not comprimento_artigo_mm or not preset_mm:
+    uma LISTA de um ou mais comprimentos (cada um a precisar do seu
+    comprimento + TOLERANCIA_CORTE_MM de espaço, a folga de corte/serra
+    entre peças) — pelo menos UMA peça de CADA comprimento da lista tem de
+    caber, senão devolve None (nunca combina só alguns). Testa todas as
+    combinações de nº de peças de cada comprimento (1 até ao máximo que
+    caiba sozinho) e fica com a que ocupa mais do preset. Com um único
+    comprimento dá exactamente o mesmo resultado que antes desta função
+    existir (só testava um). Generalizado (pedido explícito do Rui,
+    2026-10-30: "dois comprimentos podem vir de um mesmo comprimento de
+    wip... é necessário fazer uma análise prévia... e otimizar") para as
+    linhas combinadas de dois artigos (ver _juntar_pares_otimizados) —
+    mostrado junto da QTD Toros na ficha de uma OF, recalculado sempre ao
+    vivo a partir dos comprimentos do(s) artigo(s) (nunca congelado, para
+    continuar certo mesmo que o WIP/Toro Cmp seja corrigido à mão
+    depois)."""
+    comprimentos_mm = [float(c) for c in (comprimentos_mm or []) if c]
+    if not comprimentos_mm or not preset_mm:
         return None
-    unidade = float(comprimento_artigo_mm) + TOLERANCIA_CORTE_MM
     preset_mm = float(preset_mm)
-    pecas = int(preset_mm // unidade)
-    if pecas < 1:
+    unidades = [c + TOLERANCIA_CORTE_MM for c in comprimentos_mm]
+    maximos = [int(preset_mm // u) for u in unidades]
+    if any(m < 1 for m in maximos):
         return None
-    sobra = preset_mm - pecas * unidade
-    return round((preset_mm - sobra) / preset_mm * 100, 1)
+    melhor_ocupado = 0.0
+    for combo in itertools.product(*[range(1, m + 1) for m in maximos]):
+        ocupado = sum(n * u for n, u in zip(combo, unidades))
+        if preset_mm >= ocupado > melhor_ocupado:
+            melhor_ocupado = ocupado
+    if melhor_ocupado <= 0:
+        return None
+    return round(melhor_ocupado / preset_mm * 100, 1)
+
+def _aproveitamento_pct(comprimento_artigo_mm, preset_mm):
+    """% de aproveitamento de um único comprimento de artigo — ver
+    _aproveitamento_pct_multi (caso particular com um só comprimento na
+    lista)."""
+    return _aproveitamento_pct_multi([comprimento_artigo_mm], preset_mm)
 
 def _otimizar_wip_cmp(comprimento_artigo_mm: float):
     """Entre WIP_CMP_PRESETS, o comprimento de WIP que encaixa o maior
@@ -138,6 +158,21 @@ def _otimizar_wip_cmp(comprimento_artigo_mm: float):
             melhor = (pct, preset)
     return melhor[1] if melhor else None
 
+def _melhor_combinacao_par(comprimento1_mm: float, comprimento2_mm: float):
+    """Entre WIP_CMP_PRESETS, o preset que, cortando os dois comprimentos
+    JUNTOS (pelo menos uma peça de cada, ver _aproveitamento_pct_multi),
+    consegue o maior aproveitamento — devolve (preset, aproveitamento_pct),
+    ou None se não houver nenhum preset onde caibam os dois juntos (ver
+    _juntar_pares_otimizados)."""
+    melhor = None
+    for preset in WIP_CMP_PRESETS:
+        pct = _aproveitamento_pct_multi([comprimento1_mm, comprimento2_mm], preset)
+        if pct is None:
+            continue
+        if melhor is None or pct > melhor[1]:
+            melhor = (preset, pct)
+    return melhor
+
 # Correspondência 1 para 1 entre um preset de WIP_CMP_PRESETS e o preset
 # de TORO_CMP_PRESETS mais próximo (pedido explícito do Rui, 2026-10-30)
 # — são praticamente a mesma lista de comprimentos reais, só com "2650"
@@ -151,6 +186,80 @@ def _toro_cmp_de_wip(wip_cmp_texto: str):
     if wip_cmp_texto is None:
         return None
     return _WIP_CMP_PARA_TORO_CMP.get(wip_cmp_texto)
+
+def _juntar_pares_otimizados(artigos: list) -> list:
+    """Pedido explícito do Rui, 2026-10-30: "na OF por vezes temos artigos
+    cujo dois comprimentos podem vir de um mesmo comprimento de wip, é
+    necessário fazer uma análise prévia aos comprimentos dos artigos e
+    comparar com os comprimentos de wip disponíveis e otimizar... no card
+    deve aparecer os dois artigos no campo 'artigo' e apresentar as
+    quantidades de wip e toros somadas." Antes de criar as linhas de
+    WIP+Toro de uma OF, testa se algum PAR de artigos com a mesma Largura
+    (WIP Esp — só artigos da mesma secção podem sair fisicamente do mesmo
+    WIP) aproveita GENUINAMENTE melhor cortado junto num preset do que
+    cada um sozinho no seu melhor preset (ver _melhor_combinacao_par) — só
+    então os junta numa única "linha" com nome "Artigo A + Artigo B" e
+    "qtd" somada (QTD Wip/Toros somam-se sozinhas a partir daí, ver
+    calcular_linhas_automaticamente/_linhas_com_calculo, que usam sempre o
+    "peso"/"qtd" de cada linha diretamente). Só pares — nunca 3+ artigos
+    na mesma linha, mesmo que a mesma Largura tenha mais que dois
+    comprimentos (o melhor par ganha, os restantes ficam sozinhos, pedido
+    explícito do Rui). Artigos sem Largura (nome sem padrão "CxLxE") nunca
+    entram nesta análise. Devolve uma nova lista de artigos (combinados
+    primeiro, depois os que ficaram sozinhos, pela ordem original) — nunca
+    modifica `artigos`."""
+    por_esp = {}
+    for idx, a in enumerate(artigos):
+        if a.get("wip_esp_mm"):
+            por_esp.setdefault(a["wip_esp_mm"], []).append(idx)
+    pares_escolhidos = []  # (i, j, preset, pct)
+    for indices in por_esp.values():
+        pool = list(indices)
+        while len(pool) >= 2:
+            melhor = None  # (ganho, i, j, preset, pct)
+            for x in range(len(pool)):
+                for y in range(x + 1, len(pool)):
+                    i, j = pool[x], pool[y]
+                    combinacao = _melhor_combinacao_par(artigos[i]["comprimento_mm"], artigos[j]["comprimento_mm"])
+                    if combinacao is None:
+                        continue
+                    preset, pct = combinacao
+                    pcts_separados = []
+                    for k in (i, j):
+                        preset_sozinho = _otimizar_wip_cmp(artigos[k]["comprimento_mm"])
+                        if preset_sozinho is not None:
+                            pcts_separados.append(_aproveitamento_pct(artigos[k]["comprimento_mm"], preset_sozinho))
+                    melhor_separado = max(pcts_separados) if pcts_separados else 0
+                    if pct <= melhor_separado:
+                        continue  # só junta se bater GENUINAMENTE melhor que cada um sozinho
+                    ganho = pct - melhor_separado
+                    if melhor is None or ganho > melhor[0]:
+                        melhor = (ganho, i, j, preset, pct)
+            if melhor is None:
+                break
+            _, i, j, preset, pct = melhor
+            pares_escolhidos.append((i, j, preset, pct))
+            pool.remove(i)
+            pool.remove(j)
+    combinados_idx = set()
+    resultado = []
+    for i, j, preset, pct in pares_escolhidos:
+        a1, a2 = artigos[i], artigos[j]
+        qtds = [a1.get("qtd"), a2.get("qtd")]
+        resultado.append({
+            "artigo": f'{a1["artigo"]} + {a2["artigo"]}',
+            "comprimento_mm": a1["comprimento_mm"],
+            "qtd": sum(q for q in qtds if q) if any(q for q in qtds) else None,
+            "wip_esp_mm": a1["wip_esp_mm"],
+            "wip_cmp_combinado": preset,
+            "aproveitamento_combinado": pct,
+        })
+        combinados_idx.add(i)
+        combinados_idx.add(j)
+    for idx, a in enumerate(artigos):
+        if idx not in combinados_idx:
+            resultado.append(a)
+    return resultado
 
 _MISSAO_EXTRACAO_ARTIGOS_OF = """Extrais, do PDF de uma Ordem de Fabrico
 (OF) de madeira serrada, a lista de artigos/produtos encomendados (cada
@@ -354,6 +463,18 @@ def _comprimento_do_nome_artigo(nome: str):
     m = _RE_DIMENSAO_ARTIGO.search(nome)
     return float(m.group(1)) if m else None
 
+def _todos_comprimentos_do_nome_artigo(nome: str) -> list:
+    """Como _comprimento_do_nome_artigo, mas devolve TODOS os comprimentos
+    "CxLxE" encontrados no nome, pela ordem em que aparecem — uma linha
+    combinada de dois artigos (ver _juntar_pares_otimizados) tem sempre
+    dois nomes unidos por " + ", logo dois comprimentos; uma linha normal
+    tem só um (lista de 1 elemento), ou nenhum se o nome não tiver o
+    padrão. Usado para o aproveitamento ao vivo continuar certo mesmo
+    numa linha combinada (ver _linhas_com_calculo/_aproveitamento_pct_multi)."""
+    if not nome:
+        return []
+    return [float(m.group(1)) for m in _RE_DIMENSAO_ARTIGO.finditer(nome)]
+
 def _wip_esp_do_nome_artigo(nome: str):
     """O valor do campo "WIP Esp" vem da LARGURA (L), não da espessura
     (E), do nome/descrição do artigo — mesmo padrão "CxLxE" usado em
@@ -452,7 +573,11 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     também a duração a partir do novo volume); senão só ps.definir_volume
     (ainda na fila, sem duração a recalcular). Uma falha aqui (ex: nova
     duração não cabe na linha) fica só reportada em "aviso_volume", nunca
-    impede o cálculo das linhas WIP+Toro em si."""
+    impede o cálculo das linhas WIP+Toro em si. Antes de criar as linhas,
+    tenta sempre juntar pares de artigos que aproveitem melhor cortados
+    juntos (ver _juntar_pares_otimizados, pedido explícito do Rui,
+    2026-10-30) — nesse caso o "artigo" da linha mostra os dois nomes
+    ("A + B") e o "peso"/qtd já vem somado."""
     card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
     if not card:
         return {"erro": "card desta OF não encontrado entre as OFs ativas"}
@@ -466,10 +591,14 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     tipo_madeira, artigos = _extrair_artigos_of(texto_pdf)
     if not artigos:
         return {"erro": f"li o PDF ({nome_ou_erro}) mas não identifiquei nenhum artigo com comprimento"}
+    artigos = _juntar_pares_otimizados(artigos)
 
     linhas = []
     for a in artigos:
-        wip_cmp_texto = _otimizar_wip_cmp(a["comprimento_mm"])
+        if "wip_cmp_combinado" in a:
+            wip_cmp_texto = a["wip_cmp_combinado"]
+        else:
+            wip_cmp_texto = _otimizar_wip_cmp(a["comprimento_mm"])
         toro_cmp = _toro_cmp_de_wip(wip_cmp_texto)
         linhas.append({
             "artigo": a["artigo"],
@@ -572,8 +701,14 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
         # (ex: escrito à mão "Barrote 990x52x52"), o comprimento lê-se
         # dali na mesma, tal como já acontece no cálculo automático (ver
         # _comprimento_do_nome_artigo) — só cai para o valor guardado
-        # quando o nome não tiver esse padrão.
-        comprimento_artigo_mm = _comprimento_do_nome_artigo(l["artigo"]) or l.get("comprimento_artigo_mm")
+        # quando o nome não tiver esse padrão. Uma linha combinada de dois
+        # artigos (ver _juntar_pares_otimizados) tem DOIS comprimentos no
+        # nome ("A + B") — _todos_comprimentos_do_nome_artigo apanha-os
+        # todos, para o aproveitamento continuar certo também aí.
+        comprimentos_do_nome = _todos_comprimentos_do_nome_artigo(l["artigo"])
+        comprimento_artigo_mm = comprimentos_do_nome[0] if comprimentos_do_nome else l.get("comprimento_artigo_mm")
+        comprimentos_para_aproveitamento = comprimentos_do_nome or (
+            [l["comprimento_artigo_mm"]] if l.get("comprimento_artigo_mm") else [])
         resultado.append({
             "id": l["id"],
             "artigo": l["artigo"],
@@ -588,7 +723,7 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
             "indice_toros": indice_toros,
             "qtd_toros_m3": qtd_toros_m3,
             "comprimento_artigo_mm": comprimento_artigo_mm,
-            "aproveitamento_pct": _aproveitamento_pct(comprimento_artigo_mm, toro_cmp_mm),
+            "aproveitamento_pct": _aproveitamento_pct_multi(comprimentos_para_aproveitamento, toro_cmp_mm),
         })
     return resultado
 
@@ -1330,23 +1465,47 @@ function fiadasPorEspessura(espMm){
    escrito à mão tiver o padrão "CxLxE" (ex: "Barrote 990x52x52"), o
    comprimento lê-se dali na mesma. */
 const RE_DIMENSAO_ARTIGO=/(\d+)(?:\/\d+)?\s*[xX]\s*\d+\s*[xX]\s*\d+/;
+const RE_DIMENSAO_ARTIGO_G=/(\d+)(?:\/\d+)?\s*[xX]\s*\d+\s*[xX]\s*\d+/g;
 function comprimentoDoNomeArtigo(nome){
   const m=RE_DIMENSAO_ARTIGO.exec(nome||"");
   return m ? parseFloat(m[1]) : null;
 }
-/* % de aproveitamento de um WIP/Toro a cortar peças do comprimento do
-   artigo (ver tools.planeamento_entradas._aproveitamento_pct, mesma
-   fórmula) — recalculado ao vivo aqui também, para continuar certo
-   mesmo que o WIP/Toro Cmp seja corrigido à mão depois do cálculo
-   automático (pedido explícito do Rui, 2026-10-30). */
+/* como comprimentoDoNomeArtigo, mas apanha TODOS os comprimentos do nome
+   (ver tools.planeamento_entradas._todos_comprimentos_do_nome_artigo) —
+   uma linha combinada de dois artigos (pedido explícito do Rui,
+   2026-10-30) tem nome "Artigo A + Artigo B", logo dois comprimentos. */
+function todosComprimentosDoNomeArtigo(nome){
+  const resultado=[]; let m;
+  RE_DIMENSAO_ARTIGO_G.lastIndex=0;
+  while((m=RE_DIMENSAO_ARTIGO_G.exec(nome||""))) resultado.push(parseFloat(m[1]));
+  return resultado;
+}
+/* % de aproveitamento de um WIP/Toro a cortar peças de uma lista de um ou
+   mais comprimentos (ver
+   tools.planeamento_entradas._aproveitamento_pct_multi, mesma fórmula —
+   generalizada para linhas combinadas) — recalculado ao vivo aqui também,
+   para continuar certo mesmo que o WIP/Toro Cmp ou o nome do artigo sejam
+   corrigidos à mão depois do cálculo automático (pedido explícito do
+   Rui, 2026-10-30). */
 const TOLERANCIA_CORTE_MM=5;
-function aproveitamentoPct(comprimentoArtigoMm, presetMm){
-  if(!comprimentoArtigoMm || !presetMm || isNaN(comprimentoArtigoMm) || isNaN(presetMm)) return null;
-  const unidade=comprimentoArtigoMm+TOLERANCIA_CORTE_MM;
-  const pecas=Math.floor(presetMm/unidade);
-  if(pecas<1) return null;
-  const sobra=presetMm-pecas*unidade;
-  return Math.round((presetMm-sobra)/presetMm*1000)/10;
+function aproveitamentoPctMulti(comprimentosMm, presetMm){
+  const validos=(comprimentosMm||[]).filter(c=>c!=null && !isNaN(c) && c>0);
+  if(!validos.length || !presetMm || isNaN(presetMm)) return null;
+  const unidades=validos.map(c=>c+TOLERANCIA_CORTE_MM);
+  const maximos=unidades.map(u=>Math.floor(presetMm/u));
+  if(maximos.some(m=>m<1)) return null;
+  let melhorOcupado=0;
+  const combos=(idx, atual)=>{
+    if(idx===unidades.length){
+      const ocupado=atual.reduce((s,n,i)=>s+n*unidades[i],0);
+      if(ocupado<=presetMm && ocupado>melhorOcupado) melhorOcupado=ocupado;
+      return;
+    }
+    for(let n=1;n<=maximos[idx];n++) combos(idx+1,[...atual,n]);
+  };
+  combos(0,[]);
+  if(melhorOcupado<=0) return null;
+  return Math.round(melhorOcupado/presetMm*1000)/10;
 }
 function volumeRealLote(wipCmpMm, wipEspMm){
   const fiadas=fiadasPorEspessura(wipEspMm);
@@ -1999,8 +2158,9 @@ function recalcularLinha(it, container){
   const toroCmpMm=toroCmpTexto?parseFloat(toroCmpTexto):null;
   const comprimentoGuardado=parseFloat(container.dataset.comprimentoArtigo);
   const artigoTexto=container.querySelector(".fArtigo").value;
-  const comprimentoArtigo=comprimentoDoNomeArtigo(artigoTexto) ?? (isNaN(comprimentoGuardado)?null:comprimentoGuardado);
-  const pct=aproveitamentoPct(comprimentoArtigo, toroCmpMm);
+  const comprimentosDoNome=todosComprimentosDoNomeArtigo(artigoTexto);
+  const comprimentosParaAproveitamento=comprimentosDoNome.length?comprimentosDoNome:(isNaN(comprimentoGuardado)?[]:[comprimentoGuardado]);
+  const pct=aproveitamentoPctMulti(comprimentosParaAproveitamento, toroCmpMm);
   container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}%)`:"";
   const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
   container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
