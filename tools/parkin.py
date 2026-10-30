@@ -935,13 +935,25 @@ def stock_total() -> dict:
             por_categoria[c["categoria_qualidade"]] += float(c["quantidade_kg"])
 
     limites = db.limites_parkin().get("total") or {}
+    automatico = bool(limites.get("automatico"))
+    minimo_kg, maximo_kg = limites.get("minimo_kg"), limites.get("maximo_kg")
+    if automatico:
+        # pedido explícito do Rui, 2026-10-30: "ir atualizando à medida que
+        # o planeamento de entrada também atualiza" — um limite automático
+        # mostra sempre a proposta AO VIVO (recalculada aqui, a cada
+        # carregamento do dashboard, a partir do planeamento atual), nunca
+        # só o valor gravado da última vez que a rotina semanal correu (ver
+        # atualizar_limites_automaticos) ou que alguém clicou "usar".
+        proposta = limites_propostos_por_procura().get("total") or {}
+        minimo_kg = proposta.get("minimo_kg", minimo_kg)
+        maximo_kg = proposta.get("maximo_kg", maximo_kg)
     return {
         "total_kg": round(sum(por_categoria.values()) + sem_categoria, 1),
         "por_categoria_kg": {k: round(v, 1) for k, v in por_categoria.items()},
         "sem_categoria_kg": round(sem_categoria, 1),
-        "minimo_kg": limites.get("minimo_kg"),
-        "maximo_kg": limites.get("maximo_kg"),
-        "automatico": bool(limites.get("automatico")),
+        "minimo_kg": minimo_kg,
+        "maximo_kg": maximo_kg,
+        "automatico": automatico,
     }
 
 
@@ -996,19 +1008,35 @@ def stock_por_artigo() -> list[dict]:
             continue
         _bucket(chave, tipo, float(comprimento_txt), espessura)
 
+    # pedido explícito do Rui, 2026-10-30: "ir atualizando à medida que o
+    # planeamento de entrada também atualiza" — um limite automático mostra
+    # sempre a proposta AO VIVO, nunca só o valor gravado da última vez que
+    # a rotina semanal correu ou que alguém clicou "usar". Só calculada se
+    # precisar mesmo (algum artigo automático) — limites_propostos_por_
+    # procura usa _chaves_artigos_normais, nunca stock_por_artigo, para
+    # nunca entrar em ciclo (esta função chamar-se-ia a si própria).
+    propostas = None
     resultado = []
     for chave, a in artigos.items():
         total = sum(a["por_categoria_kg"].values()) + a["sem_categoria_kg"]
         if abs(total) <= 1e-6 and chave not in limites:
             continue
         lim = limites.get(chave) or {}
+        automatico = bool(lim.get("automatico"))
+        minimo_kg, maximo_kg = lim.get("minimo_kg"), lim.get("maximo_kg")
+        if automatico:
+            if propostas is None:
+                propostas = limites_propostos_por_procura()
+            proposta = propostas.get(chave) or {}
+            minimo_kg = proposta.get("minimo_kg", minimo_kg)
+            maximo_kg = proposta.get("maximo_kg", maximo_kg)
         resultado.append({
             "artigo": chave, "tipo": a["tipo"], "comprimento": a["comprimento"], "espessura": a["espessura"],
             "total_kg": round(total, 1),
             "por_categoria_kg": {k: round(v, 1) for k, v in a["por_categoria_kg"].items()},
             "sem_categoria_kg": round(a["sem_categoria_kg"], 1),
-            "minimo_kg": lim.get("minimo_kg"), "maximo_kg": lim.get("maximo_kg"),
-            "automatico": bool(lim.get("automatico")),
+            "minimo_kg": minimo_kg, "maximo_kg": maximo_kg,
+            "automatico": automatico,
         })
     resultado.sort(key=lambda x: _chave_ordenacao_artigo(x["tipo"], x["comprimento"], x["espessura"]))
     return resultado
@@ -1183,6 +1211,31 @@ def definir_limite(chave: str, minimo_kg: float = None, maximo_kg: float = None,
 DIAS_LIMITE_MINIMO_PROCURA = 30
 MULTIPLICADOR_LIMITE_MAXIMO = 2
 
+def _chaves_artigos_normais() -> set:
+    """(tipo, comprimento) de cada artigo "normal" conhecido do Park In —
+    com stock/correção, ou só registado em Limites (ver registar_artigo).
+    Mesma informação que se tiraria de stock_por_artigo, mas sem passar
+    por lá — stock_por_artigo usa limites_propostos_por_procura (abaixo)
+    para os limites "automáticos", por isso esta função nunca pode chamar
+    stock_por_artigo, senão entrava num ciclo infinito."""
+    chaves = set()
+    for e in db.entradas_parkin_todas():
+        if e["espessura"] == "normal" and e["comprimento"] is not None:
+            chaves.add((e["tipo"], float(e["comprimento"])))
+    for c in db.correcoes_parkin_positivas():
+        if c["espessura"] == "normal" and c["comprimento"] is not None:
+            chaves.add((c["tipo"], float(c["comprimento"])))
+    for chave in db.limites_parkin():
+        if chave in ("total", _ARTIGO_DESCONHECIDO):
+            continue
+        try:
+            tipo, comprimento_txt, espessura = chave.split("|")
+        except ValueError:
+            continue
+        if espessura == "normal":
+            chaves.add((tipo, float(comprimento_txt)))
+    return chaves
+
 def limites_propostos_por_procura() -> dict:
     """Uma proposta por CADA artigo "normal" conhecido do Park In (os já
     registados/com stock, ver stock_por_artigo, mais qualquer outro que só
@@ -1202,8 +1255,7 @@ def limites_propostos_por_procura() -> dict:
     recalculado à parte, por isso Máximo do total também fica sempre o
     dobro do Mínimo do total."""
     procura_min = pe.procura_toros_por_artigo(DIAS_LIMITE_MINIMO_PROCURA)
-    chaves_toro = {(a["tipo"], a["comprimento"]) for a in stock_por_artigo() if a["espessura"] == "normal"}
-    chaves_toro |= set(procura_min)
+    chaves_toro = _chaves_artigos_normais() | set(procura_min)
     propostas = {}
     total_minimo = 0.0
     for tipo, comprimento_m in chaves_toro:
