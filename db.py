@@ -895,6 +895,15 @@ CREATE INDEX IF NOT EXISTS planeamento_entradas_linhas_card_idx
 -- false para nunca mudar o comportamento de limites já definidos antes
 -- desta funcionalidade existir.
 ALTER TABLE parkin_limites ADD COLUMN IF NOT EXISTS automatico BOOLEAN NOT NULL DEFAULT false;
+-- pedido explícito do Rui, 2026-10-30: mostrar a % de aproveitamento do
+-- WIP/Toro (ver tools.planeamento_entradas._otimizar_wip_cmp) junto da
+-- QTD Toros, na ficha de uma OF — para isso recalcular a aproveitamento
+-- sempre que a ficha é lida (nunca congelado), precisa de saber o
+-- comprimento do artigo tal como foi extraído do PDF, não só o preset de
+-- WIP/Toro já escolhido. NULL numa linha criada/editada à mão (sem
+-- nenhuma informação lida do PDF) — sem aproveitamento a mostrar nesse
+-- caso.
+ALTER TABLE planeamento_entradas_linhas ADD COLUMN IF NOT EXISTS comprimento_artigo_mm NUMERIC;
 """
 
 # bug real, encontrado nos logs do Railway (2026-07-22): a tabela em
@@ -1784,7 +1793,7 @@ def linhas_entrada_ecos_largos() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, basecamp_card_id, ordem, artigo, peso, wip_cmp, wip_esp, indice_wip,
-                          toro_cmp, toro_tipo, indice_toros
+                          toro_cmp, toro_tipo, indice_toros, comprimento_artigo_mm
                    FROM planeamento_entradas_linhas
                    ORDER BY basecamp_card_id, ordem, id"""
             )
@@ -1800,6 +1809,7 @@ def linhas_entrada_ecos_largos() -> list[dict]:
                 "toro_cmp": l["toro_cmp"],
                 "toro_tipo": l["toro_tipo"],
                 "indice_toros": float(l["indice_toros"]) if l["indice_toros"] is not None else None,
+                "comprimento_artigo_mm": float(l["comprimento_artigo_mm"]) if l["comprimento_artigo_mm"] is not None else None,
             } for l in cur.fetchall()]
 
 def substituir_linhas_entrada_ecos_largos(basecamp_card_id: int, linhas: list[dict]):
@@ -1816,10 +1826,11 @@ def substituir_linhas_entrada_ecos_largos(basecamp_card_id: int, linhas: list[di
                 cur.execute(
                     """INSERT INTO planeamento_entradas_linhas
                        (basecamp_card_id, ordem, artigo, peso, wip_cmp, wip_esp, indice_wip,
-                        toro_cmp, toro_tipo, indice_toros)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        toro_cmp, toro_tipo, indice_toros, comprimento_artigo_mm)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (basecamp_card_id, i, l.get("artigo"), l.get("peso"), l.get("wip_cmp"), l.get("wip_esp"),
-                     l.get("indice_wip"), l.get("toro_cmp"), l.get("toro_tipo"), l.get("indice_toros"))
+                     l.get("indice_wip"), l.get("toro_cmp"), l.get("toro_tipo"), l.get("indice_toros"),
+                     l.get("comprimento_artigo_mm"))
                 )
         conn.commit()
     return {"guardado": True, "basecamp_card_id": basecamp_card_id}

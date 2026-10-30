@@ -82,25 +82,39 @@ INDICE_WIP_DEFAULT = 1.8
 # em si, só a proporção entre artigos.
 TOLERANCIA_CORTE_MM = 5
 
+def _aproveitamento_pct(comprimento_artigo_mm, preset_mm):
+    """% de aproveitamento de um WIP/Toro de `preset_mm` a cortar peças de
+    `comprimento_artigo_mm` (cada uma a precisar de comprimento_artigo_mm
+    + TOLERANCIA_CORTE_MM de espaço, a folga de corte/serra entre peças)
+    — None se faltar algum dos dois valores, ou se nem uma peça só
+    couber. Mostrado junto da QTD Toros na ficha de uma OF (pedido
+    explícito do Rui, 2026-10-30) — recalculado sempre ao vivo a partir
+    do comprimento do artigo guardado (ver comprimento_artigo_mm),
+    nunca congelado, para continuar certo mesmo que o WIP/Toro Cmp seja
+    depois corrigido à mão."""
+    if not comprimento_artigo_mm or not preset_mm:
+        return None
+    unidade = float(comprimento_artigo_mm) + TOLERANCIA_CORTE_MM
+    preset_mm = float(preset_mm)
+    pecas = int(preset_mm // unidade)
+    if pecas < 1:
+        return None
+    sobra = preset_mm - pecas * unidade
+    return round((preset_mm - sobra) / preset_mm * 100, 1)
+
 def _otimizar_wip_cmp(comprimento_artigo_mm: float):
     """Entre WIP_CMP_PRESETS, o comprimento de WIP que encaixa o maior
-    número de peças de `comprimento_artigo_mm` (cada uma a precisar de
-    comprimento_artigo_mm + TOLERANCIA_CORTE_MM de espaço, a folga de
-    corte/serra entre peças), com a menor sobra possível. Devolve o texto
-    do preset, ou None se o artigo for maior do que todos os presets
-    (nenhum chega para uma peça só)."""
-    unidade = float(comprimento_artigo_mm) + TOLERANCIA_CORTE_MM
+    número de peças de `comprimento_artigo_mm` com a menor sobra possível
+    (ver _aproveitamento_pct). Devolve o texto do preset, ou None se o
+    artigo for maior do que todos os presets (nenhum chega para uma peça
+    só)."""
     melhor = None
     for preset in WIP_CMP_PRESETS:
-        preset_mm = float(preset)
-        pecas = int(preset_mm // unidade)
-        if pecas < 1:
+        pct = _aproveitamento_pct(comprimento_artigo_mm, preset)
+        if pct is None:
             continue
-        sobra = preset_mm - pecas * unidade
-        aproveitamento = (preset_mm - sobra) / preset_mm
-        candidato = (aproveitamento, preset)
-        if melhor is None or candidato[0] > melhor[0]:
-            melhor = candidato
+        if melhor is None or pct > melhor[0]:
+            melhor = (pct, preset)
     return melhor[1] if melhor else None
 
 # Correspondência 1 para 1 entre um preset de WIP_CMP_PRESETS e o preset
@@ -326,6 +340,7 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
             "toro_cmp": toro_cmp,
             "toro_tipo": None,
             "indice_toros": INDICE_TOROS_DEFAULT,
+            "comprimento_artigo_mm": a["comprimento_mm"],
         })
     db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, linhas)
     return {"ok": True, "ficheiro": nome_ou_erro, "linhas": linhas}
@@ -398,6 +413,8 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
             "toro_tipo": l["toro_tipo"],
             "indice_toros": indice_toros,
             "qtd_toros_m3": qtd_toros_m3,
+            "comprimento_artigo_mm": l.get("comprimento_artigo_mm"),
+            "aproveitamento_pct": _aproveitamento_pct(l.get("comprimento_artigo_mm"), l["wip_cmp"]),
         })
     return resultado
 
@@ -1108,6 +1125,20 @@ function fiadasPorEspessura(espMm){
   const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
   return linha ? linha[1] : null;
 }
+/* % de aproveitamento de um WIP/Toro a cortar peças do comprimento do
+   artigo (ver tools.planeamento_entradas._aproveitamento_pct, mesma
+   fórmula) — recalculado ao vivo aqui também, para continuar certo
+   mesmo que o WIP/Toro Cmp seja corrigido à mão depois do cálculo
+   automático (pedido explícito do Rui, 2026-10-30). */
+const TOLERANCIA_CORTE_MM=5;
+function aproveitamentoPct(comprimentoArtigoMm, presetMm){
+  if(!comprimentoArtigoMm || !presetMm || isNaN(comprimentoArtigoMm) || isNaN(presetMm)) return null;
+  const unidade=comprimentoArtigoMm+TOLERANCIA_CORTE_MM;
+  const pecas=Math.floor(presetMm/unidade);
+  if(pecas<1) return null;
+  const sobra=presetMm-pecas*unidade;
+  return Math.round((presetMm-sobra)/presetMm*1000)/10;
+}
 function volumeRealLote(wipCmpMm, wipEspMm){
   const fiadas=fiadasPorEspessura(wipEspMm);
   if(wipCmpMm==null || wipEspMm==null || fiadas==null) return null;
@@ -1672,6 +1703,7 @@ function linhaWipToroHtml(linha, idx){
   const toroOutroValor = (linha.toroCmp!=null && !toroEhPreset) ? linha.toroCmp : "";
   return `
   <div class="linhaWipToro" data-idx="${idx}" data-peso="${linha.peso??""}"
+       data-comprimento-artigo="${linha.comprimentoArtigoMm??""}"
        style="border:1px solid var(--linha,#333);border-radius:8px;padding:10px;margin-bottom:10px">
     <div class="frow" style="margin-top:0">
       <label>Artigo</label>
@@ -1699,7 +1731,8 @@ function linhaWipToroHtml(linha, idx){
         <option value="MT"${linha.toroTipo==="MT"?" selected":""}>MT</option>
       </select></div>
       <div class="miniField"><label>Índice</label><input class="fIndiceToros" type="text" inputmode="decimal" value="${linha.indiceToros??INDICE_TOROS_DEFAULT}"></div>
-      <div class="miniField"><label>QTD Toros</label><b class="fQtdToros mono" style="align-self:center">—</b></div>
+      <div class="miniField"><label>QTD Toros</label><b class="fQtdToros mono" style="align-self:center">—</b>
+        <span class="fAproveitamento mono" style="align-self:center;color:var(--dim);font-size:12px"></span></div>
     </div>
   </div>`;
 }
@@ -1742,6 +1775,9 @@ function recalcularLinha(it, container){
   container.querySelector(".fQtdWip").textContent=qtdWip!=null?qtdWip+" m³":"—";
   container.querySelector(".fQtdToros").textContent=(volumeLinha!=null && !isNaN(indiceToros))
     ? (Math.round(volumeLinha*indiceToros*100)/100)+" m³" : "—";
+  const comprimentoArtigo=parseFloat(container.dataset.comprimentoArtigo);
+  const pct=aproveitamentoPct(isNaN(comprimentoArtigo)?null:comprimentoArtigo, wipCmp);
+  container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}% aproveitamento)`:"";
   const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
   container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
 }
@@ -1762,6 +1798,7 @@ function coletarLinhas(){
     const indiceWip=c.querySelector(".fIndiceWip").value;
     const indiceToros=c.querySelector(".fIndiceToros").value;
     const peso=c.dataset.peso;
+    const comprimentoArtigo=c.dataset.comprimentoArtigo;
     return {
       artigo: c.querySelector(".fArtigo").value||null,
       peso: peso!==""?parseFloat(peso):null,
@@ -1771,6 +1808,7 @@ function coletarLinhas(){
       toro_cmp: toroCmp,
       toro_tipo: c.querySelector(".fToroTipo").value||null,
       indice_toros: indiceToros?parseFloat(indiceToros):null,
+      comprimento_artigo_mm: comprimentoArtigo!==""?parseFloat(comprimentoArtigo):null,
     };
   });
 }
@@ -2102,6 +2140,7 @@ async function carregar(){
         id:l.id, artigo:l.artigo, peso:l.peso,
         wipCmp:l.wip_cmp, wipEsp:l.wip_esp, indiceWip:l.indice_wip, qtdWip:l.qtd_wip_m3, nLotes:l.n_lotes,
         toroCmp:l.toro_cmp, toroTipo:l.toro_tipo, indiceToros:l.indice_toros, qtdToros:l.qtd_toros_m3,
+        comprimentoArtigoMm:l.comprimento_artigo_mm,
       })),
       buffer:!!e.buffer,
     })).filter(e=>e.gs>=0);
