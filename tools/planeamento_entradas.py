@@ -160,17 +160,36 @@ depois:
   OBSERVAÇÕES do documento disserem explicitamente que a madeira é "IN"
   (nunca adivinhes a partir de outro sinal, ex: nome do cliente ou do
   artigo; na dúvida, "MT").
-- "artigo": a designação/descrição do artigo, tal como está na coluna
-  "Descrição" da tabela do PDF — NUNCA de nenhuma outra coluna.
+- "artigo": a designação da coluna "Descrição" — e SÓ dessa coluna.
 - "comprimento_mm": o comprimento dessa peça, SEMPRE convertido para
   milímetros (ex: "2,55 m" ou "255 cm" -> 2550; já em mm, usa tal e qual).
 - "qtd": o valor do campo "QTD" (quantidade) desse artigo no PDF, tal
   como está escrito (não convertas unidades) — null se não houver esse
   campo ou não for legível.
-Ignora sempre qualquer linha da tabela cuja "Descrição" seja um
-"travamento" ou um "suporte" — são material de embalagem/fixação para
-transporte, nunca um artigo de produção; não os incluas na lista mesmo
-que tenham comprimento e quantidade como qualquer outro artigo.
+
+A tabela tem SEMPRE exatamente UM artigo por linha de "Qtd." (cada linha
+nova de produto começa por uma unidade como "M3" seguida da quantidade,
+ex: "M327,00Régua..."). As colunas "Suporte" e "Travamentos" aparecem
+coladas ao texto da "Descrição", sem nenhuma separação visível depois de
+extraído do PDF — tens de as reconhecer e DESCARTAR, nunca as confundir
+com um artigo novo nem as deixares coladas ao nome. Exemplo real:
+"M327,00Régua 1450x95x22 800x95x22 37,42
+4x2 (8)
+36x12 (432)
+17x2 (34)
+1200x95x22"
+— isto é UM SÓ artigo: "Descrição" = "Régua 1450x95x22" (a PRIMEIRA
+medida "CxLxE" a seguir à quantidade), "qtd" = 27,00. O resto não é um
+artigo nenhum, é sempre assim nesta ordem e descarta-se sempre:
+"800x95x22" é o "Suporte" (uma segunda medida "CxLxE" colada logo a
+seguir à Descrição, na mesma linha de texto); "37,42" é um volume/total
+da linha; as linhas seguintes no formato "NxM (P)" (ex: "4x2 (8)") são
+"Fiadas"; e a medida solta na última linha ("1200x95x22") é sempre o
+"Travamentos". Nunca crias um artigo a partir do Suporte nem do
+Travamentos, mesmo que pareçam ter a forma de um artigo normal (medida
+"CxLxE" + número à frente) — no exemplo acima, a resposta certa é UM
+único artigo para esta linha ("Régua 1450x95x22", qtd 27), nunca dois
+nem três.
 Nunca inventes um artigo ou um comprimento que não estejam mesmo no PDF.
 Se não conseguires identificar nenhum artigo com comprimento, "artigos"
 fica uma lista vazia []."""
@@ -240,6 +259,23 @@ def _eh_quadradilho(titulo: str) -> bool:
     return not _RE_TITULO_OF.search(titulo or "")
 
 _RE_DIMENSAO_ARTIGO = re.compile(r"(\d+)(?:/\d+)?\s*[xX]\s*(\d+)\s*[xX]\s*(\d+)")
+
+def _truncar_apos_primeira_dimensao(nome):
+    """Rede de segurança determinística (pedido explícito do Rui,
+    2026-10-30, confirmado ao vivo na OF.640 Interpall): a coluna
+    "Suporte" do PDF cola-se ao texto da "Descrição" sem separador nenhum
+    depois de extraído (ex: "Régua 1450x95x22 800x95x22" — a segunda
+    medida "CxLxE" é sempre o Suporte, nunca parte do nome real). Mesmo
+    que o modelo não siga à letra a instrução de ignorar isso (ver
+    _MISSAO_EXTRACAO_ARTIGOS_OF), se o nome tiver mais do que uma medida
+    "CxLxE", corta sempre logo a seguir à primeira. Devolve `nome` tal
+    qual se só tiver uma medida (ou nenhuma)."""
+    if not nome:
+        return nome
+    medidas = list(_RE_DIMENSAO_ARTIGO.finditer(nome))
+    if len(medidas) < 2:
+        return nome
+    return nome[:medidas[0].end()].strip()
 
 def _comprimento_do_nome_artigo(nome: str):
     """Extrai o comprimento diretamente do nome/descrição do artigo, pelo
@@ -316,7 +352,7 @@ def _extrair_artigos_of(texto_pdf: str) -> tuple:
     for a in artigos:
         if not isinstance(a, dict):
             continue
-        nome_artigo = a.get("artigo") or None
+        nome_artigo = _truncar_apos_primeira_dimensao(a.get("artigo") or None)
         comprimento = _comprimento_do_nome_artigo(nome_artigo)
         if comprimento is None:
             try:
