@@ -229,6 +229,26 @@ Nunca inventes um artigo, um comprimento ou uma qtd que não estejam mesmo
 no PDF. Se não conseguires identificar nenhum artigo com comprimento,
 "artigos" fica uma lista vazia []."""
 
+_RE_QUANTIDADE_TOTAL_PDF = re.compile(r"Quantidade\s*Total\s*([\d.,]+)\s*M3", re.IGNORECASE)
+
+def _quantidade_total_do_pdf(texto_pdf: str):
+    """O volume total (m³) desta OF, lido do campo "Quantidade Total ...
+    M3" no canto inferior direito do PDF (ex: "Quantidade Total 28,96
+    M3" -> 28.96) — pedido explícito do Rui, 2026-10-30: "sempre que for
+    feito o calcular automaticamente tens de usar e atualizar o volume da
+    encomenda total... tens de ir buscar ao documento o campo quantidade
+    total". None se o PDF não tiver esse campo ou não for legível."""
+    if not texto_pdf:
+        return None
+    m = _RE_QUANTIDADE_TOTAL_PDF.search(texto_pdf)
+    if not m:
+        return None
+    try:
+        valor = float(m.group(1).replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+    return valor if valor > 0 else None
+
 def _ler_pdf_of(card: dict):
     """Encontra e lê o PDF da OF anexado ao card do Basecamp (nome tipo
     "OF <número> <cliente>.pdf" — pedido explícito do Rui, 2026-10-23),
@@ -423,7 +443,16 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     (pedido explícito do Rui, 2026-10-30) vem das observações do PDF (ver
     _MISSAO_EXTRACAO_ARTIGOS_OF): "MT" por omissão, só "IN" se o
     documento o disser explicitamente — é uma propriedade da OF toda,
-    por isso o mesmo valor aplica-se a todas as linhas."""
+    por isso o mesmo valor aplica-se a todas as linhas. O volume total da
+    OF (usado na logística/produção para calcular a duração) é sempre
+    retificado pelo campo "Quantidade Total ... M3" do PDF (ver
+    _quantidade_total_do_pdf, pedido explícito do Rui, 2026-10-30) — nunca
+    deixado com um valor manual desatualizado. Se a OF já estiver
+    agendada (linha/dia já atribuídos), usa-se ps.agendar (recalcula
+    também a duração a partir do novo volume); senão só ps.definir_volume
+    (ainda na fila, sem duração a recalcular). Uma falha aqui (ex: nova
+    duração não cabe na linha) fica só reportada em "aviso_volume", nunca
+    impede o cálculo das linhas WIP+Toro em si."""
     card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
     if not card:
         return {"erro": "card desta OF não encontrado entre as OFs ativas"}
@@ -454,7 +483,24 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
             "comprimento_artigo_mm": a["comprimento_mm"],
         })
     db.substituir_linhas_entrada_ecos_largos(basecamp_card_id, linhas)
-    return {"ok": True, "ficheiro": nome_ou_erro, "linhas": linhas}
+
+    aviso_volume = None
+    volume_total_pdf = _quantidade_total_do_pdf(texto_pdf)
+    if volume_total_pdf is not None:
+        existente = db.agendamento_producao(basecamp_card_id)
+        if existente and existente.get("linha") and existente.get("dia_inicio"):
+            resultado_volume = ps.agendar(basecamp_card_id, existente["linha"], existente["dia_inicio"],
+                                          volume_m3=volume_total_pdf)
+        else:
+            resultado_volume = ps.definir_volume(basecamp_card_id, volume_total_pdf)
+        if resultado_volume.get("erro"):
+            aviso_volume = (f"linhas calculadas, mas não consegui atualizar o volume total para "
+                           f"{volume_total_pdf} m³ (lido do PDF): {resultado_volume['erro']}")
+
+    resposta = {"ok": True, "ficheiro": nome_ou_erro, "linhas": linhas, "volume_m3": volume_total_pdf}
+    if aviso_volume:
+        resposta["aviso_volume"] = aviso_volume
+    return resposta
 
 def _calcular_automaticamente_em_fundo(basecamp_card_id: int):
     """Corre calcular_linhas_automaticamente numa thread (chamado ao
@@ -2180,7 +2226,9 @@ function openSheet(id){
           body:JSON.stringify({basecamp_card_id:it.id})});
         const d=await r.json();
         if(d.erro){ $("#fErro").textContent=d.erro; return; }
-        log("local",`"${it.titulo}": comprimentos calculados automaticamente (${d.linhas.length} linha(s), de "${d.ficheiro}")`);
+        log("local",`"${it.titulo}": comprimentos calculados automaticamente (${d.linhas.length} linha(s), de "${d.ficheiro}")`+
+          (d.volume_m3!=null?` — volume total retificado para ${d.volume_m3} m³`:""));
+        if(d.aviso_volume){ $("#fErro").textContent=d.aviso_volume; }
         await carregar();
         openSheet(it.id);
       }catch(e){ $("#fErro").textContent="Falhou a calcular: "+e; }
