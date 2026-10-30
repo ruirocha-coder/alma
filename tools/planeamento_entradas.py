@@ -66,39 +66,31 @@ INDICE_WIP_DEFAULT = 1.8
 # identifica-se o(s) artigo(s) e o comprimento de cada um, e cria-se uma
 # linha de WIP+Toro por artigo — WIP arredondado para cima ao preset mais
 # pequeno que ainda chegue (a peça final tem de caber dentro do WIP, nunca
-# o contrário) e Toro escolhido para encaixar o maior número de peças do
-# artigo com a menor sobra (ver _otimizar_toro). O volume total real da OF
-# (vindo da produção) reparte-se entre as linhas pelo peso relativo do
-# campo "QTD" de cada artigo no PDF (ver _linhas_com_calculo) — nunca um
-# volume em si, só a proporção entre artigos.
-TOLERANCIA_CORTE_MM = 5
+# o contrário) e Toro sempre o comprimento CORRESPONDENTE ao desse WIP
+# (ver _toro_cmp_de_wip) — nunca otimizado sozinho a partir do comprimento
+# do artigo final: o toro dá origem ao WIP, nunca diretamente ao artigo
+# (pedido explícito do Rui, 2026-10-30, correção de um erro real: "o
+# comprimento do toro terá que ser semelhante ao comprimento da tábua
+# cortada (wip)" — antes, um artigo pequeno como 990mm podia escolher um
+# toro de 3100mm por aproveitamento, sem nenhuma relação com o WIP de
+# 2350mm calculado para a mesma linha). O volume total real da OF (vindo
+# da produção) reparte-se entre as linhas pelo peso relativo do campo
+# "QTD" de cada artigo no PDF (ver _linhas_com_calculo) — nunca um volume
+# em si, só a proporção entre artigos.
 
-def _otimizar_toro(comprimento_artigo_mm: float):
-    """Entre TORO_CMP_PRESETS, o comprimento de toro que encaixa o maior
-    número de peças de `comprimento_artigo_mm` (cada uma a precisar de
-    comprimento_artigo_mm + TOLERANCIA_CORTE_MM de espaço, a folga de
-    corte/serra entre peças — pedido explícito do Rui, 2026-10-23), com a
-    menor sobra possível. Devolve (toro_cmp_texto, peças_por_toro,
-    sobra_mm) do melhor preset, ou (None, None, None) se o artigo for
-    maior do que todos os presets (nenhum chega para uma peça só)."""
-    unidade = float(comprimento_artigo_mm) + TOLERANCIA_CORTE_MM
-    melhor = None
-    for preset in TORO_CMP_PRESETS:
-        try:
-            preset_mm = float(preset)
-        except ValueError:
-            continue  # preset não numérico (ex: com diâmetro) — não entra nesta otimização
-        pecas = int(preset_mm // unidade)
-        if pecas < 1:
-            continue
-        sobra = preset_mm - pecas * unidade
-        aproveitamento = (preset_mm - sobra) / preset_mm
-        candidato = (aproveitamento, preset, pecas, round(sobra, 1))
-        if melhor is None or candidato[0] > melhor[0]:
-            melhor = candidato
-    if melhor is None:
-        return None, None, None
-    return melhor[1], melhor[2], melhor[3]
+# Correspondência 1 para 1 entre um preset de WIP_CMP_PRESETS e o preset
+# de TORO_CMP_PRESETS mais próximo (pedido explícito do Rui, 2026-10-30)
+# — são praticamente a mesma lista de comprimentos reais, só com "2650"
+# do lado do WIP e "2640" do lado do Toro a designar o mesmo comprimento.
+_WIP_CMP_PARA_TORO_CMP = {"2350": "2350", "2550": "2550", "2650": "2640", "3100": "3100"}
+
+def _toro_cmp_de_wip(wip_cmp_texto: str):
+    """O preset de Toro correspondente a este WIP Cmp (ver
+    _WIP_CMP_PARA_TORO_CMP) — None se `wip_cmp_texto` for None (artigo
+    maior que todos os presets de WIP, ver _arredondar_wip_cmp)."""
+    if wip_cmp_texto is None:
+        return None
+    return _WIP_CMP_PARA_TORO_CMP.get(wip_cmp_texto)
 
 def _arredondar_wip_cmp(comprimento_artigo_mm: float):
     """O menor preset de WIP_CMP_PRESETS que ainda seja >= ao comprimento
@@ -283,8 +275,8 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
 
     linhas = []
     for a in artigos:
-        toro_cmp, pecas_por_toro, sobra_mm = _otimizar_toro(a["comprimento_mm"])
         wip_cmp_texto = _arredondar_wip_cmp(a["comprimento_mm"])
+        toro_cmp = _toro_cmp_de_wip(wip_cmp_texto)
         linhas.append({
             "artigo": a["artigo"],
             "peso": a["qtd"],
