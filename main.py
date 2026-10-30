@@ -1046,6 +1046,28 @@ def park_in_saida_por_talao(corpo: dict = Body(...)):
         return JSONResponse(resultado, status_code=400)
     return JSONResponse(resultado)
 
+@app.post("/park-in/entrada/corrigir-artigo")
+def park_in_corrigir_artigo(corpo: dict = Body(...)):
+    """Corrige o artigo (tipo/comprimento/espessura) de uma entrada já
+    registada, identificada pelo talão — ex: o talão foi lido/registado
+    com um comprimento errado — ver tools/parkin.corrigir_artigo_por_talao.
+    Só os campos indicados mudam; nunca mexe no saldo."""
+    talao = corpo.get("talao")
+    if not talao:
+        return JSONResponse({"erro": "falta indicar o talão"}, status_code=400)
+    comprimento_bruto = corpo.get("comprimento")
+    comprimento = None
+    if comprimento_bruto not in (None, ""):
+        try:
+            comprimento = float(comprimento_bruto)
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "comprimento tem de ser um número"}, status_code=400)
+    resultado = parkin.corrigir_artigo_por_talao(
+        talao, corpo.get("tipo") or None, comprimento, corpo.get("espessura") or None)
+    if "erro" in resultado:
+        return JSONResponse(resultado, status_code=400)
+    return JSONResponse(resultado)
+
 @app.post("/park-in/correcao")
 def park_in_correcao(corpo: dict = Body(...)):
     """Lançamento manual de uma correção de stock — ver

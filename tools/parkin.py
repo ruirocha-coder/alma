@@ -662,6 +662,34 @@ def info_entrada_por_talao(talao: str) -> dict:
     }
 
 
+def corrigir_artigo_por_talao(talao: str, tipo: str = None, comprimento: float = None,
+                              espessura: str = None) -> dict:
+    """Corrige o artigo (tipo/comprimento/espessura) de uma entrada já
+    registada no Park In, identificada pelo nº de talão — pedido explícito
+    do Rui, 2026-10-30: "foi dada entrada de um card com uma medida que
+    depois tivemos de alterar" (ex: talão lido/registado com o comprimento
+    errado). Só os campos indicados mudam, os outros mantêm o valor atual
+    da entrada. Nunca mexe no saldo nem noutro campo — ver
+    db.corrigir_artigo_entrada_parkin."""
+    talao = (talao or "").strip()
+    if not talao:
+        return {"erro": "o número do talão é obrigatório"}
+    entrada = db.entrada_parkin_por_talao(talao)
+    if not entrada:
+        return {"erro": f"não encontrei nenhuma entrada no Park In com o talão {talao!r}"}
+    tipo = tipo if tipo is not None else entrada["tipo"]
+    comprimento = float(comprimento) if comprimento is not None else (
+        float(entrada["comprimento"]) if entrada["comprimento"] is not None else None)
+    espessura = espessura if espessura is not None else entrada["espessura"]
+    db.corrigir_artigo_entrada_parkin(entrada["id"], tipo, comprimento, espessura)
+    return {
+        "ok": True, "talao": talao, "fornecedor": entrada["fornecedor"],
+        "tipo": tipo, "comprimento": comprimento, "espessura": espessura,
+        "artigo": _chave_artigo(tipo, comprimento, espessura),
+        "saldo_kg": round(float(entrada["saldo_kg"] or 0), 1),
+    }
+
+
 def registar_saida_por_talao(talao: str, quantidade_kg: float = None, data_saida: str = None,
                              registado_por: str = None) -> dict:
     """Saída identificada só pelo nº de talão do LOTE de entrada que está a
