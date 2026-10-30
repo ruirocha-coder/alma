@@ -181,7 +181,7 @@ def _eh_quadradilho(titulo: str) -> bool:
     da mesma forma)."""
     return not _RE_TITULO_OF.search(titulo or "")
 
-_RE_DIMENSAO_ARTIGO = re.compile(r"(\d+)(?:/\d+)?\s*[xX]\s*\d+\s*[xX]\s*\d+")
+_RE_DIMENSAO_ARTIGO = re.compile(r"(\d+)(?:/\d+)?\s*[xX]\s*(\d+)\s*[xX]\s*(\d+)")
 
 def _comprimento_do_nome_artigo(nome: str):
     """Extrai o comprimento diretamente do nome/descrição do artigo, pelo
@@ -205,6 +205,23 @@ def _comprimento_do_nome_artigo(nome: str):
     m = _RE_DIMENSAO_ARTIGO.search(nome)
     return float(m.group(1)) if m else None
 
+def _espessura_do_nome_artigo(nome: str):
+    """Extrai a espessura (E) diretamente do nome/descrição do artigo,
+    pelo mesmo padrão "<comprimento>x<largura>x<espessura>" usado em
+    _comprimento_do_nome_artigo (ex: "Barrote 990x52x52" -> 52;
+    "1200/1000X82X16" -> 16) — pedido explícito do Rui, 2026-10-30: "a
+    espessura (E) vem sempre do próprio nome do artigo quando este tem o
+    padrão CxLxE", para o WIP Esp deixar de ficar sempre em branco.
+    Preenche o campo "WIP Esp" (ver calcular_linhas_automaticamente); o
+    nº de lotes só é calculado a seguir se este valor bater com uma linha
+    da tabela "WIP Lotes" (ver FIADAS_POR_ESPESSURA) — senão fica por
+    confirmar à mão, como já acontecia. None se o nome não tiver este
+    padrão."""
+    if not nome:
+        return None
+    m = _RE_DIMENSAO_ARTIGO.search(nome)
+    return float(m.group(3)) if m else None
+
 def _extrair_artigos_of(texto_pdf: str) -> list:
     """Chama o modelo para identificar os artigos (comprimento + qtd) no
     texto do PDF da OF — ver _MISSAO_EXTRACAO_ARTIGOS_OF. Devolve sempre
@@ -212,7 +229,11 @@ def _extrair_artigos_of(texto_pdf: str) -> list:
     nunca inventa dados. O comprimento do modelo é sempre substituído
     pelo lido diretamente do nome do artigo quando possível (ver
     _comprimento_do_nome_artigo) — mais fiável do que confiar no número
-    que o modelo escolher no texto do PDF."""
+    que o modelo escolher no texto do PDF. A espessura ("espessura_mm",
+    pedido explícito do Rui, 2026-10-30) vem sempre do mesmo padrão no
+    nome do artigo (ver _espessura_do_nome_artigo) — o modelo nunca é
+    chamado para a extrair, não há nenhum campo correspondente no seu
+    output (ver _MISSAO_EXTRACAO_ARTIGOS_OF)."""
     resposta = _client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=2048,
         system=_MISSAO_EXTRACAO_ARTIGOS_OF,
@@ -243,7 +264,8 @@ def _extrair_artigos_of(texto_pdf: str) -> list:
             qtd = float(a["qtd"]) if a.get("qtd") is not None else None
         except (TypeError, ValueError):
             qtd = None
-        validos.append({"artigo": nome_artigo, "comprimento_mm": comprimento, "qtd": qtd})
+        validos.append({"artigo": nome_artigo, "comprimento_mm": comprimento, "qtd": qtd,
+                        "espessura_mm": _espessura_do_nome_artigo(nome_artigo)})
     return validos
 
 def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
@@ -258,7 +280,10 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     estado_planeamento_entradas/_linhas_com_calculo, a única fonte desse
     cálculo). Índices (WIP/Toro) assumem sempre os valores por omissão
     (INDICE_WIP_DEFAULT/INDICE_TOROS_DEFAULT) — não há nenhum índice
-    "correto" por artigo a ler de lado nenhum."""
+    "correto" por artigo a ler de lado nenhum. WIP Esp vem do mesmo nome
+    do artigo (ver _espessura_do_nome_artigo, pedido explícito do Rui,
+    2026-10-30) — None se o nome não tiver o padrão "CxLxE", fica então
+    por preencher à mão como antes."""
     card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
     if not card:
         return {"erro": "card desta OF não encontrado entre as OFs ativas"}
@@ -281,7 +306,7 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
             "artigo": a["artigo"],
             "peso": a["qtd"],
             "wip_cmp": float(wip_cmp_texto) if wip_cmp_texto is not None else None,
-            "wip_esp": None,
+            "wip_esp": a["espessura_mm"],
             "indice_wip": INDICE_WIP_DEFAULT,
             "toro_cmp": toro_cmp,
             "toro_tipo": None,
