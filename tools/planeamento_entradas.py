@@ -201,13 +201,21 @@ def _juntar_pares_otimizados(artigos: list) -> list:
     então os junta numa única "linha" com nome "Artigo A + Artigo B" e
     "qtd" somada (QTD Wip/Toros somam-se sozinhas a partir daí, ver
     calcular_linhas_automaticamente/_linhas_com_calculo, que usam sempre o
-    "peso"/"qtd" de cada linha diretamente). Só pares — nunca 3+ artigos
-    na mesma linha, mesmo que a mesma Largura tenha mais que dois
-    comprimentos (o melhor par ganha, os restantes ficam sozinhos, pedido
-    explícito do Rui). Artigos sem Largura (nome sem padrão "CxLxE") nunca
-    entram nesta análise. Devolve uma nova lista de artigos (combinados
-    primeiro, depois os que ficaram sozinhos, pela ordem original) — nunca
-    modifica `artigos`."""
+    "peso"/"qtd" de cada linha diretamente). A comparação com "cada um
+    sozinho" é a MÉDIA PONDERADA pela qtd/peso de cada artigo (não o
+    melhor dos dois) — pedido explícito do Rui, 2026-10-30, correção de um
+    erro real: comparar só contra o melhor dos dois era demasiado
+    conservador (ex: Green Box of 622, 720+990x52x52 — separados dá
+    93,5%/96,3%, mas para produzir AS DUAS quantidades reais seria preciso
+    usar os dois presets separados, cuja média ponderada pelo peso de cada
+    uma, 17,18/11,78 m³, é só 94,6% — menos do que os 95,9% do combinado,
+    por isso devia juntar-se, e com "o melhor dos dois" como referência
+    nunca juntava). Só pares — nunca 3+ artigos na mesma linha, mesmo que
+    a mesma Largura tenha mais que dois comprimentos (o melhor par ganha,
+    os restantes ficam sozinhos, pedido explícito do Rui). Artigos sem
+    Largura (nome sem padrão "CxLxE") nunca entram nesta análise. Devolve
+    uma nova lista de artigos (combinados primeiro, depois os que ficaram
+    sozinhos, pela ordem original) — nunca modifica `artigos`."""
     por_esp = {}
     for idx, a in enumerate(artigos):
         if a.get("wip_esp_mm"):
@@ -224,14 +232,22 @@ def _juntar_pares_otimizados(artigos: list) -> list:
                     if combinacao is None:
                         continue
                     preset, pct = combinacao
-                    pcts_separados = []
+                    dados_separados = []  # (pct_sozinho, peso) de cada artigo do par
                     for k in (i, j):
                         preset_sozinho = _otimizar_wip_cmp(artigos[k]["comprimento_mm"])
                         if preset_sozinho is not None:
-                            pcts_separados.append(_aproveitamento_pct(artigos[k]["comprimento_mm"], preset_sozinho))
-                    melhor_separado = max(pcts_separados) if pcts_separados else 0
+                            dados_separados.append((_aproveitamento_pct(artigos[k]["comprimento_mm"], preset_sozinho),
+                                                    artigos[k].get("qtd") or 0))
+                    if not dados_separados:
+                        melhor_separado = 0
+                    else:
+                        soma_pesos = sum(p for _, p in dados_separados)
+                        if soma_pesos > 0:
+                            melhor_separado = sum(pc * p for pc, p in dados_separados) / soma_pesos
+                        else:
+                            melhor_separado = sum(pc for pc, _ in dados_separados) / len(dados_separados)
                     if pct <= melhor_separado:
-                        continue  # só junta se bater GENUINAMENTE melhor que cada um sozinho
+                        continue  # só junta se bater GENUINAMENTE melhor que a média ponderada de cada um sozinho
                     ganho = pct - melhor_separado
                     if melhor is None or ganho > melhor[0]:
                         melhor = (ganho, i, j, preset, pct)
