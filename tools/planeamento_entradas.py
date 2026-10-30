@@ -55,18 +55,20 @@ FIADAS_POR_ESPESSURA = {esp: fiadas for esp, fiadas in WIP_LOTES_TABELA}
 def _fiadas_mais_proxima(esp_mm):
     """Nº de fiadas da tabela "WIP Lotes" para este WIP Esp — exata se
     bater com uma linha da tabela, senão a da espessura mais PRÓXIMA
-    (nunca None só por não bater em cheio). Pedido explícito do Rui,
-    2026-10-30: desde que o WIP Esp passou a vir da largura (L) do nome
-    do artigo (ver _wip_esp_do_nome_artigo), já raramente bate
-    exatamente com uma linha da tabela — "se a espessura tal como está
-    não aparece na tabela, deve ser o valor arredondado e assumir esse
-    número de fiadas". None só se esp_mm for None."""
+    (nunca None só por não bater em cheio); a meio caminho exato entre
+    duas linhas da tabela (ex: 125 entre 120 e 130), arredonda por
+    EXCESSO — fica sempre com a mais alta das duas (pedido explícito do
+    Rui, 2026-10-30: "arredondamento por excesso a partir de 5").
+    Pedido explícito do Rui, 2026-10-30: desde que o WIP Esp passou a vir
+    da largura (L) do nome do artigo (ver _wip_esp_do_nome_artigo), já
+    raramente bate exatamente com uma linha da tabela. None só se esp_mm
+    for None."""
     if esp_mm is None:
         return None
     esp = round(float(esp_mm))
     if esp in FIADAS_POR_ESPESSURA:
         return FIADAS_POR_ESPESSURA[esp]
-    mais_proxima = min(FIADAS_POR_ESPESSURA, key=lambda e: abs(e - esp))
+    mais_proxima = min(FIADAS_POR_ESPESSURA, key=lambda e: (abs(e - esp), -e))
     return FIADAS_POR_ESPESSURA[mais_proxima]
 
 # QTD Toros = volume da linha (m³) × INDICE_TOROS; QTD Wip = volume da
@@ -1180,7 +1182,10 @@ function tipoMadeiraDoTitulo(titulo){ return /\bIN\b/i.test(titulo||"") ? "IN" :
 /* exata se bater com uma linha da tabela "WIP Lotes", senão a mais
    PRÓXIMA (mesma regra de tools.planeamento_entradas._fiadas_mais_
    proxima) — pedido explícito do Rui, 2026-10-30: desde que o WIP Esp
-   passou a vir da largura do artigo, raramente bate em cheio. */
+   passou a vir da largura do artigo, raramente bate em cheio. A meio
+   caminho exato entre duas linhas da tabela, arredonda por EXCESSO —
+   fica com a mais alta das duas ("arredondamento por excesso a partir
+   de 5"). */
 function fiadasPorEspessura(espMm){
   if(espMm==null || isNaN(espMm)) return null;
   const exata=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
@@ -1188,7 +1193,7 @@ function fiadasPorEspessura(espMm){
   let melhor=null;
   for(const [e,f] of WIP_LOTES_TABELA){
     const dist=Math.abs(e-espMm);
-    if(melhor==null || dist<melhor.dist) melhor={dist,f};
+    if(melhor==null || dist<melhor.dist || (dist===melhor.dist && e>melhor.e)) melhor={dist,f,e};
   }
   return melhor?melhor.f:null;
 }
