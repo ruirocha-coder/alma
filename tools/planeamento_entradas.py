@@ -414,6 +414,10 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
         indice_toros = l["indice_toros"] if l["indice_toros"] is not None else INDICE_TOROS_DEFAULT
         qtd_wip_m3 = round(volume_linha * indice_wip, 2) if volume_linha is not None else None
         qtd_toros_m3 = round(volume_linha * indice_toros, 2) if volume_linha is not None else None
+        try:
+            toro_cmp_mm = float(l["toro_cmp"]) if l.get("toro_cmp") else None
+        except (TypeError, ValueError):
+            toro_cmp_mm = None  # "outro" com texto não numérico — sem % para mostrar
         resultado.append({
             "id": l["id"],
             "artigo": l["artigo"],
@@ -428,7 +432,7 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
             "indice_toros": indice_toros,
             "qtd_toros_m3": qtd_toros_m3,
             "comprimento_artigo_mm": l.get("comprimento_artigo_mm"),
-            "aproveitamento_pct": _aproveitamento_pct(l.get("comprimento_artigo_mm"), l["wip_cmp"]),
+            "aproveitamento_pct": _aproveitamento_pct(l.get("comprimento_artigo_mm"), toro_cmp_mm),
         })
     return resultado
 
@@ -1768,7 +1772,12 @@ function bindLinhaHandlers(container, it){
   const toroCmpEl=container.querySelector(".fToroCmp");
   toroCmpEl.onchange=()=>{
     container.querySelector(".fToroCmpOutroWrap").style.display = toroCmpEl.value==="outro" ? "" : "none";
+    recalcularLinha(it,container);
   };
+  // pedido explícito do Rui, 2026-10-30: "sempre que se alterar as
+  // dimensões do cmp, a percentagem de aproveitamento devia mudar" — Cmp
+  // do Toro (preset ou "outro") recalcula tal como o Cmp do WIP já fazia.
+  container.querySelector(".fToroCmpOutro").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fIndiceWip").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fIndiceToros").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fWipCmp").onchange=()=>recalcularLinha(it,container);
@@ -1803,8 +1812,14 @@ function recalcularLinha(it, container){
   container.querySelector(".fQtdWip").textContent=qtdWip!=null?qtdWip+" m³":"—";
   container.querySelector(".fQtdToros").textContent=(volumeLinha!=null && !isNaN(indiceToros))
     ? (Math.round(volumeLinha*indiceToros*100)/100)+" m³" : "—";
+  // pedido explícito do Rui, 2026-10-30: a % mostra-se junto da QTD
+  // Toros, por isso segue sempre o Cmp do TORO (não o do WIP) — muda
+  // assim que o Cmp do Toro muda, preset ou "outro".
+  const toroCmpSel=container.querySelector(".fToroCmp").value;
+  const toroCmpTexto=toroCmpSel==="outro" ? container.querySelector(".fToroCmpOutro").value : toroCmpSel;
+  const toroCmpMm=toroCmpTexto?parseFloat(toroCmpTexto):null;
   const comprimentoArtigo=parseFloat(container.dataset.comprimentoArtigo);
-  const pct=aproveitamentoPct(isNaN(comprimentoArtigo)?null:comprimentoArtigo, wipCmp);
+  const pct=aproveitamentoPct(isNaN(comprimentoArtigo)?null:comprimentoArtigo, toroCmpMm);
   container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}%)`:"";
   const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
   container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
