@@ -95,10 +95,12 @@ INDICE_WIP_DEFAULT = 1.8
 # otimizado sozinho a partir do comprimento do artigo final: o toro dá
 # origem ao WIP, nunca diretamente ao artigo (pedido explícito do Rui,
 # 2026-10-30: "o comprimento do toro terá que ser semelhante ao
-# comprimento da tábua cortada (wip)"). O volume total real da OF (vindo
-# da produção) reparte-se entre as linhas pelo peso relativo do campo
-# "QTD" de cada artigo no PDF (ver _linhas_com_calculo) — nunca um volume
-# em si, só a proporção entre artigos.
+# comprimento da tábua cortada (wip)"). O volume de cada linha é o campo
+# "QTD" desse artigo no PDF, tal como está escrito — já é o volume em m³
+# dessa linha (ver _linhas_com_calculo), nunca uma proporção do volume
+# total da OF (pedido explícito do Rui, 2026-10-30: "tens de ir buscar os
+# m3 à coluna qtd no documento pdf, referente a cada artigo. e não à qtd
+# total").
 TOLERANCIA_CORTE_MM = 5
 
 def _aproveitamento_pct(comprimento_artigo_mm, preset_mm):
@@ -375,9 +377,9 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     comprimento de toro de cada um, e substitui TODAS as linhas de
     WIP+Toro desta OF pelo resultado — nunca junta às que já lá estavam
     (pedido explícito do Rui: "substitui sempre pelo resultado do
-    cálculo"). O "peso" de cada linha (campo QTD do PDF) fica gravado tal
-    como lido; a repartição do volume real da OF entre linhas por esse
-    peso é só calculada ao vivo, nunca aqui (ver
+    cálculo"). O "peso" de cada linha (campo QTD do PDF, já em m³ por
+    artigo) fica gravado tal como lido; é usado diretamente como o volume
+    dessa linha só calculado ao vivo, nunca aqui (ver
     estado_planeamento_entradas/_linhas_com_calculo, a única fonte desse
     cálculo). Índices (WIP/Toro) assumem sempre os valores por omissão
     (INDICE_WIP_DEFAULT/INDICE_TOROS_DEFAULT) — não há nenhum índice
@@ -454,24 +456,28 @@ def _volume_real_lote(wip_cmp_mm, wip_esp_mm):
     return volume if volume > 0 else None
 
 def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
-    """Para cada linha de WIP+Toro de uma OF real, reparte volume_total_m3
-    (o volume real da OF, vindo da produção) pelo "peso" de cada linha
-    (campo QTD lido do PDF da OF — sem peso em nenhuma, reparte em partes
-    iguais) e calcula QTD Wip/QTD Toros/Nº de lotes dessa linha a partir
-    do volume já repartido. Devolve uma lista pronta a mostrar/editar,
+    """Para cada linha de WIP+Toro de uma OF real, usa diretamente o "peso"
+    dessa linha (campo "QTD" lido do PDF da OF, por artigo) como o volume
+    em m³ dessa linha — pedido explícito do Rui, 2026-10-30: "para os
+    cálculos da wip, por artigo, tens de ir buscar os m3 à coluna qtd no
+    documento pdf, referente a cada artigo. e não à qtd total" (o PDF já
+    traz o volume de cada artigo, ex: "M327,00Régua..." -> 27,00 m³ dessa
+    Régua — nunca é só uma proporção do volume total da OF, como se fazia
+    antes). Só quando uma linha não tem "peso" nenhum (ex: adicionada à
+    mão, sem PDF) é que se cai para um valor de recurso: parte igual
+    (1/nº de linhas) do volume_total_m3 da OF, a única informação
+    disponível nesse caso. Calcula também QTD Toros/Nº de lotes dessa
+    linha a partir desse volume. Devolve uma lista pronta a mostrar/editar,
     nunca grava nada."""
     if not linhas:
         return []
-    pesos = [l["peso"] for l in linhas]
-    soma = sum(p for p in pesos if p)
     n = len(linhas)
     resultado = []
     for l in linhas:
-        if soma > 0 and l["peso"]:
-            fracao = l["peso"] / soma
+        if l.get("peso"):
+            volume_linha = round(float(l["peso"]), 3)
         else:
-            fracao = 1 / n
-        volume_linha = round((volume_total_m3 or 0) * fracao, 3) if volume_total_m3 is not None else None
+            volume_linha = round((volume_total_m3 or 0) / n, 3) if volume_total_m3 is not None else None
         indice_wip = l["indice_wip"] if l["indice_wip"] is not None else INDICE_WIP_DEFAULT
         indice_toros = l["indice_toros"] if l["indice_toros"] is not None else INDICE_TOROS_DEFAULT
         qtd_wip_m3 = round(volume_linha * indice_wip, 2) if volume_linha is not None else None
@@ -1885,17 +1891,16 @@ function bindLinhaHandlers(container, it){
   };
   recalcularLinha(it,container);
 }
-/* reparte it.volume (volume real da OF) pelo peso relativo (data-peso) de
-   cada linha, tal como tools.planeamento_entradas._linhas_com_calculo —
-   sem peso em nenhuma linha, reparte em partes iguais (mesma regra). */
+/* usa diretamente data-peso (campo "QTD" do PDF, por artigo, já em m³)
+   como o volume dessa linha, tal como
+   tools.planeamento_entradas._linhas_com_calculo — só quando uma linha
+   não tem peso nenhum (ex: adicionada à mão) é que cai para 1/nº de
+   linhas do volume total da OF (it.volume), como valor de recurso. */
 function recalcularLinha(it, container){
   const todas=Array.from(document.querySelectorAll("#linhasWipToro .linhaWipToro"));
-  const pesos=todas.map(c=>parseFloat(c.dataset.peso));
-  const somaPesos=pesos.reduce((s,p)=>s+(isNaN(p)?0:p),0);
   const n=todas.length;
   const pesoLinha=parseFloat(container.dataset.peso);
-  const fracao=(somaPesos>0 && !isNaN(pesoLinha)) ? pesoLinha/somaPesos : 1/n;
-  const volumeLinha=(it.volume!=null) ? it.volume*fracao : null;
+  const volumeLinha=!isNaN(pesoLinha) ? pesoLinha : ((it.volume!=null) ? it.volume/n : null);
   const indiceWip=parseFloat(container.querySelector(".fIndiceWip").value);
   const indiceToros=parseFloat(container.querySelector(".fIndiceToros").value);
   const wipCmpEl=container.querySelector(".fWipCmp"), wipEspEl=container.querySelector(".fWipEsp");
