@@ -165,36 +165,69 @@ depois:
 - "artigo": a designação da coluna "Descrição" — e SÓ dessa coluna.
 - "comprimento_mm": o comprimento dessa peça, SEMPRE convertido para
   milímetros (ex: "2,55 m" ou "255 cm" -> 2550; já em mm, usa tal e qual).
-- "qtd": o valor do campo "QTD" (quantidade) desse artigo no PDF, tal
-  como está escrito (não convertas unidades) — null se não houver esse
-  campo ou não for legível.
+- "qtd": o valor da coluna "Qtd." (sempre em M3) desse artigo — ver a
+  regra abaixo para a reconheceres corretamente. NUNCA o Nº de Lotes,
+  mesmo que pareça estar "colado" à Qtd no texto extraído.
 
-A tabela tem SEMPRE exatamente UM artigo por linha de "Qtd." (cada linha
-nova de produto começa por uma unidade como "M3" seguida da quantidade,
-ex: "M327,00Régua..."). As colunas "Suporte" e "Travamentos" aparecem
-coladas ao texto da "Descrição", sem nenhuma separação visível depois de
-extraído do PDF — tens de as reconhecer e DESCARTAR, nunca as confundir
-com um artigo novo nem as deixares coladas ao nome. Exemplo real:
+A tabela tem SEMPRE exatamente UM artigo por linha de produto, e cada
+linha de produto tem SEMPRE esta estrutura, nesta ordem exata, depois de
+extraído o texto do PDF:
+1. Uma unidade ("M3") seguida logo de um número — isto é o Nº de LOTES,
+   NUNCA a Qtd, descarta sempre este número para efeitos de "qtd".
+2. A "Descrição" do artigo (nome + medida "CxLxE").
+3. Às vezes, colada logo a seguir à Descrição, na mesma linha, uma
+   SEGUNDA medida "CxLxE" — é o "Suporte", descarta sempre, nunca é um
+   artigo novo.
+4. No FIM dessa mesma linha (depois da Descrição, ou do Suporte quando
+   colado), outro número — este sim é a "Qtd." (sempre em M3), o valor
+   certo para o campo "qtd". A soma de todos estes números, de todas as
+   linhas, bate sempre com "Quantidade Total ... M3" perto do fim do
+   documento — usa isto para confirmares sempre que tiveres dúvida (a
+   soma dos números do passo 1, Nº de Lotes, é que bate com "Total
+   Lotes", NUNCA com "Quantidade Total").
+5. Depois, uma ou mais linhas no formato "NxM (P)" (ex: "4x2 (8)") são
+   "Fiadas", descarta sempre.
+6. Às vezes uma linha só com um número entre parêntesis (ex: "(338)") —
+   descarta sempre.
+7. Por fim, uma medida solta "CxLxE" numa linha à parte (Suporte ou
+   Travamentos, varia consoante o documento) — descarta sempre, nunca é
+   um artigo novo, mesmo que pareça ter a forma de um artigo normal
+   (medida "CxLxE" + número à frente).
+
+Dois exemplos reais:
+
+Exemplo 1 (OF.640 Interpall) — Suporte colado à Descrição:
 "M327,00Régua 1450x95x22 800x95x22 37,42
 4x2 (8)
 36x12 (432)
 17x2 (34)
 1200x95x22"
-— isto é UM SÓ artigo: "Descrição" = "Régua 1450x95x22" (a PRIMEIRA
-medida "CxLxE" a seguir à quantidade), "qtd" = 27,00. O resto não é um
-artigo nenhum, é sempre assim nesta ordem e descarta-se sempre:
-"800x95x22" é o "Suporte" (uma segunda medida "CxLxE" colada logo a
-seguir à Descrição, na mesma linha de texto); "37,42" é um volume/total
-da linha; as linhas seguintes no formato "NxM (P)" (ex: "4x2 (8)") são
-"Fiadas"; e a medida solta na última linha ("1200x95x22") é sempre o
-"Travamentos". Nunca crias um artigo a partir do Suporte nem do
-Travamentos, mesmo que pareçam ter a forma de um artigo normal (medida
-"CxLxE" + número à frente) — no exemplo acima, a resposta certa é UM
-único artigo para esta linha ("Régua 1450x95x22", qtd 27), nunca dois
-nem três.
-Nunca inventes um artigo ou um comprimento que não estejam mesmo no PDF.
-Se não conseguires identificar nenhum artigo com comprimento, "artigos"
-fica uma lista vazia []."""
+-> UM só artigo: "artigo" = "Régua 1450x95x22", "qtd" = 37,42 (o número
+no FIM da primeira linha — NUNCA o 27,00 logo a seguir ao "M3", que é o
+Nº de Lotes). "800x95x22" (Suporte) e "1200x95x22" (Travamentos) são
+sempre descartados, nunca artigos novos.
+
+Exemplo 2 (OF.622 Green Box) — Suporte isolado no fim, depois das Fiadas:
+"M328,00Barrote 720x52x52    17,18
+1x2 (2)
+   (338)
+990x52x52
+M314,00Barrote 990x52x52    11,78
+1x2 (2)
+   (338)
+990x52x52
+Obs.: Total Lotes  42,00
+Quantidade Total 28,96 M3"
+-> DOIS artigos: "Barrote 720x52x52" com "qtd" = 17,18, e "Barrote
+990x52x52" com "qtd" = 11,78 (17,18 + 11,78 = 28,96, exatamente a
+"Quantidade Total" no fim do documento — NUNCA uses 28,00/14,00, que são
+os Nº de Lotes de cada linha, cuja soma dá "Total Lotes" 42,00, nunca a
+Qtd). As medidas soltas "990x52x52" depois das Fiadas são sempre o
+Suporte, descarta sempre, nunca um artigo novo.
+
+Nunca inventes um artigo, um comprimento ou uma qtd que não estejam mesmo
+no PDF. Se não conseguires identificar nenhum artigo com comprimento,
+"artigos" fica uma lista vazia []."""
 
 def _ler_pdf_of(card: dict):
     """Encontra e lê o PDF da OF anexado ao card do Basecamp (nome tipo
