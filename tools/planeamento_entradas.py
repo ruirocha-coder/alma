@@ -418,6 +418,15 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
             toro_cmp_mm = float(l["toro_cmp"]) if l.get("toro_cmp") else None
         except (TypeError, ValueError):
             toro_cmp_mm = None  # "outro" com texto não numérico — sem % para mostrar
+        # pedido explícito do Rui, 2026-10-30: "o desperdício tem de
+        # aparecer, mesmo sem o cálculo automático" — uma linha criada ou
+        # editada à mão não tem comprimento_artigo_mm guardado (nunca leu
+        # nenhum PDF), mas se o nome do artigo tiver o padrão "CxLxE"
+        # (ex: escrito à mão "Barrote 990x52x52"), o comprimento lê-se
+        # dali na mesma, tal como já acontece no cálculo automático (ver
+        # _comprimento_do_nome_artigo) — só cai para o valor guardado
+        # quando o nome não tiver esse padrão.
+        comprimento_artigo_mm = _comprimento_do_nome_artigo(l["artigo"]) or l.get("comprimento_artigo_mm")
         resultado.append({
             "id": l["id"],
             "artigo": l["artigo"],
@@ -431,8 +440,8 @@ def _linhas_com_calculo(linhas: list, volume_total_m3) -> list:
             "toro_tipo": l["toro_tipo"],
             "indice_toros": indice_toros,
             "qtd_toros_m3": qtd_toros_m3,
-            "comprimento_artigo_mm": l.get("comprimento_artigo_mm"),
-            "aproveitamento_pct": _aproveitamento_pct(l.get("comprimento_artigo_mm"), toro_cmp_mm),
+            "comprimento_artigo_mm": comprimento_artigo_mm,
+            "aproveitamento_pct": _aproveitamento_pct(comprimento_artigo_mm, toro_cmp_mm),
         })
     return resultado
 
@@ -1154,6 +1163,17 @@ function fiadasPorEspessura(espMm){
   const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
   return linha ? linha[1] : null;
 }
+/* mesmo padrão de tools.planeamento_entradas._comprimento_do_nome_artigo
+   — pedido explícito do Rui, 2026-10-30: "o desperdício tem de aparecer,
+   mesmo sem o cálculo automático": uma linha criada/editada à mão não
+   tem nenhum comprimento guardado de um PDF, mas se o nome do artigo
+   escrito à mão tiver o padrão "CxLxE" (ex: "Barrote 990x52x52"), o
+   comprimento lê-se dali na mesma. */
+const RE_DIMENSAO_ARTIGO=/(\d+)(?:\/\d+)?\s*[xX]\s*\d+\s*[xX]\s*\d+/;
+function comprimentoDoNomeArtigo(nome){
+  const m=RE_DIMENSAO_ARTIGO.exec(nome||"");
+  return m ? parseFloat(m[1]) : null;
+}
 /* % de aproveitamento de um WIP/Toro a cortar peças do comprimento do
    artigo (ver tools.planeamento_entradas._aproveitamento_pct, mesma
    fórmula) — recalculado ao vivo aqui também, para continuar certo
@@ -1778,6 +1798,10 @@ function bindLinhaHandlers(container, it){
   // dimensões do cmp, a percentagem de aproveitamento devia mudar" — Cmp
   // do Toro (preset ou "outro") recalcula tal como o Cmp do WIP já fazia.
   container.querySelector(".fToroCmpOutro").oninput=()=>recalcularLinha(it,container);
+  // pedido explícito do Rui, 2026-10-30: o nome do artigo pode trazer o
+  // comprimento (padrão "CxLxE") mesmo numa linha sem PDF nenhum — a %
+  // tem de aparecer assim que o nome bater com esse padrão.
+  container.querySelector(".fArtigo").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fIndiceWip").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fIndiceToros").oninput=()=>recalcularLinha(it,container);
   container.querySelector(".fWipCmp").onchange=()=>recalcularLinha(it,container);
@@ -1818,8 +1842,10 @@ function recalcularLinha(it, container){
   const toroCmpSel=container.querySelector(".fToroCmp").value;
   const toroCmpTexto=toroCmpSel==="outro" ? container.querySelector(".fToroCmpOutro").value : toroCmpSel;
   const toroCmpMm=toroCmpTexto?parseFloat(toroCmpTexto):null;
-  const comprimentoArtigo=parseFloat(container.dataset.comprimentoArtigo);
-  const pct=aproveitamentoPct(isNaN(comprimentoArtigo)?null:comprimentoArtigo, toroCmpMm);
+  const comprimentoGuardado=parseFloat(container.dataset.comprimentoArtigo);
+  const artigoTexto=container.querySelector(".fArtigo").value;
+  const comprimentoArtigo=comprimentoDoNomeArtigo(artigoTexto) ?? (isNaN(comprimentoGuardado)?null:comprimentoGuardado);
+  const pct=aproveitamentoPct(comprimentoArtigo, toroCmpMm);
   container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}%)`:"";
   const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
   container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
