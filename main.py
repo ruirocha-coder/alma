@@ -1083,16 +1083,6 @@ def park_in_limites(corpo: dict = Body(...)):
     return JSONResponse(parkin.definir_limite(chave, corpo.get("minimo_kg"), corpo.get("maximo_kg"),
                                               bool(corpo.get("automatico"))))
 
-@app.get("/_debug-pdf-of")
-def _debug_pdf_of(basecamp_card_id: int):
-    card = next((c for c in planeamento_serracao._cards_of_ativos() if c["id"] == basecamp_card_id), None)
-    if not card:
-        return {"erro": "card não encontrado"}
-    texto, nome_ou_erro = planeamento_entradas._ler_pdf_of(card)
-    if texto is None:
-        return {"erro": nome_ou_erro}
-    return {"ficheiro": nome_ou_erro, "texto": texto}
-
 @app.get("/park-in/limites/propostas")
 def park_in_limites_propostas():
     """Propostas de limite por artigo, calculadas a partir da procura real
