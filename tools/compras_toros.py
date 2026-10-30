@@ -21,6 +21,7 @@ import re
 import threading
 import db
 from tools import parkin
+from tools import planeamento_entradas as pe
 
 _lock_abates = threading.Lock()
 
@@ -102,19 +103,31 @@ def _pendente_por_artigo() -> dict:
 def calcular_necessidades_propostas() -> list[dict]:
     """Necessidade proposta por artigo, agora mesmo — usada para pré-ver
     antes de criar uma coluna nova (ver criar_coluna). Necessidade =
-    max(0, (Lmi - S) + Lmax - Pendente)."""
+    max(0, Procura - S - Pendente) — pedido explícito do Rui, 2026-10-30:
+    "quero que o cálculo da necessidade por artigo seja calculado segundo
+    o que vai ser utilizado no planeamento de entradas". Procura vem de
+    tools.planeamento_entradas.procura_toros_por_artigo, a mesma janela
+    (próximos N dias, ver tools.parkin.DIAS_LIMITE_MINIMO_PROCURA) usada
+    pelos limites automáticos do Park In — já em kg, nunca em m³/toneladas
+    (ver o próprio procura_toros_por_artigo). Deixou de usar Lmi/Lmax (que
+    continuam a servir só para os alertas de stock do Park In, não para
+    esta necessidade) — cobre exatamente o que vai ser consumido, sem
+    reserva extra nenhuma. O Planeamento de Entradas nunca regista
+    espessura, por isso a procura conta sempre para o artigo "normal" de
+    cada tipo+comprimento, tal como já acontece nos limites automáticos."""
     pendente_por_artigo = _pendente_por_artigo()
+    procura = pe.procura_toros_por_artigo(parkin.DIAS_LIMITE_MINIMO_PROCURA)
     linhas = []
     for a in _artigos_com_limite():
         chave = (a["tipo"], float(a["comprimento"]), a["espessura"])
-        lmi = float(a.get("minimo_kg") or 0)
-        lmax = float(a["maximo_kg"])
         s = float(a["total_kg"])
         pendente = pendente_por_artigo.get(chave, 0.0)
-        necessidade = max(0.0, (lmi - s) + lmax - pendente)
+        procura_kg = procura.get((a["tipo"], float(a["comprimento"])), 0.0) if a["espessura"] == "normal" else 0.0
+        necessidade = max(0.0, procura_kg - s - pendente)
         linhas.append({
             "tipo": a["tipo"], "comprimento": a["comprimento"], "espessura": a["espessura"],
-            "lmi_kg": round(lmi, 1), "lmax_kg": round(lmax, 1), "s_kg": round(s, 1),
+            "lmi_kg": round(float(a.get("minimo_kg") or 0), 1), "lmax_kg": round(float(a["maximo_kg"]), 1),
+            "s_kg": round(s, 1), "procura_kg": round(procura_kg, 1),
             "pendente_kg": round(pendente, 1), "necessidade_kg": round(necessidade, 1),
         })
     linhas.sort(key=lambda l: parkin._chave_ordenacao_artigo(l["tipo"], l["comprimento"], l["espessura"]))
