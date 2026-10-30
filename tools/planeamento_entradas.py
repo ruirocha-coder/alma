@@ -132,11 +132,15 @@ def _toro_cmp_de_wip(wip_cmp_texto: str):
     return _WIP_CMP_PARA_TORO_CMP.get(wip_cmp_texto)
 
 _MISSAO_EXTRACAO_ARTIGOS_OF = """Extrais, do PDF de uma Ordem de Fabrico
-(OF) de madeira serrada, a lista de artigos/produtos encomendados, cada
-um com o seu comprimento e quantidade. Responde APENAS com um array JSON,
-sem mais nenhum texto antes ou depois, com um objeto por artigo
-distinto encontrado:
-[{"artigo": string, "comprimento_mm": number, "qtd": number ou null}]
+(OF) de madeira serrada, a lista de artigos/produtos encomendados (cada
+um com o seu comprimento e quantidade) e o tipo de madeira do toro desta
+OF. Responde APENAS com um objeto JSON, sem mais nenhum texto antes ou
+depois:
+{"tipo_madeira": "MT" ou "IN", "artigos": [{"artigo": string, "comprimento_mm": number, "qtd": number ou null}]}
+- "tipo_madeira": por OMISSÃO é sempre "MT" — só respondes "IN" se as
+  OBSERVAÇÕES do documento disserem explicitamente que a madeira é "IN"
+  (nunca adivinhes a partir de outro sinal, ex: nome do cliente ou do
+  artigo; na dúvida, "MT").
 - "artigo": a designação/descrição do artigo tal como está no PDF.
 - "comprimento_mm": o comprimento dessa peça, SEMPRE convertido para
   milímetros (ex: "2,55 m" ou "255 cm" -> 2550; já em mm, usa tal e qual).
@@ -144,7 +148,8 @@ distinto encontrado:
   como está escrito (não convertas unidades) — null se não houver esse
   campo ou não for legível.
 Nunca inventes um artigo ou um comprimento que não estejam mesmo no PDF.
-Se não conseguires identificar nenhum artigo com comprimento, devolve []."""
+Se não conseguires identificar nenhum artigo com comprimento, "artigos"
+fica uma lista vazia []."""
 
 def _ler_pdf_of(card: dict):
     """Encontra e lê o PDF da OF anexado ao card do Basecamp (nome tipo
@@ -251,18 +256,19 @@ def _espessura_do_nome_artigo(nome: str):
     m = _RE_DIMENSAO_ARTIGO.search(nome)
     return float(m.group(3)) if m else None
 
-def _extrair_artigos_of(texto_pdf: str) -> list:
-    """Chama o modelo para identificar os artigos (comprimento + qtd) no
-    texto do PDF da OF — ver _MISSAO_EXTRACAO_ARTIGOS_OF. Devolve sempre
-    uma lista (vazia se a extração falhar ou não devolver JSON válido),
-    nunca inventa dados. O comprimento do modelo é sempre substituído
-    pelo lido diretamente do nome do artigo quando possível (ver
-    _comprimento_do_nome_artigo) — mais fiável do que confiar no número
-    que o modelo escolher no texto do PDF. A espessura ("espessura_mm",
-    pedido explícito do Rui, 2026-10-30) vem sempre do mesmo padrão no
-    nome do artigo (ver _espessura_do_nome_artigo) — o modelo nunca é
-    chamado para a extrair, não há nenhum campo correspondente no seu
-    output (ver _MISSAO_EXTRACAO_ARTIGOS_OF)."""
+def _extrair_artigos_of(texto_pdf: str) -> tuple:
+    """Chama o modelo para identificar os artigos (comprimento + qtd) e o
+    tipo de madeira (ver _MISSAO_EXTRACAO_ARTIGOS_OF) no texto do PDF da
+    OF. Devolve sempre (tipo_madeira, artigos) — tipo_madeira é sempre
+    "MT" ou "IN" (nunca None, "MT" por omissão se a extração falhar ou
+    não devolver JSON válido), artigos é sempre uma lista (vazia nesses
+    casos), nunca inventa dados. O comprimento do modelo é sempre
+    substituído pelo lido diretamente do nome do artigo quando possível
+    (ver _comprimento_do_nome_artigo) — mais fiável do que confiar no
+    número que o modelo escolher no texto do PDF. A espessura
+    ("espessura_mm", pedido explícito do Rui, 2026-10-30) vem sempre do
+    mesmo padrão no nome do artigo (ver _espessura_do_nome_artigo) — o
+    modelo nunca é chamado para a extrair."""
     resposta = _client.messages.create(
         model="claude-haiku-4-5-20251001", max_tokens=2048,
         system=_MISSAO_EXTRACAO_ARTIGOS_OF,
@@ -270,12 +276,16 @@ def _extrair_artigos_of(texto_pdf: str) -> list:
     )
     texto = _limpar_bloco_codigo("".join(b.text for b in resposta.content if b.type == "text").strip())
     try:
-        artigos = json.loads(texto)
+        resultado = json.loads(texto)
     except ValueError:
         print(f"[planeamento_entradas] extração de artigos não devolveu JSON válido: {texto[:200]!r}")
-        return []
+        return "MT", []
+    if not isinstance(resultado, dict):
+        return "MT", []
+    tipo_madeira = "IN" if resultado.get("tipo_madeira") == "IN" else "MT"
+    artigos = resultado.get("artigos")
     if not isinstance(artigos, list):
-        return []
+        return tipo_madeira, []
     validos = []
     for a in artigos:
         if not isinstance(a, dict):
@@ -295,7 +305,7 @@ def _extrair_artigos_of(texto_pdf: str) -> list:
             qtd = None
         validos.append({"artigo": nome_artigo, "comprimento_mm": comprimento, "qtd": qtd,
                         "espessura_mm": _espessura_do_nome_artigo(nome_artigo)})
-    return validos
+    return tipo_madeira, validos
 
 def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     """"Algoritmo de Comprimentos" (pedido explícito do Rui, 2026-10-23):
@@ -312,7 +322,11 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     "correto" por artigo a ler de lado nenhum. WIP Esp vem do mesmo nome
     do artigo (ver _espessura_do_nome_artigo, pedido explícito do Rui,
     2026-10-30) — None se o nome não tiver o padrão "CxLxE", fica então
-    por preencher à mão como antes."""
+    por preencher à mão como antes. Toro Tipo (pedido explícito do Rui,
+    2026-10-30) vem das observações do PDF (ver
+    _MISSAO_EXTRACAO_ARTIGOS_OF): "MT" por omissão, só "IN" se o
+    documento o disser explicitamente — é uma propriedade da OF toda,
+    por isso o mesmo valor aplica-se a todas as linhas."""
     card = next((c for c in ps._cards_of_ativos() if c["id"] == basecamp_card_id), None)
     if not card:
         return {"erro": "card desta OF não encontrado entre as OFs ativas"}
@@ -323,7 +337,7 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
     texto_pdf, nome_ou_erro = _ler_pdf_of(card)
     if texto_pdf is None:
         return {"erro": nome_ou_erro}
-    artigos = _extrair_artigos_of(texto_pdf)
+    tipo_madeira, artigos = _extrair_artigos_of(texto_pdf)
     if not artigos:
         return {"erro": f"li o PDF ({nome_ou_erro}) mas não identifiquei nenhum artigo com comprimento"}
 
@@ -338,7 +352,7 @@ def calcular_linhas_automaticamente(basecamp_card_id: int) -> dict:
             "wip_esp": a["espessura_mm"],
             "indice_wip": INDICE_WIP_DEFAULT,
             "toro_cmp": toro_cmp,
-            "toro_tipo": None,
+            "toro_tipo": tipo_madeira,
             "indice_toros": INDICE_TOROS_DEFAULT,
             "comprimento_artigo_mm": a["comprimento_mm"],
         })
@@ -1120,6 +1134,17 @@ const WIP_LAR_FIXA=1200;
 const WIP_LOTES_TABELA=[[18,40],[22,35],[25,30],[32,25],[36,20],[42,16],
   [52,14],[60,12],[70,10],[80,8],[88,7],[90,7],[100,6],[107,6],[110,6],[120,5],[130,5],
   [140,4],[150,4],[160,4],[170,4],[180,4],[200,3]];
+/* mesma regra de tools.planeamento_entradas._eh_quadradilho: uma OF sem
+   número (título sem "OF") nunca tem PDF anexado. */
+function ehQuadradilho(titulo){ return !/\bOF\b/i.test(titulo||""); }
+/* pedido explícito do Rui, 2026-10-30: para um "quadradilho" (sem PDF
+   para ler observações), o tipo de madeira do toro vem do próprio nome
+   do card — "MT" por omissão, "IN" só se a palavra aparecer no título
+   (mesma convenção já vista em títulos reais, ex: "Girona — 2600MT").
+   Usado só para pré-preencher o campo "Tipo" ao adicionar uma linha à
+   mão (ver "+ Adicionar linha") — nunca impede a correção manual
+   depois. */
+function tipoMadeiraDoTitulo(titulo){ return /\bIN\b/i.test(titulo||"") ? "IN" : "MT"; }
 function fiadasPorEspessura(espMm){
   if(espMm==null || isNaN(espMm)) return null;
   const linha=WIP_LOTES_TABELA.find(([e])=>Math.round(e)===Math.round(espMm));
@@ -1780,7 +1805,7 @@ function recalcularLinha(it, container){
     ? (Math.round(volumeLinha*indiceToros*100)/100)+" m³" : "—";
   const comprimentoArtigo=parseFloat(container.dataset.comprimentoArtigo);
   const pct=aproveitamentoPct(isNaN(comprimentoArtigo)?null:comprimentoArtigo, wipCmp);
-  container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}% aproveitamento)`:"";
+  container.querySelector(".fAproveitamento").textContent=pct!=null?`(${pct}%)`:"";
   const nLotes=calcularNLotes(qtdWip,wipCmp,wipEsp);
   container.querySelector(".fNLotes").textContent=nLotes!=null?nLotes:"—";
 }
@@ -1989,7 +2014,8 @@ function openSheet(id){
     $("#btnAdicionarLinha").onclick=()=>{
       const container=document.createElement("div");
       const idx=document.querySelectorAll("#linhasWipToro .linhaWipToro").length;
-      container.innerHTML=linhaWipToroHtml({},idx);
+      const toroTipoDefeito=ehQuadradilho(it.titulo)?tipoMadeiraDoTitulo(it.titulo):null;
+      container.innerHTML=linhaWipToroHtml({toroTipo:toroTipoDefeito},idx);
       const novaLinha=container.firstElementChild;
       $("#linhasWipToro").appendChild(novaLinha);
       bindLinhaHandlers(novaLinha,it);
